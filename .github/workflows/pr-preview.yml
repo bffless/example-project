@@ -1,0 +1,37 @@
+name: Preview to BFFless
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # Allow the action to comment the preview URL on the PR
+
+jobs:
+  build-and-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy preview to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: dist
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: pr-${{ github.event.pull_request.number }}
+          description: 'Preview for PR #${{ github.event.pull_request.number }}'
+          pr-comment: true
+          github-token: ${{ secrets.GITHUB_TOKEN }} 
