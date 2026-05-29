@@ -37,7 +37,6 @@ export function CommentsSection() {
     if (!trimmedName || !trimmedComment) return
     try {
       await update({
-        comments: data.comments,
         name: trimmedName,
         comment: trimmedComment,
       } as unknown as CommentsState)
