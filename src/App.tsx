@@ -2,10 +2,12 @@ import { useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
+import { ContactDialog } from './components/ContactDialog'
 import './App.css'
 
 function App() {
   const [count, setCount] = useState(0)
+  const [contactOpen, setContactOpen] = useState(false)
 
   return (
     <>
@@ -115,6 +117,30 @@ function App() {
 
       <div className="ticks"></div>
       <section id="spacer"></section>
+
+      <button
+        type="button"
+        className="contact-fab"
+        aria-label="Open contact form"
+        onClick={() => setContactOpen(true)}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      </button>
+      <ContactDialog
+        open={contactOpen}
+        onClose={() => setContactOpen(false)}
+      />
     </>
   )
 }
