@@ -3,6 +3,7 @@ import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
 import { ContactDialog } from './components/ContactDialog'
+import { CommentsSection } from './components/CommentsSection'
 import './App.css'
 
 function App() {
@@ -114,6 +115,10 @@ function App() {
           </ul>
         </div>
       </section>
+
+      <div className="ticks"></div>
+
+      <CommentsSection />
 
       <div className="ticks"></div>
       <section id="spacer"></section>
