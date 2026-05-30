@@ -38,7 +38,7 @@ test.describe('home page', () => {
     await page.goto('/')
 
     await expect(
-      page.getByRole('heading', { name: 'Hello BFFless!!' }),
+      page.getByRole('heading', { name: 'Hello BFFless from a PR!!' }),
     ).toBeVisible()
 
     const counter = page.getByRole('button', { name: /Count is/ })
