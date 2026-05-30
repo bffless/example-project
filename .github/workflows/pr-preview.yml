@@ -65,3 +65,13 @@ jobs:
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: pr-${{ github.event.pull_request.number }}
           description: 'Playwright screenshots for PR #${{ github.event.pull_request.number }}'
+
+      - name: Upload Playwright report to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: playwright-report
+          base-path: /
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: pr-${{ github.event.pull_request.number }}
+          description: 'Playwright HTML report for PR #${{ github.event.pull_request.number }}'
