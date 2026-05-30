@@ -29,6 +29,12 @@ jobs:
       - name: Generate coverage report
         run: npm run test:coverage
 
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright e2e and capture screenshots
+        run: npm run test:e2e
+
       - name: Deploy to BFFless
         uses: bffless/upload-artifact@v1
         with:
@@ -45,3 +51,12 @@ jobs:
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: production
           description: 'Coverage report for production'
+
+      - name: Upload Playwright screenshots to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: screenshots
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: production
+          description: 'Playwright screenshots for production'
