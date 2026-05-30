@@ -35,6 +35,7 @@ jobs:
         with:
           path: ./coverage/lcov.info
           baseline-alias: production
+          baseline-path: coverage/lcov.info
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
 
