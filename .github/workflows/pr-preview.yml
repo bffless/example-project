@@ -45,6 +45,18 @@ jobs:
       - name: Run Playwright e2e and capture screenshots
         run: npm run test:e2e
 
+      - name: Compare screenshots against production
+        uses: bffless/compare-screenshots@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path: ./screenshots
+          baseline-alias: production
+          baseline-path: screenshots
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          fail-on-difference: false
+
       - name: Deploy preview to BFFless
         uses: bffless/upload-artifact@v1
         with:
