@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { useSession } from './useSession'
 
 type FetchMock = ReturnType<typeof vi.fn>
 
