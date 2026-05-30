@@ -25,6 +25,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Generate coverage report
+        run: npm run test:coverage
+
       - name: Deploy preview to BFFless
         uses: bffless/upload-artifact@v1
         with:
@@ -36,3 +39,12 @@ jobs:
           proxy-rule-set-name: api-backend
           pr-comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload coverage report to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: coverage
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: pr-${{ github.event.pull_request.number }}
+          description: 'Coverage report for PR #${{ github.event.pull_request.number }}'

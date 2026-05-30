@@ -26,6 +26,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Generate coverage report
+        run: npm run test:coverage
+
       - name: Deploy to BFFless
         uses: bffless/upload-artifact@v1
         with:
@@ -33,3 +36,12 @@ jobs:
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: production
+
+      - name: Upload coverage report to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: coverage
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: production
+          description: 'Coverage report for production'
