@@ -47,7 +47,6 @@ jobs:
         uses: bffless/upload-artifact@v1
         with:
           path: coverage
-          base-path: ./
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: production
@@ -57,7 +56,6 @@ jobs:
         uses: bffless/upload-artifact@v1
         with:
           path: screenshots
-          base-path: ./
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: production
