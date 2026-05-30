@@ -28,6 +28,17 @@ jobs:
       - name: Generate coverage report
         run: npm run test:coverage
 
+      - name: Compare coverage against production
+        uses: bffless/compare-coverage@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path: ./coverage/lcov.info
+          baseline-alias: production
+          baseline-path: coverage/lcov.info
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
