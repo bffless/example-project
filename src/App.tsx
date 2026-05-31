@@ -4,6 +4,8 @@ import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
 import { ContactDialog } from './components/ContactDialog'
 import { CommentsSection } from './components/CommentsSection'
+import { SiteHeader } from './components/SiteHeader'
+import { ChatPopup } from './components/ChatPopup'
 import './App.css'
 
 function App() {
@@ -12,6 +14,7 @@ function App() {
 
   return (
     <>
+      <SiteHeader onContactClick={() => setContactOpen(true)} />
       <section id="center">
         <div className="hero">
           <img src={heroImg} className="base" width="170" height="179" alt="" />
@@ -123,29 +126,11 @@ function App() {
       <div className="ticks"></div>
       <section id="spacer"></section>
 
-      <button
-        type="button"
-        className="contact-fab"
-        aria-label="Open contact form"
-        onClick={() => setContactOpen(true)}
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <rect x="3" y="5" width="18" height="14" rx="2" />
-          <path d="m3 7 9 6 9-6" />
-        </svg>
-      </button>
       <ContactDialog
         open={contactOpen}
         onClose={() => setContactOpen(false)}
       />
+      <ChatPopup />
     </>
   )
 }

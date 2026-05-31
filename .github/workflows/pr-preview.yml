@@ -63,8 +63,8 @@ jobs:
           path: dist
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
-          alias: pr-${{ github.event.pull_request.number }}
-          description: 'Preview for PR #${{ github.event.pull_request.number }}'
+          alias: preview
+          description: 'Preview from PR #${{ github.event.pull_request.number }}'
           proxy-rule-set-name: api-backend
           pr-comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -76,8 +76,8 @@ jobs:
           base-path: /
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
-          alias: pr-${{ github.event.pull_request.number }}
-          description: 'Coverage report for PR #${{ github.event.pull_request.number }}'
+          alias: preview
+          description: 'Coverage report from PR #${{ github.event.pull_request.number }}'
 
       - name: Upload Playwright screenshots to BFFless
         uses: bffless/upload-artifact@v1
@@ -86,8 +86,8 @@ jobs:
           base-path: /
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
-          alias: pr-${{ github.event.pull_request.number }}
-          description: 'Playwright screenshots for PR #${{ github.event.pull_request.number }}'
+          alias: preview
+          description: 'Playwright screenshots from PR #${{ github.event.pull_request.number }}'
 
       - name: Upload Playwright report to BFFless
         uses: bffless/upload-artifact@v1
@@ -96,5 +96,14 @@ jobs:
           base-path: /
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
-          alias: pr-${{ github.event.pull_request.number }}
-          description: 'Playwright HTML report for PR #${{ github.event.pull_request.number }}'
+          alias: preview
+          description: 'Playwright HTML report from PR #${{ github.event.pull_request.number }}'
+
+      - name: Upload chat skills to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: .bffless
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: preview
+          description: 'Chat skills from PR #${{ github.event.pull_request.number }}'
