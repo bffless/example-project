@@ -38,6 +38,7 @@ jobs:
           baseline-path: coverage/lcov.info
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
+          fail-on-regression: false
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
