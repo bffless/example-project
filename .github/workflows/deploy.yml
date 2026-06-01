@@ -72,3 +72,12 @@ jobs:
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: production
           description: 'Playwright HTML report for production'
+
+      - name: Upload chat skills to BFFless
+        uses: bffless/upload-artifact@v1
+        with:
+          path: .bffless
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          alias: production
+          description: 'Chat skills for production'
