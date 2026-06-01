@@ -19,17 +19,18 @@ export function ChatPopup() {
           type="button"
           onClick={() => setIsOpen(true)}
           aria-label="Open chat"
-          className="fixed right-6 bottom-6 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-all hover:bg-blue-700 hover:shadow-xl dark:bg-blue-500 dark:hover:bg-blue-600"
+          className="group fixed right-6 bottom-6 z-[70] flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-[0_10px_30px_-5px_rgba(37,99,235,0.5)] ring-1 ring-white/10 transition-all hover:-translate-y-0.5 hover:shadow-[0_15px_40px_-5px_rgba(37,99,235,0.6)] active:translate-y-0 dark:from-blue-400 dark:to-blue-600"
         >
           <svg
-            width="24"
-            height="24"
+            width="20"
+            height="20"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="2.25"
             strokeLinecap="round"
             strokeLinejoin="round"
+            className="transition-transform group-hover:scale-110"
           >
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>

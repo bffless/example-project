@@ -26,3 +26,4 @@ screenshots
 *.njsproj
 *.sln
 *.sw?
+.claude/settings*

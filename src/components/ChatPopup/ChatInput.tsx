@@ -25,7 +25,7 @@ export function ChatInput({
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = '48px'
+      textareaRef.current.style.height = '40px'
       const scrollHeight = textareaRef.current.scrollHeight
       textareaRef.current.style.height = `${Math.min(scrollHeight, 120)}px`
     }
@@ -41,51 +41,52 @@ export function ChatInput({
   }
 
   const isStreaming = status === 'streaming' || status === 'submitted'
-  const isDisabled = disabled || (!isStreaming && !value.trim())
+  const canSend = !disabled && !!value.trim()
+  const buttonDisabled = !isStreaming && !canSend
 
   return (
-    <div className="border-t border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900 rounded-b-2xl">
+    <div className="border-t border-zinc-200/80 bg-white px-3 pt-2.5 pb-3 dark:border-zinc-800 dark:bg-zinc-950">
       {rateLimitCountdown !== undefined && rateLimitCountdown > 0 && (
-        <p className="mb-2 text-center text-xs text-amber-600 dark:text-amber-400">
-          Rate limited. Try again in {rateLimitCountdown}s
+        <p className="mb-2 text-center text-[11px] font-medium text-amber-600 dark:text-amber-400">
+          Rate limited — try again in {rateLimitCountdown}s
         </p>
       )}
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-2 py-1.5 transition-colors focus-within:border-blue-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-blue-500 dark:focus-within:bg-zinc-900 dark:focus-within:ring-blue-500/20">
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message..."
+          placeholder="Type a message"
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-900 placeholder-zinc-400 focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:placeholder-zinc-500 dark:focus:border-blue-400"
-          style={{ minHeight: '48px', maxHeight: '120px' }}
+          className="flex-1 resize-none border-0 bg-transparent px-2 py-2 text-[13.5px] leading-snug text-zinc-900 placeholder-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-50 dark:placeholder-zinc-500"
+          style={{ minHeight: '40px', maxHeight: '120px' }}
         />
         <button
           type="button"
           onClick={isStreaming ? onStop : onSend}
-          disabled={isDisabled && !isStreaming}
-          className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+          disabled={buttonDisabled}
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-600/30 transition-all hover:bg-blue-700 hover:shadow-md hover:shadow-blue-600/40 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none dark:bg-blue-500 dark:hover:bg-blue-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
           aria-label={isStreaming ? 'Stop' : 'Send'}
         >
           {isStreaming ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="2" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="1.5" />
             </svg>
           ) : (
             <svg
-              width="20"
-              height="20"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
             </svg>
           )}
         </button>
