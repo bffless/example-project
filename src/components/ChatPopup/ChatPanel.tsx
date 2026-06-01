@@ -18,7 +18,7 @@ const suggestions: SuggestionItem[] = [
 ]
 
 const DEFAULT_CONTAINER_CLASS =
-  'flex h-full flex-col rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900'
+  'flex h-full flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white text-left shadow-[0_20px_60px_-15px_rgba(15,23,42,0.25)] ring-1 ring-black/[0.02] dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)] dark:ring-white/[0.04]'
 
 interface ChatPanelProps {
   onClose: () => void
@@ -28,7 +28,6 @@ interface ChatPanelProps {
 
 export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelProps) {
   const containerClass = containerClassName ?? DEFAULT_CONTAINER_CLASS
-  const isRounded = !containerClassName
   const [conversationId, setConversationId] = useState<string | null>(() => {
     return localStorage.getItem(STORAGE_KEY)
   })
@@ -173,13 +172,12 @@ export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelP
           hasMessages={false}
           onNewChat={onNewChat}
           onClose={onClose}
-          rounded={isRounded}
         />
         <div className="flex flex-1 items-center justify-center">
-          <div className="flex flex-col items-center gap-2">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">
-              Loading conversation...
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-600 dark:border-zinc-800 dark:border-t-blue-400" />
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              Loading conversation
             </span>
           </div>
         </div>
@@ -194,9 +192,8 @@ export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelP
         hasMessages={messages.length > 0}
         onNewChat={onNewChat}
         onClose={onClose}
-        rounded={isRounded}
       />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/40">
         <ChatMessages
           messages={messages}
           status={status}

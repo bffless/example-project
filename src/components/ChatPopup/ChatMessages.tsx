@@ -27,38 +27,41 @@ function EmptyState({
   onSuggestionClick: (prompt: string) => void
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center px-4">
-      <div className="mb-6 text-center">
-        <div className="mb-3 flex justify-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
+    <div className="flex flex-col px-4 pt-6 pb-4 text-left">
+      <div className="mb-5">
+        <h3 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          Hi there
+        </h3>
+        <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+          Ask anything about this site.
+        </p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <p className="mb-1 px-0.5 text-[10px] font-semibold tracking-[0.08em] text-zinc-400 uppercase dark:text-zinc-500">
+          Suggested
+        </p>
+        {suggestions.map((s) => (
+          <button
+            type="button"
+            key={s.prompt}
+            onClick={() => onSuggestionClick(s.prompt)}
+            className="group flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm text-zinc-700 transition-all hover:-translate-y-px hover:border-blue-300 hover:text-zinc-900 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-blue-500/50 dark:hover:text-zinc-50"
+          >
+            <span>{s.label}</span>
             <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-blue-600 dark:text-blue-400"
+              className="text-zinc-300 transition-all group-hover:translate-x-0.5 group-hover:text-blue-500 dark:text-zinc-600"
             >
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
             </svg>
-          </div>
-        </div>
-        <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Hi there!</h3>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">How can I help you?</p>
-      </div>
-      <div className="w-full space-y-2">
-        {suggestions.map((s) => (
-          <button
-            type="button"
-            key={s.prompt}
-            onClick={() => onSuggestionClick(s.prompt)}
-            className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-3 text-left text-sm text-zinc-700 transition-colors hover:border-blue-300 hover:bg-blue-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-blue-500 dark:hover:bg-zinc-700"
-          >
-            {s.label}
           </button>
         ))}
       </div>
@@ -83,7 +86,7 @@ export function ChatMessages({
   }
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-3 px-4 py-4 text-left">
       {messages.map((message) => {
         const text = getMessageText(message)
         const isUser = message.role === 'user'
@@ -94,16 +97,16 @@ export function ChatMessages({
             className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2 ${
+              className={
                 isUser
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-              }`}
+                  ? 'max-w-[85%] rounded-2xl rounded-br-md bg-blue-600 px-3.5 py-2 text-white shadow-sm shadow-blue-600/20 dark:bg-blue-500'
+                  : 'max-w-[85%] rounded-2xl rounded-bl-md border border-zinc-200/80 bg-white px-3.5 py-2 text-zinc-900 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
+              }
             >
               {isUser ? (
-                <p className="text-sm whitespace-pre-wrap">{text}</p>
+                <p className="text-[13.5px] leading-snug whitespace-pre-wrap">{text}</p>
               ) : (
-                <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:bg-zinc-800 [&_pre]:text-zinc-100 [&_pre]:rounded-md [&_pre]:p-2 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_code]:text-xs">
+                <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none text-left text-[13.5px] leading-snug [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_code]:rounded [&_code]:bg-zinc-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[12px] dark:[&_code]:bg-zinc-800 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-900 [&_pre]:p-2.5 [&_pre]:text-[12px] [&_pre]:text-zinc-100 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
                 </div>
               )}
@@ -113,11 +116,11 @@ export function ChatMessages({
       })}
       {status === 'streaming' && messages[messages.length - 1]?.role === 'user' && (
         <div className="flex justify-start">
-          <div className="max-w-[80%] rounded-2xl bg-zinc-100 px-4 py-2 dark:bg-zinc-800">
+          <div className="rounded-2xl rounded-bl-md border border-zinc-200/80 bg-white px-3.5 py-2.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <div className="flex gap-1">
-              <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s] dark:bg-zinc-500" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s] dark:bg-zinc-500" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
             </div>
           </div>
         </div>

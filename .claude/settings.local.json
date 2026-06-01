@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__bffless-j5s__list_projects",
+      "mcp__bffless-j5s__list_pipeline_schemas",
+      "mcp__bffless-j5s__list_proxy_rule_sets",
+      "mcp__bffless-j5s__get_proxy_rule_set",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl -s https://raw.githubusercontent.com/bffless/demo-chat/main/src/components/ChatPopup/index.tsx)",
+      "Bash(curl -s https://raw.githubusercontent.com/bffless/demo-chat/main/src/components/ChatPopup/ChatPanel.tsx)",
+      "Bash(curl *)",
+      "Bash(gh api *)",
+      "Bash(npx eslint *)"
+    ]
+  }
+}
