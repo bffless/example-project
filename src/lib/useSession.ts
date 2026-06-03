@@ -28,7 +28,13 @@ async function fetchSessionOnce(): Promise<Session> {
 
   if (!res.ok) return { authenticated: false }
 
-  const body = (await res.json()) as { user?: SessionUser } & SessionUser
+  const body = (await res.json()) as {
+    authenticated?: boolean
+    user?: SessionUser | null
+  } & SessionUser
+  if (body.authenticated === false || body.user === null) {
+    return { authenticated: false }
+  }
   const user = (body.user ?? body) as SessionUser
   return { authenticated: true, user }
 }
@@ -64,6 +70,13 @@ export function useSession() {
       cancelled = true
     }
   }, [tick])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onChange = () => refetch()
+    window.addEventListener('bffless:mockauth:change', onChange)
+    return () => window.removeEventListener('bffless:mockauth:change', onChange)
+  }, [refetch])
 
   return { session, loading, refetch }
 }
