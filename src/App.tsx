@@ -6,6 +6,7 @@ import { ContactDialog } from './components/ContactDialog'
 import { CommentsSection } from './components/CommentsSection'
 import { SiteHeader } from './components/SiteHeader'
 import { ChatPopup } from './components/ChatPopup'
+import { DevAuthPanel } from './components/DevAuthPanel'
 import './App.css'
 
 function App() {
@@ -131,6 +132,7 @@ function App() {
         onClose={() => setContactOpen(false)}
       />
       <ChatPopup />
+      {import.meta.env.DEV && <DevAuthPanel />}
     </>
   )
 }

@@ -28,8 +28,17 @@ async function fetchSessionOnce(): Promise<Session> {
 
   if (!res.ok) return { authenticated: false }
 
-  const body = (await res.json()) as { user?: SessionUser } & SessionUser
-  const user = (body.user ?? body) as SessionUser
+  const body = (await res.json()) as {
+    authenticated?: boolean
+    user?: SessionUser | null
+  } & Partial<SessionUser>
+  if (body?.authenticated === false || body?.user === null) {
+    return { authenticated: false }
+  }
+  const user = (body.user ?? (body as SessionUser)) as SessionUser
+  if (!user || typeof user !== 'object' || !('id' in user)) {
+    return { authenticated: false }
+  }
   return { authenticated: true, user }
 }
 
@@ -64,6 +73,12 @@ export function useSession() {
       cancelled = true
     }
   }, [tick])
+
+  useEffect(() => {
+    const onChange = () => refetch()
+    window.addEventListener('bffless:auth:refetch', onChange)
+    return () => window.removeEventListener('bffless:auth:refetch', onChange)
+  }, [refetch])
 
   return { session, loading, refetch }
 }

@@ -65,6 +65,19 @@ describe('useSession', () => {
     )
   })
 
+  it('returns unauthenticated when /session 200s with a guest body', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ authenticated: false, user: null })
+    )
+
+    const { useSession: freshUseSession } = await import('./useSession')
+    const { result } = renderHook(() => freshUseSession())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.session).toEqual({ authenticated: false })
+  })
+
   it('returns unauthenticated when refresh fails', async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(null, { status: 401 }))
