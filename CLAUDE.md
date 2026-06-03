@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Conventions
 
 - For anything fetched from GitHub (files, PRs, issues, releases, raw content), use `gh` — not `curl`.
+- Prefer Tailwind utility classes for new styles rather than writing custom CSS. Theme tokens are defined in `src/index.css` via `@theme` (Tailwind v4 CSS-first config — no `tailwind.config.js`).
 
 ## Commands
 
