@@ -9,8 +9,10 @@ const ADMIN_LOGIN_URL =
   (import.meta.env.VITE_ADMIN_LOGIN_URL as string | undefined) ??
   'https://admin.j5s.dev/login'
 
+const ADMIN_LOGOUT_URL = ADMIN_LOGIN_URL.replace(/\/login(\?.*)?$/, '/logout')
+
 export function SiteHeader({ onContactClick }: Props) {
-  const { session, loading, refetch } = useSession()
+  const { session, loading } = useSession()
   const authenticated = session?.authenticated === true
   const user = authenticated ? session.user : null
 
@@ -24,11 +26,20 @@ export function SiteHeader({ onContactClick }: Props) {
   }
 
   async function handleLogout() {
-    await fetch('/_bffless/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-    })
-    refetch()
+    // Clear bffless_access/refresh cookies that live on this domain
+    // (no-op on workspace subdomains, required for custom domains).
+    try {
+      await fetch('/_bffless/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      })
+    } catch {
+      // ignore — the admin bounce below is the source of truth
+    }
+    // Bounce through admin to revoke the SuperTokens session, then come back.
+    const redirect = window.location.origin + window.location.pathname
+    const params = new URLSearchParams({ redirect })
+    window.location.href = `${ADMIN_LOGOUT_URL}?${params.toString()}`
   }
 
   return (
