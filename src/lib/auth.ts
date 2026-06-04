@@ -6,11 +6,8 @@ function adminBaseUrl(): string {
 }
 
 export function getLoginUrl(redirectPath = window.location.pathname): string {
-  const params = new URLSearchParams({
-    customDomainRelay: 'true',
-    targetDomain: window.location.host,
-    redirect: redirectPath,
-  })
+  const redirect = window.location.origin + redirectPath
+  const params = new URLSearchParams({ redirect })
   return `${adminBaseUrl()}/login?${params.toString()}`
 }
 
