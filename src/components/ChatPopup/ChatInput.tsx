@@ -51,7 +51,7 @@ export function ChatInput({
           Rate limited — try again in {rateLimitCountdown}s
         </p>
       )}
-      <div className="flex items-end gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-2 py-1.5 transition-colors focus-within:border-blue-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-blue-500 dark:focus-within:bg-zinc-900 dark:focus-within:ring-blue-500/20">
+      <div className="flex items-end gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-2 py-1.5 transition-colors focus-within:border-terracotta focus-within:bg-white focus-within:ring-2 focus-within:ring-terracotta/20 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:bg-zinc-900">
         <textarea
           ref={textareaRef}
           value={value}
@@ -67,7 +67,7 @@ export function ChatInput({
           type="button"
           onClick={isStreaming ? onStop : onSend}
           disabled={buttonDisabled}
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-600/30 transition-all hover:bg-blue-700 hover:shadow-md hover:shadow-blue-600/40 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none dark:bg-blue-500 dark:hover:bg-blue-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-terracotta text-paper shadow-sm shadow-terracotta/30 transition-all hover:bg-terracotta-hover hover:shadow-md hover:shadow-terracotta/40 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
           aria-label={isStreaming ? 'Stop' : 'Send'}
         >
           {isStreaming ? (

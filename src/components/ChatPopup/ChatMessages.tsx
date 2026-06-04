@@ -45,7 +45,7 @@ function EmptyState({
             type="button"
             key={s.prompt}
             onClick={() => onSuggestionClick(s.prompt)}
-            className="group flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm text-zinc-700 transition-all hover:-translate-y-px hover:border-blue-300 hover:text-zinc-900 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-blue-500/50 dark:hover:text-zinc-50"
+            className="group flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm text-zinc-700 transition-all hover:-translate-y-px hover:border-terracotta/50 hover:text-zinc-900 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-50"
           >
             <span>{s.label}</span>
             <svg
@@ -57,7 +57,7 @@ function EmptyState({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="text-zinc-300 transition-all group-hover:translate-x-0.5 group-hover:text-blue-500 dark:text-zinc-600"
+              className="text-zinc-300 transition-all group-hover:translate-x-0.5 group-hover:text-terracotta dark:text-zinc-600"
             >
               <line x1="5" y1="12" x2="19" y2="12" />
               <polyline points="12 5 19 12 12 19" />
@@ -99,7 +99,7 @@ export function ChatMessages({
             <div
               className={
                 isUser
-                  ? 'max-w-[85%] rounded-2xl rounded-br-md bg-blue-600 px-3.5 py-2 text-white shadow-sm shadow-blue-600/20 dark:bg-blue-500'
+                  ? 'max-w-[85%] rounded-2xl rounded-br-md bg-terracotta px-3.5 py-2 text-paper shadow-sm shadow-terracotta/20'
                   : 'max-w-[85%] rounded-2xl rounded-bl-md border border-zinc-200/80 bg-white px-3.5 py-2 text-zinc-900 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
               }
             >

@@ -175,7 +175,7 @@ export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelP
         />
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <div className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-600 dark:border-zinc-800 dark:border-t-blue-400" />
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-200 border-t-terracotta dark:border-zinc-800" />
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               Loading conversation
             </span>

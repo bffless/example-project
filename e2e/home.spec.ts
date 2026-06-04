@@ -19,7 +19,7 @@ const MOCK_COMMENTS = {
   ],
 }
 
-test.describe('home page', () => {
+test.describe('demo site', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/comments**', async (route) => {
       await route.fulfill({
@@ -34,25 +34,34 @@ test.describe('home page', () => {
     })
   })
 
-  test('renders hero, counter, and mocked comments', async ({ page }) => {
+  test('renders the home hero and primary nav', async ({ page }) => {
     await page.goto('/')
 
     await expect(
-      page.getByRole('heading', { name: 'Hello BFFless from a PR!!' }),
+      page.getByRole('heading', { name: /No backend to run/ }),
     ).toBeVisible()
 
-    const counter = page.getByRole('button', { name: /Count is/ })
-    await expect(counter).toHaveText('Count is 0')
-    await counter.click()
-    await expect(counter).toHaveText('Count is 1')
+    // Primary nav links to each feature page.
+    for (const label of ['Forms', 'Comments', 'Chat', 'Auth']) {
+      await expect(page.getByRole('link', { name: label, exact: true })).toBeVisible()
+    }
+
+    // Unauthenticated session => log in control.
+    await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible()
+
+    await page.screenshot({ path: 'screenshots/home.png', fullPage: true })
+  })
+
+  test('navigates to comments and shows mocked comments', async ({ page }) => {
+    await page.goto('/')
+
+    await page.getByRole('link', { name: 'Comments', exact: true }).click()
+    await expect(page).toHaveURL(/\/comments$/)
 
     await expect(page.getByText('Ada Lovelace')).toBeVisible()
     await expect(page.getByText('First!')).toBeVisible()
     await expect(page.getByText('Alan Turing')).toBeVisible()
 
-    await page.screenshot({
-      path: 'screenshots/home.png',
-      fullPage: true,
-    })
+    await page.screenshot({ path: 'screenshots/comments.png', fullPage: true })
   })
 })

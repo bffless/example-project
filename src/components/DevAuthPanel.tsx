@@ -49,40 +49,40 @@ export function DevAuthPanel() {
   return (
     <div className="fixed bottom-4 left-4 z-50 font-mono text-sm">
       {open ? (
-        <div className="w-80 rounded-lg border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow)]">
-          <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-            <span className="font-semibold text-[var(--text-h)]">
+        <div className="w-80 rounded-lg border border-[var(--color-paper-line)] bg-[var(--color-paper)] shadow-[0_24px_60px_-20px_rgba(23,21,19,0.4)]">
+          <div className="flex items-center justify-between border-b border-[var(--color-paper-line)] px-3 py-2">
+            <span className="font-semibold text-[var(--color-ink)]">
               Dev auth
             </span>
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Close dev auth panel"
-              className="cursor-pointer rounded px-2 text-[var(--text)] hover:text-[var(--accent)]"
+              className="cursor-pointer rounded px-2 text-[var(--color-ink-soft)] hover:text-[var(--color-terracotta)]"
             >
               ×
             </button>
           </div>
 
           <div className="flex flex-col gap-3 px-3 py-3">
-            <label className="flex items-center justify-between gap-2 text-[var(--text)]">
+            <label className="flex items-center justify-between gap-2 text-[var(--color-ink-soft)]">
               <span>MSW enabled</span>
               <input
                 type="checkbox"
                 checked={state.enabled}
                 onChange={(e) => apply({ enabled: e.target.checked })}
-                className="accent-[var(--accent)]"
+                className="accent-[var(--color-terracotta)]"
               />
             </label>
 
-            <label className="flex items-center justify-between gap-2 text-[var(--text)]">
+            <label className="flex items-center justify-between gap-2 text-[var(--color-ink-soft)]">
               <span>Authenticated</span>
               <input
                 type="checkbox"
                 checked={state.authenticated}
                 onChange={(e) => apply({ authenticated: e.target.checked })}
                 disabled={!state.enabled}
-                className="accent-[var(--accent)] disabled:opacity-40"
+                className="accent-[var(--color-terracotta)] disabled:opacity-40"
               />
             </label>
 
@@ -98,7 +98,7 @@ export function DevAuthPanel() {
               onChange={(v) => apply({ user: { ...state.user, email: v } })}
               disabled={!state.enabled}
             />
-            <label className="flex flex-col gap-1 text-[var(--text)]">
+            <label className="flex flex-col gap-1 text-[var(--color-ink-soft)]">
               <span className="text-xs uppercase tracking-wide opacity-70">
                 Role
               </span>
@@ -110,7 +110,7 @@ export function DevAuthPanel() {
                     user: { ...state.user, role: e.target.value as MockRole },
                   })
                 }
-                className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[var(--text-h)] outline-none focus:border-[var(--accent-border)] disabled:opacity-40"
+                className="rounded border border-[var(--color-paper-line)] bg-[var(--color-paper)] px-2 py-1 text-[var(--color-ink)] outline-none focus:border-[rgba(216,90,61,0.5)] disabled:opacity-40"
               >
                 {MOCK_ROLES.map((r) => (
                   <option key={r} value={r}>
@@ -120,18 +120,18 @@ export function DevAuthPanel() {
               </select>
             </label>
 
-            <div className="mt-1 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
+            <div className="mt-1 flex items-center justify-between gap-2 border-t border-[var(--color-paper-line)] pt-3">
               <button
                 type="button"
                 onClick={reset}
-                className="cursor-pointer rounded border border-[var(--border)] px-2.5 py-1 text-[var(--text)] hover:text-[var(--accent)]"
+                className="cursor-pointer rounded border border-[var(--color-paper-line)] px-2.5 py-1 text-[var(--color-ink-soft)] hover:text-[var(--color-terracotta)]"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={dispatchRefetch}
-                className="cursor-pointer rounded border border-transparent bg-[var(--accent-bg)] px-2.5 py-1 text-[var(--accent)] hover:border-[var(--accent-border)]"
+                className="cursor-pointer rounded border border-transparent bg-[rgba(216,90,61,0.12)] px-2.5 py-1 text-[var(--color-terracotta)] hover:border-[rgba(216,90,61,0.5)]"
               >
                 Refetch session
               </button>
@@ -142,7 +142,7 @@ export function DevAuthPanel() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="cursor-pointer rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[var(--text)] shadow-[var(--shadow)] hover:text-[var(--accent)]"
+          className="cursor-pointer rounded-full border border-[var(--color-paper-line)] bg-[var(--color-paper)] px-3 py-2 text-[var(--color-ink-soft)] shadow-[0_24px_60px_-20px_rgba(23,21,19,0.4)] hover:text-[var(--color-terracotta)]"
           title="Dev auth panel"
         >
           {state.enabled
@@ -165,7 +165,7 @@ type FieldProps = {
 
 function Field({ label, value, onChange, disabled }: FieldProps) {
   return (
-    <label className="flex flex-col gap-1 text-[var(--text)]">
+    <label className="flex flex-col gap-1 text-[var(--color-ink-soft)]">
       <span className="text-xs uppercase tracking-wide opacity-70">
         {label}
       </span>
@@ -174,7 +174,7 @@ function Field({ label, value, onChange, disabled }: FieldProps) {
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[var(--text-h)] outline-none focus:border-[var(--accent-border)] disabled:opacity-40"
+        className="rounded border border-[var(--color-paper-line)] bg-[var(--color-paper)] px-2 py-1 text-[var(--color-ink)] outline-none focus:border-[rgba(216,90,61,0.5)] disabled:opacity-40"
       />
     </label>
   )
