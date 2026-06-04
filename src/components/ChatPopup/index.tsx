@@ -19,7 +19,7 @@ export function ChatPopup() {
           type="button"
           onClick={() => setIsOpen(true)}
           aria-label="Open chat"
-          className="group fixed right-6 bottom-6 z-[70] flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-[0_10px_30px_-5px_rgba(37,99,235,0.5)] ring-1 ring-white/10 transition-all hover:-translate-y-0.5 hover:shadow-[0_15px_40px_-5px_rgba(37,99,235,0.6)] active:translate-y-0 dark:from-blue-400 dark:to-blue-600"
+          className="group fixed right-6 bottom-6 z-[70] flex h-13 w-13 items-center justify-center rounded-full bg-terracotta text-paper shadow-[0_10px_30px_-5px_rgba(216,90,61,0.5)] ring-1 ring-ink/10 transition-all hover:-translate-y-0.5 hover:bg-terracotta-hover hover:shadow-[0_15px_40px_-5px_rgba(216,90,61,0.6)] active:translate-y-0"
         >
           <svg
             width="20"

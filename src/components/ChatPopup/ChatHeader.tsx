@@ -39,7 +39,7 @@ export function ChatHeader({ status, hasMessages, onNewChat, onClose }: ChatHead
   return (
     <div className="flex items-center justify-between border-b border-zinc-200/80 bg-white/80 px-4 py-3 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80">
       <div className="flex items-center gap-3">
-        <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-sm shadow-blue-600/30 dark:from-blue-400 dark:to-blue-600">
+        <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-terracotta text-paper shadow-sm shadow-terracotta/30">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"

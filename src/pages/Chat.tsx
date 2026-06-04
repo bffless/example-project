@@ -1,0 +1,88 @@
+import { useCallback, useState } from 'react'
+import { PageHero } from '../components/PageHero'
+import { Section, Dot } from '../components/Section'
+import { VideoEmbed } from '../components/VideoEmbed'
+import { ChatPanel } from '../components/ChatPopup/ChatPanel'
+import { EPISODES } from '../lib/episodes'
+
+const STORAGE_KEY = 'chat_conversation_id'
+
+const FEATURES = [
+  {
+    title: 'Streaming',
+    body: 'Built on the Vercel AI SDK (useChat). Tokens stream in over /api/chat, proxied through BFFless to your model provider.',
+  },
+  {
+    title: 'Persistence',
+    body: 'Each conversation gets an id stored client-side; history is loaded back from the backend so the thread survives reloads.',
+  },
+  {
+    title: 'Skills',
+    body: 'The assistant can be taught skills on the BFFless side — answering questions about this very site, for instance.',
+  },
+]
+
+const INLINE_PANEL_CLASS =
+  'flex h-[600px] max-h-[75vh] flex-col overflow-hidden rounded-xl border border-paper-line bg-white text-left shadow-[0_20px_60px_-25px_rgba(23,21,19,0.45)]'
+
+export function Chat() {
+  const [minimized, setMinimized] = useState(false)
+  const [chatKey, setChatKey] = useState(0)
+
+  const handleNewChat = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY)
+    setChatKey((k) => k + 1)
+  }, [])
+
+  return (
+    <>
+      <PageHero
+        eyebrow="Walkthrough — AI chat"
+        title={
+          <>
+            A streaming assistant, wired in minutes<Dot />
+          </>
+        }
+        lead="The same chat widget that floats in the corner of this site, embedded inline. It streams responses through BFFless and remembers the conversation — no chat backend to build."
+      />
+
+      <Section eyebrow="— What's underneath" title={<>Chat, the AI SDK, and BFFless<Dot /></>}>
+        <div className="grid border-l border-t border-paper-line md:grid-cols-3">
+          {FEATURES.map((f) => (
+            <div
+              key={f.title}
+              className="border-b border-r border-paper-line bg-paper p-7 md:p-8"
+            >
+              <h3 className="font-serif text-[20px] leading-[1.15] text-ink">{f.title}</h3>
+              <p className="mt-2 text-[14.5px] leading-relaxed text-ink-soft">{f.body}</p>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section eyebrow="— Live demo" title={<>Talk to the assistant<Dot /></>}>
+        <div className="mx-auto max-w-2xl">
+          {minimized ? (
+            <div className="flex flex-col items-center gap-4 border border-paper-line bg-paper-deep/30 p-10 text-center">
+              <p className="text-[15px] text-ink-soft">The assistant is minimized.</p>
+              <button type="button" className="pill-cta" onClick={() => setMinimized(false)}>
+                Open the assistant
+              </button>
+            </div>
+          ) : (
+            <ChatPanel
+              key={chatKey}
+              containerClassName={INLINE_PANEL_CLASS}
+              onClose={() => setMinimized(true)}
+              onNewChat={handleNewChat}
+            />
+          )}
+        </div>
+      </Section>
+
+      <Section eyebrow="— Watch" title={<>Chat AI SDK and BFFless<Dot /></>} divider={false}>
+        <VideoEmbed episodes={EPISODES.chat} />
+      </Section>
+    </>
+  )
+}

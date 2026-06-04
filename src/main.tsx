@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { BffStateProvider } from '@bffless/use-bff-state'
 import './index.css'
 import App from './App.tsx'
@@ -14,7 +15,9 @@ enableMocks().then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <BffStateProvider>
-        <App />
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
       </BffStateProvider>
     </StrictMode>,
   )
