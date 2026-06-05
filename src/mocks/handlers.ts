@@ -23,4 +23,10 @@ export const handlers = [
     writeMockAuth({ ...state, authenticated: false })
     return new HttpResponse(null, { status: 204 })
   }),
+
+  // Studio stage ③ — transcription is now a real BFFless pipeline
+  // (`/api/transcribe`: presigned audio URL → Replicate WhisperX, story 02).
+  // No MSW handler: unhandled `/api/*` falls through to the Vite proxy, same as
+  // the upload routes. The real pipeline returns the same `{ words, text }` shape
+  // the mock used, so the FE is unchanged.
 ]

@@ -5,6 +5,7 @@ import { Forms } from './pages/Forms'
 import { Comments } from './pages/Comments'
 import { Chat } from './pages/Chat'
 import { Auth } from './pages/Auth'
+import { Studio } from './pages/Studio'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="comments" element={<Comments />} />
         <Route path="chat" element={<Chat />} />
         <Route path="auth" element={<Auth />} />
+        <Route path="studio" element={<Studio />} />
         <Route path="*" element={<Home />} />
       </Route>
     </Routes>
