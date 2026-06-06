@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
 import { buildScenes, narrationSeconds, type Scene } from '../../lib/scenes'
 import { extractAudioWav } from '../../lib/audio'
@@ -34,6 +34,11 @@ export function useScenePipeline() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [voicingId, setVoicingId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  // Synchronous in-flight guard. `running` (state) updates on the next render,
+  // so two fast clicks both read it as false and double-fire the step (e.g. two
+  // paid /api/transcribe calls). The ref flips immediately, so the second call
+  // bails before any work — the button's `disabled` is just the visual half.
+  const runningRef = useRef(false)
 
   const patch = useCallback((id: StageId, p: Partial<Stage>) => {
     setStages((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)))
@@ -156,7 +161,8 @@ export function useScenePipeline() {
   const next = useCallback(
     async (ctx: StepContext) => {
       const id = currentStageId
-      if (!id || running) return
+      if (!id || runningRef.current) return
+      runningRef.current = true
       setRunning(true)
       try {
         if (id === 'upload') await uploadClip(ctx)
@@ -172,10 +178,11 @@ export function useScenePipeline() {
           ),
         )
       } finally {
+        runningRef.current = false
         setRunning(false)
       }
     },
-    [currentStageId, running, uploadClip, extractAndUploadAudio, transcribe, finishPrep],
+    [currentStageId, uploadClip, extractAndUploadAudio, transcribe, finishPrep],
   )
 
   // ---- Scene build loop (unchanged) ----------------------------------------

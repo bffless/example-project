@@ -7,6 +7,7 @@ import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneEditor } from '../components/Studio/SceneEditor'
 import { StudioStepper } from '../components/Studio/StudioStepper'
+import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { formatTime } from '../lib/edl'
 import { studioPhase } from '../lib/pipeline'
@@ -15,6 +16,7 @@ import type { Scene } from '../lib/scenes'
 export function Studio() {
   const [file, setFile] = useState<File | null>(null)
   const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
@@ -31,6 +33,7 @@ export function Studio() {
   function selectFile(f: File) {
     setFile(f)
     setDuration(0)
+    setCurrentTime(0)
     pipe.reset()
   }
 
@@ -104,31 +107,36 @@ export function Studio() {
 
             {!pipe.ready ? (
               /* Prep phase: the notes board (left, a third) + the source preview
-                 (right, two thirds). The video sits at the top of its column;
-                 `items-start` keeps it from stretching, so the space below stays
-                 empty for now — it'll hold the transcription editor later. */
-              <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
-                <PipelineBoard
-                  stages={pipe.stages}
-                  currentStageId={pipe.currentStageId}
-                  busy={pipe.running}
-                  onAction={() => pipe.next({ file, src: url, duration })}
-                />
-                <div>
-                  {/* Invisible spacer mirroring the menu's header row so the video
-                      top lines up with the menu's first item, not its label. */}
-                  <div className="mb-3 flex items-baseline justify-between" aria-hidden="true">
-                    <p className="meta-label">&nbsp;</p>
-                    <p className="font-mono text-[12px]">&nbsp;</p>
-                  </div>
-                  <PreviewPlayer
-                    src={url}
-                    videoRef={videoRef}
-                    cuts={[]}
-                    onTime={() => {}}
-                    onLoaded={onLoaded}
+                 (right, two thirds), then the transcript editor full-width below
+                 once transcription has produced words. */
+              <div className="flex flex-col gap-8">
+                <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
+                  <PipelineBoard
+                    stages={pipe.stages}
+                    currentStageId={pipe.currentStageId}
+                    busy={pipe.running}
+                    onAction={() => pipe.next({ file, src: url, duration })}
                   />
+                  <div>
+                    {/* Invisible spacer mirroring the menu's header row so the video
+                        top lines up with the menu's first item, not its label. */}
+                    <div className="mb-3 flex items-baseline justify-between" aria-hidden="true">
+                      <p className="meta-label">&nbsp;</p>
+                      <p className="font-mono text-[12px]">&nbsp;</p>
+                    </div>
+                    <PreviewPlayer
+                      src={url}
+                      videoRef={videoRef}
+                      cuts={[]}
+                      onTime={setCurrentTime}
+                      onLoaded={onLoaded}
+                    />
+                  </div>
                 </div>
+
+                {pipe.words.length > 0 && (
+                  <TranscriptDiff words={pipe.words} currentTime={currentTime} />
+                )}
               </div>
             ) : (
               /* Build phase: scene queue + per-scene editor */
