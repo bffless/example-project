@@ -5,6 +5,8 @@ import { MediaImport } from '../components/Studio/MediaImport'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
+import { PrepArtifacts } from '../components/Studio/PrepArtifacts'
+import { buildPrepArtifacts } from '../lib/prepArtifacts'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneEditor } from '../components/Studio/SceneEditor'
 import { StudioStepper } from '../components/Studio/StudioStepper'
@@ -54,6 +56,19 @@ export function Studio() {
   }, [])
 
   const selected = pipe.scenes.find((s) => s.id === pipe.selectedId) ?? null
+
+  const artifacts = useMemo(
+    () =>
+      buildPrepArtifacts({
+        hasSource: !!pipe.sourceUrl,
+        hasAudio: !!pipe.audioUrl,
+        wordCount: pipe.words.length,
+        sheetCount: pipe.contactSheets.length,
+        frameCount: pipe.contactSheets.reduce((n, s) => n + s.count, 0),
+        sheetsSaved: pipe.contactSheets.filter((s) => s.url).length,
+      }),
+    [pipe.sourceUrl, pipe.audioUrl, pipe.words, pipe.contactSheets],
+  )
 
   const phase = studioPhase({
     hasFile: !!file,
@@ -111,6 +126,7 @@ export function Studio() {
                  (right, two thirds), then the transcript editor full-width below
                  once transcription has produced words. */
               <div className="flex flex-col gap-8">
+                <PrepArtifacts artifacts={artifacts} />
                 <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
                   <PipelineBoard
                     stages={pipe.stages}

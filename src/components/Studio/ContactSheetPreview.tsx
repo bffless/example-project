@@ -41,8 +41,11 @@ export function ContactSheetPreview({ sheets }: { sheets: ContactSheet[] }) {
                   {sheet.count} frames · {fmtBytes(sheet.bytes)}
                 </span>
               </figcaption>
+              {/* Prefer the bucket URL once uploaded (loads through the serve
+                  route — same bytes the director gets); fall back to the local
+                  blob only during the brief capture→upload window. */}
               <img
-                src={sheet.dataUrl}
+                src={sheet.url ?? sheet.dataUrl}
                 alt={`Frames ${clockLabel(first)} to ${clockLabel(last)} with burned-in timestamps`}
                 className="w-full rounded border border-paper-line"
                 draggable={false}

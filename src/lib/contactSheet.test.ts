@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  MIN_INTERVAL_SECONDS,
   MAX_INTERVAL_SECONDS,
   MAX_SHEETS,
   TILE_COLUMNS,
@@ -23,20 +24,20 @@ const maxGap = (times: number[]) =>
 const sheetCount = (p: { times: number[]; perSheet: number }) =>
   p.perSheet > 0 ? Math.ceil(p.times.length / p.perSheet) : 0
 
-describe('frameCount (ideal 30s coverage, uncapped)', () => {
-  it('scales with clip length at one frame per 30s', () => {
-    expect(frameCount(60)).toBe(2)
-    expect(frameCount(45 * 60)).toBe(90)
-    expect(frameCount(90)).toBe(3)
+describe('frameCount (ideal density at MIN_INTERVAL, uncapped)', () => {
+  it('scales with clip length at one frame per MIN_INTERVAL', () => {
+    expect(frameCount(60)).toBe(12) // 5s apart
+    expect(frameCount(300)).toBe(60)
+    expect(frameCount(30)).toBe(6)
   })
 
   it('is uncapped — the cap is applied by the plan, not here', () => {
-    expect(frameCount(2 * 60 * 60)).toBe(240)
-    expect(frameCount(10 * 60 * 60)).toBeGreaterThan(MAX_FRAMES)
+    expect(frameCount(60 * 60)).toBe(720)
+    expect(frameCount(60 * 60)).toBeGreaterThan(MAX_FRAMES)
   })
 
   it('is at least one frame for any real clip, zero for invalid', () => {
-    expect(frameCount(15)).toBe(1)
+    expect(frameCount(2)).toBe(1)
     expect(frameCount(0)).toBe(0)
     expect(frameCount(-10)).toBe(0)
     expect(frameCount(NaN)).toBe(0)
@@ -134,45 +135,53 @@ describe('gridDimensions', () => {
   })
 })
 
-describe('planContactSheet — balancing coverage, detail, and the 10-image cap', () => {
-  it('holds 30s spacing and 9-cell sheets up to 45 min', () => {
-    const plan = planContactSheet(45 * 60)
-    expect(plan.times.length).toBe(90)
-    expect(plan.perSheet).toBe(PREFERRED_CELLS_PER_SHEET)
-    expect(sheetCount(plan)).toBe(MAX_SHEETS) // exactly 10
-    expect(maxGap(plan.times)).toBeLessThanOrEqual(MAX_INTERVAL_SECONDS)
+describe('planContactSheet — dense for short clips, budget-capped for long', () => {
+  it('samples short clips finely (~MIN_INTERVAL), not pinned to 30s', () => {
+    const plan = planContactSheet(60)
+    expect(plan.times.length).toBe(12)
+    expect(plan.interval).toBeCloseTo(MIN_INTERVAL_SECONDS, 5)
+    expect(maxGap(plan.times)).toBeLessThanOrEqual(MIN_INTERVAL_SECONDS)
+    expect(sheetCount(plan)).toBe(2)
   })
 
-  it('packs cells 9→12 to keep 30s within 10 sheets at 45–60 min', () => {
-    const plan = planContactSheet(60 * 60)
-    expect(plan.times.length).toBe(120)
+  it('gives a short clip many more frames than the old 30s policy', () => {
+    // 3 min: the old coverage-only policy gave 6 frames (30s); now ~36 (5s).
+    expect(planContactSheet(3 * 60).times.length).toBe(36)
+    expect(planContactSheet(3 * 60).times.length).toBeGreaterThan(6)
+  })
+
+  it('fills the budget once dense sampling reaches it (~10 min)', () => {
+    const plan = planContactSheet(10 * 60)
+    expect(plan.times.length).toBe(MAX_FRAMES)
     expect(plan.perSheet).toBe(MAX_CELLS_PER_SHEET)
     expect(sheetCount(plan)).toBe(MAX_SHEETS)
-    expect(maxGap(plan.times)).toBeLessThanOrEqual(MAX_INTERVAL_SECONDS)
+    expect(plan.interval).toBeCloseTo(MIN_INTERVAL_SECONDS, 5)
   })
 
-  it('caps the frame budget and relaxes spacing past 60 min', () => {
+  it('caps at the budget and keeps ≤30s coverage up to ~60 min', () => {
+    for (const mins of [10, 20, 45, 60]) {
+      const plan = planContactSheet(mins * 60)
+      expect(plan.times.length).toBe(MAX_FRAMES)
+      expect(maxGap(plan.times)).toBeLessThanOrEqual(MAX_INTERVAL_SECONDS)
+      expect(sheetCount(plan)).toBeLessThanOrEqual(MAX_SHEETS)
+    }
+  })
+
+  it('relaxes spacing past 60 min once the budget is exhausted', () => {
     const plan = planContactSheet(90 * 60)
-    expect(plan.times.length).toBe(MAX_FRAMES) // capped at 120
-    expect(sheetCount(plan)).toBe(MAX_SHEETS)
-    expect(plan.interval).toBeGreaterThan(MAX_INTERVAL_SECONDS) // 45s
+    expect(plan.times.length).toBe(MAX_FRAMES)
+    expect(plan.interval).toBeGreaterThan(MAX_INTERVAL_SECONDS)
     expect(plan.interval).toBeCloseTo(45, 5)
   })
 
   it('never exceeds the image cap across a wide range of durations', () => {
-    for (const mins of [1, 5, 17, 30, 45, 50, 60, 75, 90, 180]) {
+    for (const mins of [0.5, 1, 3, 5, 10, 20, 45, 60, 90, 180]) {
       expect(sheetCount(planContactSheet(mins * 60))).toBeLessThanOrEqual(MAX_SHEETS)
     }
   })
 
-  it('keeps full 30s coverage for any clip up to 60 min', () => {
-    for (const mins of [1, 5, 17, 30, 45, 55, 60]) {
-      expect(maxGap(planContactSheet(mins * 60).times)).toBeLessThanOrEqual(MAX_INTERVAL_SECONDS)
-    }
-  })
-
-  it('packs a short clip into a single sheet', () => {
-    const plan = planContactSheet(3 * 60)
+  it('packs a very short clip into a single sheet', () => {
+    const plan = planContactSheet(30)
     expect(plan.times.length).toBe(6)
     expect(plan.perSheet).toBe(6)
     expect(sheetCount(plan)).toBe(1)

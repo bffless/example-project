@@ -76,6 +76,14 @@ ffmpeg.wasm into the final cut.
    everything's done, we generate the final YouTube thumbnail image and get it
    **back** from the AI. A separate, self-contained feature.
 
+**Later — reuse the director thumbnails as a build-step scrubbing sprite.** The
+prep contact-sheet frames are already captured, timestamped, and uploaded to the
+bucket (`thumbnails/` subDir). Since the transcript words also carry timestamps
+(story 02), the Build step can show the matching frame as the user moves through
+the words — a cheap visual scrub — by reusing those same frames as a sprite
+sheet instead of re-capturing. (Today's per-scene thumb is a single midpoint
+frame; this is the finer-grained version.)
+
 ## Open questions (to reconcile before building)
 
 - **Cut info vs. footage-fit.** The director now returns **cut info** per scene,

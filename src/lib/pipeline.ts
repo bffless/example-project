@@ -86,9 +86,9 @@ export const STAGE_DEFS: StageDef[] = [
   },
   {
     id: 'thumbnails',
-    title: 'Sample thumbnails for the director',
-    note: 'Grab frames across the whole clip on an interval that scales with its length, and compose them into one contact sheet with a timestamp burned on each — the visual context the AI director reads alongside the transcript.',
-    where: 'browser',
+    title: 'Sample & save director thumbnails',
+    note: 'Grab frames across the whole clip (≤30s apart), compose them into timestamped contact sheets, and upload each to the bucket — the visual context the AI director reads alongside the transcript.',
+    where: 'browser+pipeline',
     actionLabel: 'Generate thumbnails',
   },
   {

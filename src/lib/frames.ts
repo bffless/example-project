@@ -97,6 +97,9 @@ export type ContactSheet = {
   /** Position in the set, for "Sheet 2 of 7". */
   index: number
   total: number
+  /** Bucket URL once uploaded (story 03 feeds these to the director); the
+   * `dataUrl` is the local preview, this is the persisted object. */
+  url?: string
 }
 
 /** Load an image data URL into a decoded <img> element. */

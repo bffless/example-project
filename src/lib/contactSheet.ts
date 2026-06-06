@@ -4,26 +4,32 @@
  * timestamped grid images handed to the master director (story 03) as visual
  * context, so it can decide what footage to cut, not just rewrite the words.
  *
- * Four constraints have to be balanced; `planContactSheet` optimizes across all
- * of them:
+ * Constraints `planContactSheet` balances:
  *
- * 1. **Coverage** — frames should be ≤ `MAX_INTERVAL_SECONDS` apart so nothing
- *    important is skipped.
- * 2. **Per-frame detail** — a multimodal model downsamples each image it gets to
- *    a fixed budget (~1 MP), so a few large cells beat many tiny ones. We prefer
- *    `PREFERRED_CELLS_PER_SHEET`, allowing up to `MAX_CELLS_PER_SHEET`.
- * 3. **Image count** — at most `MAX_SHEETS` images per director call.
- * 4. **Upload size** — ≤ 7 MB per image (enforced in `frames.ts` at encode time).
+ * 1. **Density** — sample as finely as `MIN_INTERVAL_SECONDS` for SHORT clips
+ *    (closer than that just yields near-duplicate frames), so a short video gets
+ *    plenty of frames rather than being needlessly capped at 30s.
+ * 2. **Coverage** — but never sparser than `MAX_INTERVAL_SECONDS`, so long clips
+ *    don't skip too much (until the frame budget forces it).
+ * 3. **Per-frame detail** — the model reads each image at a bounded resolution,
+ *    so a few large cells beat many tiny ones: prefer `PREFERRED_CELLS_PER_SHEET`,
+ *    allow up to `MAX_CELLS_PER_SHEET`.
+ * 4. **Image count** — at most `MAX_SHEETS` images per director call.
+ * 5. **Upload size** — ≤ 7 MB per image (enforced in `frames.ts` at encode time).
  *
- * These conflict only for long clips. The ladder: keep 30s spacing and 9 cells
- * while it fits in 10 sheets (≤ 45 min); then pack more cells per sheet, 9 → 12,
- * to stay ≤ 10 sheets (45–60 min); past that the frame budget is maxed (10 × 12
- * = 120) and spacing relaxes beyond 30s. The capture and canvas compositing live
- * in `frames.ts`; this file only decides WHICH timestamps to grab and HOW to
- * tile/lay them out (pure + unit-tested).
+ * Net behaviour: short clips sample at ~`MIN_INTERVAL` and use as many frames as
+ * that needs; once the clip is long enough to hit `MAX_FRAMES` (10 × 12 = 120)
+ * the budget caps it and the spacing widens — staying ≤ 30s up to ~60 min, then
+ * relaxing past it. The capture and canvas compositing live in `frames.ts`; this
+ * file only decides WHICH timestamps to grab and HOW to tile them (pure + tested).
  */
 
-/** Frames should be no more than this far apart — until the image cap forces it. */
+/** Finest spacing we sample at — closer just yields near-duplicate frames. Drives
+ * density on SHORT clips so they aren't needlessly sparse. */
+export const MIN_INTERVAL_SECONDS = 5
+
+/** Coarsest spacing we tolerate — beyond it too much is skipped. Holds until the
+ * frame budget caps out (~60 min); longer clips relax past it. */
 export const MAX_INTERVAL_SECONDS = 30
 
 /** Hard cap on images sent to the director in one call. */
@@ -51,13 +57,14 @@ export type ContactSheetPlan = {
 }
 
 /**
- * Ideal frame count for full `MAX_INTERVAL_SECONDS` coverage — uncapped, scales
+ * Ideal frame count: as dense as `MIN_INTERVAL_SECONDS` allows — uncapped, scales
  * with length. The plan caps the *sampled* count at `MAX_FRAMES`; this is the
- * count we'd want if image/size limits didn't exist.
+ * count we'd want if image/size limits didn't exist. (Short clips get plenty of
+ * frames this way instead of being pinned to the 30s coverage floor.)
  */
 export function frameCount(duration: number): number {
   if (!Number.isFinite(duration) || duration <= 0) return 0
-  return Math.max(1, Math.ceil(duration / MAX_INTERVAL_SECONDS))
+  return Math.max(1, Math.ceil(duration / MIN_INTERVAL_SECONDS))
 }
 
 /**
@@ -107,9 +114,12 @@ export function gridDimensions(count: number): { cols: number; rows: number } {
  * cells per sheet — balancing coverage, detail, and the image cap.
  */
 export function planContactSheet(duration: number): ContactSheetPlan {
-  const ideal = frameCount(duration)
-  if (ideal === 0) return { interval: 0, times: [], perSheet: 0 }
-  const total = Math.min(ideal, MAX_FRAMES)
+  const dense = frameCount(duration)
+  if (dense === 0) return { interval: 0, times: [], perSheet: 0 }
+  // Aim for MIN_INTERVAL density, never sparser than MAX_INTERVAL, never over the
+  // budget. (dense ≥ coverage whenever MIN < MAX, so the floor is belt-and-braces.)
+  const coverage = Math.ceil(duration / MAX_INTERVAL_SECONDS)
+  const total = Math.min(MAX_FRAMES, Math.max(coverage, dense))
   return {
     interval: duration / total,
     times: sampleTimes(duration, total),

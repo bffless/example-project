@@ -124,21 +124,35 @@ export function useScenePipeline() {
     [patch, audioUrl],
   )
 
-  // Stage ④ — sample interval thumbnails across the whole clip and compose them
-  // into one timestamped contact sheet (real, browser-side). This is the visual
-  // context the master director (story 03) reads alongside the transcript; for
-  // now we generate it and show it so we can see what the AI will get.
+  // Stage ④ — sample interval thumbnails across the whole clip, compose them into
+  // timestamped contact sheets (real, browser-side), then upload each to its
+  // bucket so the master director (story 03) can be handed real image URLs — not
+  // just in-browser blobs. The local `dataUrl` stays for the preview; `url` is
+  // the persisted object.
   const generateThumbnails = useCallback(
     async ({ src, duration }: StepContext) => {
       patch('thumbnails', { status: 'active' })
       const sheets = await captureContactSheet(src, duration) // real, tiled ≤10
-      setContactSheets(sheets)
-      const frames = sheets.reduce((n, s) => n + s.count, 0)
-      const interval = sheets[0]?.interval ?? 0
+      setContactSheets(sheets) // show the blobs immediately, before the upload
+      const uploaded = await Promise.all(
+        sheets.map(async (sheet) => {
+          const blob = await (await fetch(sheet.dataUrl)).blob()
+          const ext = blob.type === 'image/png' ? 'png' : 'jpg'
+          const name = `contact-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
+          const file = new File([blob], name, { type: blob.type })
+          const url = await presignedUpload(file, '/api/uploads/thumbnails')
+          // The bucket URL is now the canonical state — drop the base64 blob so
+          // what we hold (and could later persist, e.g. to localStorage) is just
+          // a small URL, and the preview loads through the serve route.
+          return { ...sheet, url, dataUrl: '' }
+        }),
+      )
+      setContactSheets(uploaded)
+      const frames = uploaded.reduce((n, s) => n + s.count, 0)
       patch('thumbnails', {
         status: 'done',
         detail: frames
-          ? `${frames} frames · ${sheets.length} sheet${sheets.length === 1 ? '' : 's'} · ~${Math.round(interval)}s apart`
+          ? `${frames} frames · ${uploaded.length} sheet${uploaded.length === 1 ? '' : 's'} → bucket`
           : 'no frames sampled',
       })
     },
