@@ -42,6 +42,17 @@ export function SceneEditor({
           <p className="mt-1 font-mono text-[12px] text-ink-mute">
             {formatTime(scene.start)}–{formatTime(scene.end)} · scene video {formatTime(videoLen)}
           </p>
+          {scene.cuts && scene.cuts.length > 0 && (
+            <p className="mt-1 font-mono text-[11.5px] text-terracotta-ink">
+              director cuts:{' '}
+              {scene.cuts.map((c, i) => (
+                <span key={i}>
+                  {i > 0 ? ', ' : ''}
+                  {formatTime(c.start)}–{formatTime(c.end)}
+                </span>
+              ))}
+            </p>
+          )}
         </div>
         <button type="button" className="pill-ghost flex-shrink-0" onClick={onPlayScene}>
           ▶ Play scene

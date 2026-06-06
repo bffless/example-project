@@ -13,8 +13,7 @@ export type StageId =
   | 'extract'
   | 'transcribe'
   | 'thumbnails'
-  | 'shorten'
-  | 'segment'
+  | 'director'
   | 'clone'
 
 export type StageStatus = 'pending' | 'active' | 'done' | 'error'
@@ -97,23 +96,20 @@ export const STAGE_DEFS: StageDef[] = [
     actionLabel: 'Generate thumbnails',
   },
   {
-    id: 'shorten',
-    title: 'Shorten the transcript',
-    note: 'Ask the AI to condense the whole transcript first — cut the rambling and dead weight while keeping your points and your phrasing.',
+    id: 'director',
+    title: 'Send to the AI director',
+    note: 'Hand the timestamped transcript and the director contact sheets to the AI master director (Gemini), with any direction of your own. One call shortens the script AND groups it into logical 2–5 min scenes — each with its original-video timestamps and the footage to cut. You get back a one-line synopsis plus your chapters.',
     where: 'pipeline',
-    // Grouped with segment + clone behind one "Finish prep" action for now.
-    actionLabel: 'Finish prep',
-  },
-  {
-    id: 'segment',
-    title: 'Group into scenes with timestamps',
-    note: 'Break the shortened transcript into logical 2–5 min scenes where it makes sense. Each comes back with its narration text and the original-video timestamps it maps to — these are your chapters.',
-    where: 'pipeline',
+    // The master director (story 03): a single Gemini call does the shortening
+    // AND the scene grouping — so it's one step. The action lives in the richer
+    // DirectorPanel (see panelStageId), not an inline board button.
+    actionLabel: 'Send to the AI director',
   },
   {
     id: 'clone',
     title: 'Clone your voice',
     note: 'Build a reusable voice model from your extracted audio via a Replicate voice-clone pipeline, ready to re-voice each scene.',
     where: 'pipeline',
+    actionLabel: 'Clone voice',
   },
 ]

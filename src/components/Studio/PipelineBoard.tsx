@@ -9,6 +9,8 @@ type Props = {
   busy?: boolean
   /** Run the current step. */
   onAction?: () => void
+  /** A step whose action is owned by a richer panel elsewhere — hide its inline button. */
+  panelStageId?: StageId | null
 }
 
 /**
@@ -16,7 +18,7 @@ type Props = {
  * it goes. Prep is step by step now: the current step shows its action button;
  * earlier steps are checked off, later ones wait their turn.
  */
-export function PipelineBoard({ stages, currentStageId, busy, onAction }: Props) {
+export function PipelineBoard({ stages, currentStageId, busy, onAction, panelStageId }: Props) {
   const done = stages.filter((s) => s.status === 'done').length
 
   return (
@@ -36,6 +38,7 @@ export function PipelineBoard({ stages, currentStageId, busy, onAction }: Props)
             current={stage.id === currentStageId}
             busy={busy}
             onAction={onAction}
+            hideAction={stage.id === panelStageId}
           />
         ))}
       </ol>

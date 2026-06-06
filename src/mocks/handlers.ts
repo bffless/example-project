@@ -74,7 +74,52 @@ const studioHandlers = [
   // Transcription: return the real captured WhisperX response (82 words with
   // word-level timestamps) so the editor has realistic data, free of charge.
   http.post('/api/transcribe', () => HttpResponse.json(TRANSCRIBE_FIXTURE)),
+
+  // Master director: canned synopsis + scenes (with tightened script + cut
+  // spans) so the scene workspace has realistic data without a paid Gemini call.
+  // Scenes are derived from the posted `duration` so they fit any clip. Mirrors
+  // the real `/api/scenes` shape: { synopsis, scenes: [{ title, start, end,
+  // transcript, draftText, cuts }] }.
+  http.post('/api/scenes', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { duration?: number; direction?: string }
+    return HttpResponse.json(mockDirector(body.duration ?? 0, body.direction ?? ''))
+  }),
 ]
+
+/** A deterministic canned director response sized to the clip's duration. */
+function mockDirector(duration: number, direction: string) {
+  const total = Number.isFinite(duration) && duration > 0 ? duration : 600
+  const count = Math.max(1, Math.round(total / 210)) // ~3.5 min scenes
+  const each = total / count
+  const beats = [
+    { title: 'Cold open — the problem', draft: 'Here is the problem we kept running into, and why the usual fix falls apart at scale.' },
+    { title: 'The turn — what changed', draft: 'So we tried something different. The key insight was to let the pipeline do the rewriting up front.' },
+    { title: 'The demo', draft: 'Let me show you. You upload one clip, and it preps everything — transcript, scenes, your cloned voice.' },
+    { title: 'How it works', draft: 'Under the hood it is a chain of small steps, each one handed off to the next, no server code.' },
+    { title: 'Where it goes next', draft: 'Next we tighten each scene, line the footage up to the voice, and ship the cut.' },
+  ]
+  const scenes = Array.from({ length: count }, (_, i) => {
+    const start = i * each
+    const end = i === count - 1 ? total : (i + 1) * each
+    const beat = beats[i % beats.length]
+    // Drop a chunk of dead air in the middle third of each scene.
+    const cutStart = start + each * 0.45
+    const cutEnd = start + each * 0.62
+    return {
+      title: beat.title,
+      start,
+      end,
+      transcript: `(${Math.round(end - start)}s of original footage for this scene)`,
+      draftText: direction ? `${beat.draft} (${direction})` : beat.draft,
+      cuts: [{ start: cutStart, end: cutEnd }],
+    }
+  })
+  return {
+    synopsis:
+      'A builder turns one long, rambly screen recording into a tight, scene-by-scene short — the AI cuts the dead weight, groups the rest into chapters, and re-voices it in the maker’s own cloned voice.',
+    scenes,
+  }
+}
 
 export const handlers = [
   http.get('/_bffless/auth/session', () => {

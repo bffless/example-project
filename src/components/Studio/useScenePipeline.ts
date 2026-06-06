@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
-import { type StageId } from '../../lib/pipeline'
-import { buildScenes, narrationSeconds, type Scene } from '../../lib/scenes'
+import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
+import { narrationSeconds, type Scene } from '../../lib/scenes'
+import { timedTranscript, toScenes } from '../../lib/director'
 import { extractAudio } from '../../lib/audio'
 import { captureFramesAt, captureContactSheet, type ContactSheet } from '../../lib/frames'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { useTranscribeMutation, useUploadMutation } from '../../store/studioApi'
+import { useTranscribeMutation, useScenesMutation, useUploadMutation } from '../../store/studioApi'
 import {
   patchStage,
   failActiveStage,
@@ -15,6 +16,7 @@ import {
   setAudioPeaks,
   setContactSheets,
   setWords,
+  setSynopsis,
   setSelected,
   resetStudio,
   type TranscriptWord,
@@ -57,8 +59,12 @@ function stageError(e: unknown): string {
 
 export type { TranscriptWord }
 
-/** What each step needs: the source file, its object URL, and its duration. */
-export type StepContext = { file: File; src: string; duration: number }
+/**
+ * What each step needs: the source file, its object URL, and its duration.
+ * `direction` is the optional free-text note the user types for the master
+ * director step; ignored by every other step.
+ */
+export type StepContext = { file: File; src: string; duration: number; direction?: string }
 
 /**
  * Owns the one-time prep pipeline and the scene queue you build afterwards.
@@ -75,16 +81,31 @@ export type StepContext = { file: File; src: string; duration: number }
  */
 export function useScenePipeline() {
   const dispatch = useAppDispatch()
-  const stages = useAppSelector((s) => s.studio.stages)
+  // The board is the static step content (STAGE_DEFS) recombined with the only
+  // persisted, dynamic part — per-step progress. Keeping just the progress in
+  // state means editing STAGE_DEFS reshapes the board on the next load, no
+  // migration needed (see studioSlice `StageProgress`).
+  const stageProgress = useAppSelector((s) => s.studio.stageProgress)
+  const stages = useMemo<Stage[]>(
+    () =>
+      STAGE_DEFS.map((def) => ({
+        ...def,
+        status: stageProgress[def.id]?.status ?? 'pending',
+        detail: stageProgress[def.id]?.detail,
+      })),
+    [stageProgress],
+  )
   const scenes = useAppSelector((s) => s.studio.scenes)
   const sourceUrl = useAppSelector((s) => s.studio.sourceUrl)
   const audioUrl = useAppSelector((s) => s.studio.audioUrl)
   const audioPeaks = useAppSelector((s) => s.studio.audioPeaks)
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
+  const synopsis = useAppSelector((s) => s.studio.synopsis)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
 
   const [transcribeReq] = useTranscribeMutation()
+  const [scenesReq] = useScenesMutation()
   const [uploadReq] = useUploadMutation()
 
   // Transient UI state — not persisted.
@@ -221,40 +242,52 @@ export function useScenePipeline() {
     [patch, dispatch, uploadReq],
   )
 
-  // Stages ⑤⑥⑦ — shorten + segment + clone, still mocked, run together. Segment
-  // captures per-scene thumbnails. Replace each with its real `/api/*` call later.
-  const finishPrep = useCallback(
-    async ({ src, duration }: StepContext) => {
-      patch('shorten', { status: 'active' })
-      await delay(1100)
-      const total = words.length || Math.round((duration / 60) * 150)
-      const kept = Math.round(total * 0.6)
-      patch('shorten', {
-        status: 'done',
-        detail: `${kept.toLocaleString()} words kept · ~40% trimmed`,
-      })
+  // Stages ⑤⑥ — the master director (story 03). One multimodal Gemini call gets
+  // the timestamped transcript, the director contact sheets, and the user's
+  // optional direction, and returns the synopsis + scenes (tightened script,
+  // original-video span, and cut spans). Marks BOTH the shorten and segment
+  // notes done (one call does both), then captures a midpoint thumb per scene
+  // for the scene-card art. Replaces the old mocked `buildScenes`.
+  const runDirector = useCallback(
+    async ({ src, duration, direction }: StepContext) => {
+      patch('director', { status: 'active' })
+      const transcript = timedTranscript(words)
+      const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
+      const data = await scenesReq({
+        transcript,
+        sheetUrls,
+        direction: direction ?? '',
+        duration,
+      }).unwrap()
 
-      patch('segment', { status: 'active' })
-      const built = buildScenes(duration)
+      const built = toScenes(data.scenes ?? [], duration)
+      dispatch(setSynopsis(data.synopsis ?? null))
+
+      // Grab one midpoint frame per scene for the scene-card art (real, browser).
       const thumbs = await captureFramesAt(
         src,
         built.map((s) => (s.start + s.end) / 2),
         64,
-      ) // real
+      )
       const withThumbs = built.map((s, i) => ({ ...s, thumb: thumbs[i] }))
       dispatch(setScenes(withThumbs))
       dispatch(setSelected(withThumbs[0]?.id ?? null))
-      patch('segment', {
-        status: 'done',
-        detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · text + timestamps`,
-      })
 
-      patch('clone', { status: 'active' })
-      await delay(900)
-      patch('clone', { status: 'done', detail: 'voice model ready' })
+      const cutCount = withThumbs.reduce((n, s) => n + (s.cuts?.length ?? 0), 0)
+      patch('director', {
+        status: 'done',
+        detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · ${cutCount} cut${cutCount === 1 ? '' : 's'} · script tightened`,
+      })
     },
-    [patch, dispatch, words],
+    [patch, dispatch, words, persistedSheets, scenesReq],
   )
+
+  // Stage ⑦ — clone the voice (still mocked; real Replicate clone is story 04).
+  const cloneVoice = useCallback(async () => {
+    patch('clone', { status: 'active' })
+    await delay(900)
+    patch('clone', { status: 'done', detail: 'voice model ready' })
+  }, [patch])
 
   /** Run the current prep step. Marks the active stage `error` if it throws. */
   const next = useCallback(
@@ -268,7 +301,8 @@ export function useScenePipeline() {
         else if (id === 'extract') await extractAndUploadAudio(ctx)
         else if (id === 'transcribe') await transcribe(ctx)
         else if (id === 'thumbnails') await generateThumbnails(ctx)
-        else await finishPrep(ctx) // shorten/segment/clone grouped
+        else if (id === 'clone') await cloneVoice()
+        else await runDirector(ctx) // shorten + segment, one Gemini call
       } catch (e) {
         dispatch(failActiveStage(stageError(e)))
       } finally {
@@ -283,7 +317,8 @@ export function useScenePipeline() {
       extractAndUploadAudio,
       transcribe,
       generateThumbnails,
-      finishPrep,
+      runDirector,
+      cloneVoice,
     ],
   )
 
@@ -338,6 +373,7 @@ export function useScenePipeline() {
     audioPeaks,
     contactSheets,
     words,
+    synopsis,
     selectedId,
     voicingId,
     running,

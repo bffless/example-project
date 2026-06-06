@@ -9,6 +9,7 @@ import { configureStore, combineReducers } from '@reduxjs/toolkit'
 import {
   persistStore,
   persistReducer,
+  createMigrate,
   FLUSH,
   REHYDRATE,
   PAUSE,
@@ -17,7 +18,7 @@ import {
   REGISTER,
   type WebStorage,
 } from 'redux-persist'
-import studioReducer from './studioSlice'
+import studioReducer, { freshProgress } from './studioSlice'
 import { studioApi } from './studioApi'
 
 /**
@@ -43,10 +44,28 @@ const storage: WebStorage =
       }
     : noopStorage
 
+/**
+ * v2 drops the legacy `stages` blob: the board's static content (titles, notes,
+ * labels) no longer lives in state — only per-step `stageProgress` does, and the
+ * board is rebuilt from `STAGE_DEFS` in the hook. This strips the obsolete key
+ * from pre-v2 localStorage so nothing stale lingers (a sessions's progress is
+ * preserved if it already had `stageProgress`, else reset to fresh).
+ */
+const migrations = {
+  2: (state: Record<string, unknown> | undefined) => {
+    if (!state) return state
+    const next = { ...state }
+    delete next.stages // legacy: board content is static STAGE_DEFS now
+    if (!next.stageProgress) next.stageProgress = freshProgress()
+    return next
+  },
+}
+
 const persistConfig = {
   key: 'studio',
-  version: 1,
+  version: 2,
   storage,
+  migrate: createMigrate(migrations as never),
 }
 
 const rootReducer = combineReducers({

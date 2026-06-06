@@ -20,16 +20,23 @@ Replicate **WhisperX** (`align_output:true` for word timestamps). ⚠️ Needs t
 Story 02b added the **transcript editor** (a GitHub-diff-style time grid under
 the video) and **MSW dev mocks** (`MOCK_STUDIO`) so iterating never hits the
 bucket or the paid model — `/api/transcribe` returns a real captured fixture.
-**Next up: Story 03 — the AI master director** (transcript + thumbnail contact
-sheet → scenes + new script + cut info; feeds the editor's right pane).
+**Story 03 shipped the AI master director**: `/api/scenes` (live, rule
+`138f27fb`) signs each contact sheet and hands it + the timestamped transcript +
+the creator's free-text direction to **`google/gemini-3.1-pro`**, which returns a
+one-line **synopsis** plus **scenes** (tightened script, original-video span,
+parseable `cuts`). The prep page got a **Director panel** (direction input + send
+action), Build shows the synopsis + per-scene cuts, and the shortened script now
+fills the 02b diff's right pane. **Next up: Story 04 — voice clone + per-scene
+re-voice.**
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
 inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 02-wire-transcription (WhisperX; needs Replicate token)
              ✅ 02b-transcript-editor (time-grid diff view + dev mocks)
-             ▶  03 master director (scenes + script + cuts)  ← START HERE
-             ·  04 · 05 · 06 · 07              (queued)
+             ✅ 03 master director (Gemini 3.1 Pro → synopsis + scenes + cuts)
+             ▶  04 voice clone + per-scene re-voice  ← START HERE
+             ·  05 · 06 · 07                  (queued)
 ```
 
 ## Order & status
@@ -43,8 +50,8 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 01b | `01b-wire-audio-bucket.md` | ② extract + audio→bucket · stepper | ✅ done |
 | 02 | `02-wire-transcription.md` | ③ transcribe (WhisperX) | ✅ done* |
 | 02b | `02b-transcript-editor.md` | transcript time-grid editor · dev mocks | ✅ done |
-| 03 | `03-wire-shorten-segment.md` | ④⑤ master director (scenes + script + cuts) | ▶ **next up** |
-| 04 | `04-wire-voice-clone.md` | ⑥ clone + per-scene re-voice | ⏳ queued |
+| 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
+| 04 | `04-wire-voice-clone.md` | ⑥ clone + per-scene re-voice | ▶ **next up** |
 | 05 | `05-wire-ffmpeg-assemble.md` | assemble (fit footage to voice) | ⏳ queued |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |

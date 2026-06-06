@@ -9,6 +9,7 @@ import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
 import { PrepArtifacts } from '../components/Studio/PrepArtifacts'
 import { buildPrepArtifacts } from '../lib/prepArtifacts'
+import { scenesToTimedWords } from '../lib/director'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneEditor } from '../components/Studio/SceneEditor'
 import { StudioStepper } from '../components/Studio/StudioStepper'
@@ -30,6 +31,9 @@ export function Studio() {
   const [currentTime, setCurrentTime] = useState(0)
   const [rehydrating, setRehydrating] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+  // Free-text direction the user hands the master director (e.g. "keep the demo
+  // at 12:30, make the intro punchy"). Only used by the director prep step.
+  const [direction, setDirection] = useState('')
 
   const dispatch = useAppDispatch()
   const duration = useAppSelector((s) => s.studio.duration)
@@ -107,14 +111,14 @@ export function Studio() {
   // revoke once the step is done (the persisted `file`/`url` drive the preview).
   async function runStep() {
     if (file && url) {
-      pipe.next({ file, src: url, duration })
+      pipe.next({ file, src: url, duration, direction })
       return
     }
     const f = await rehydrateClip()
     if (!f) return
     const tmpUrl = URL.createObjectURL(f)
     try {
-      await pipe.next({ file: f, src: tmpUrl, duration })
+      await pipe.next({ file: f, src: tmpUrl, duration, direction })
     } finally {
       URL.revokeObjectURL(tmpUrl)
     }
@@ -136,6 +140,9 @@ export function Studio() {
   }, [])
 
   const selected = pipe.scenes.find((s) => s.id === pipe.selectedId) ?? null
+
+  // The shortened script laid back on the timeline, for the diff's right pane.
+  const editedWords = useMemo(() => scenesToTimedWords(pipe.scenes), [pipe.scenes])
 
   const artifacts = useMemo(
     () =>
@@ -223,10 +230,13 @@ export function Studio() {
                     currentStageId={pipe.currentStageId}
                     busy={pipe.running || rehydrating}
                     onAction={runStep}
+                    panelStageId="director"
                   />
                   <div>
-                    {/* Invisible spacer mirroring the menu's header row so the video
-                        top lines up with the menu's first item, not its label. */}
+                    {/* Spacer so the video top lines up with the board's first
+                        item. The master director's panel (direction + send) lives
+                        at the BOTTOM of this column — you review the ingredients
+                        first, then send the cut. */}
                     <div className="mb-3 flex items-baseline justify-between" aria-hidden="true">
                       <p className="meta-label">&nbsp;</p>
                       <p className="font-mono text-[12px]">&nbsp;</p>
@@ -253,13 +263,53 @@ export function Studio() {
                         <ContactSheetPreview sheets={pipe.contactSheets} />
                       </div>
                     )}
+                    {/* The master director's action sits at the bottom — after the
+                        ingredients — when it's the current step. */}
+                    {pipe.currentStageId === 'director' && (
+                      <div className="mt-6">
+                        <DirectorPanel
+                          value={direction}
+                          onChange={setDirection}
+                          onSubmit={runStep}
+                          busy={pipe.running || rehydrating}
+                          sheetCount={pipe.contactSheets.length}
+                          wordCount={pipe.words.length}
+                        />
+                      </div>
+                    )}
+                    {/* The director's result — synopsis + scene breakdown together,
+                        shown as soon as it lands so it's visible during the rest of
+                        prep (clone), each in its own box to match the other
+                        prep-artifact sections above. */}
+                    {pipe.scenes.length > 0 && (
+                      <div className="mt-6 flex flex-col gap-4">
+                        {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                        <div className="border rule bg-paper-deep/30 p-4">
+                          <SceneList
+                            scenes={pipe.scenes}
+                            selectedId={pipe.selectedId}
+                            onSelect={pipe.select}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
+                {/* The original vs shortened script, full-width, the moment the
+                    director produces the new script — not held back to Build. */}
+                {pipe.words.length > 0 && pipe.scenes.length > 0 && (
+                  <TranscriptDiff
+                    words={pipe.words}
+                    editedWords={editedWords}
+                    currentTime={currentTime}
+                  />
+                )}
               </div>
             ) : (
               /* Build phase: scene queue + per-scene editor, then the transcript
                  time grid (original vs the shortened script) full-width below. */
               <div className="flex flex-col gap-8">
+                {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
                 <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
                   <div className="flex flex-col gap-6">
                     <PreviewPlayer
@@ -300,7 +350,11 @@ export function Studio() {
                 </div>
 
                 {pipe.words.length > 0 && (
-                  <TranscriptDiff words={pipe.words} currentTime={currentTime} />
+                  <TranscriptDiff
+                    words={pipe.words}
+                    editedWords={editedWords}
+                    currentTime={currentTime}
+                  />
                 )}
               </div>
             )}
@@ -308,6 +362,70 @@ export function Studio() {
         )}
       </Section>
     </>
+  )
+}
+
+/**
+ * The headline prep step: hand the cut to the AI master director. Shown in the
+ * right column only when the director step is current, so the direction input
+ * and the "send" action sit together and read as the big moment (not a buried
+ * board button). The free-text direction is optional — an aside to the AI ("keep
+ * the demo at 12:30", "punchier intro") — so the button works empty too.
+ */
+function DirectorPanel({
+  value,
+  onChange,
+  onSubmit,
+  busy,
+  sheetCount,
+  wordCount,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onSubmit: () => void
+  busy?: boolean
+  sheetCount: number
+  wordCount: number
+}) {
+  return (
+    <div className="mb-6 border-l-2 border-terracotta bg-terracotta/5 p-5">
+      <p className="meta-label">Final prep step · the master director</p>
+      <h3 className="mt-1 font-serif text-[22px] leading-tight text-ink">
+        Send it to the AI director
+      </h3>
+      <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-soft">
+        Gemini reads your {wordCount.toLocaleString()}-word transcript and{' '}
+        {sheetCount} contact sheet{sheetCount === 1 ? '' : 's'} together, then returns a
+        one-line synopsis and your scenes — each with a tightened script, the
+        original-video span, and the footage to cut.
+      </p>
+
+      <label className="mt-4 flex flex-col gap-1.5">
+        <span className="meta-label">Your direction · optional</span>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={busy}
+          rows={3}
+          placeholder="e.g. Keep the live demo around 12:30. Make the intro punchy and drop the throat-clearing."
+          className="w-full resize-y rounded-md border border-paper-line bg-paper p-3 text-[14px] leading-relaxed text-ink disabled:opacity-60"
+        />
+      </label>
+
+      <button type="button" className="pill-cta mt-4" disabled={busy} onClick={onSubmit}>
+        {busy ? 'Directing…' : 'Send to the AI director →'}
+      </button>
+    </div>
+  )
+}
+
+/** The director's one-line logline of the whole talk — the "what's this about". */
+function SynopsisCard({ synopsis }: { synopsis: string }) {
+  return (
+    <div className="border-l-2 border-terracotta bg-terracotta/5 px-5 py-4">
+      <p className="meta-label">The director’s take</p>
+      <p className="mt-1.5 font-serif text-[18px] leading-snug text-ink">{synopsis}</p>
+    </div>
   )
 }
 

@@ -14,9 +14,12 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 import { presignedUpload } from '../lib/upload'
 import type { TranscriptWord } from './studioSlice'
+import type { DirectorRequest, DirectorScene } from '../lib/director'
 
 export type UploadKind = 'source' | 'audio' | 'thumbnails'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
+/** The master director's response: a logline + the raw scene breakdown. */
+type ScenesResponse = { synopsis?: string; scenes?: DirectorScene[] }
 
 export const studioApi = createApi({
   reducerPath: 'studioApi',
@@ -25,6 +28,16 @@ export const studioApi = createApi({
     transcribe: builder.mutation<TranscribeResponse, { audioUrl: string | null }>({
       query: (body) => ({
         url: 'api/transcribe',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    // The master director (story 03): timestamped transcript + contact-sheet
+    // images + the user's direction → synopsis + scenes (script, span, cuts).
+    scenes: builder.mutation<ScenesResponse, DirectorRequest>({
+      query: (body) => ({
+        url: 'api/scenes',
         method: 'POST',
         body,
       }),
@@ -48,4 +61,4 @@ export const studioApi = createApi({
   }),
 })
 
-export const { useTranscribeMutation, useUploadMutation } = studioApi
+export const { useTranscribeMutation, useScenesMutation, useUploadMutation } = studioApi

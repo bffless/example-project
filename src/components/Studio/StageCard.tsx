@@ -8,14 +8,16 @@ type Props = {
   /** A step is in flight; disable the button and show progress. */
   busy?: boolean
   onAction?: () => void
+  /** Suppress the inline action button — a richer panel elsewhere owns it. */
+  hideAction?: boolean
 }
 
 /** One "note" in the pipeline board: what we're going to do, and its status. */
-export function StageCard({ stage, index, current, busy, onAction }: Props) {
+export function StageCard({ stage, index, current, busy, onAction, hideAction }: Props) {
   const done = stage.status === 'done'
   const active = stage.status === 'active'
   const error = stage.status === 'error'
-  const showAction = current && stage.actionLabel && onAction
+  const showAction = current && stage.actionLabel && onAction && !hideAction
 
   return (
     <li

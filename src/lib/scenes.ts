@@ -12,6 +12,13 @@
 
 export type SceneStatus = 'pending' | 'built'
 
+/**
+ * A span of the scene's footage the director says to drop. Bounds are in
+ * original-video seconds and always sit inside the owning scene's `start`–`end`.
+ * The Build step applies these when it fits the footage to the narration.
+ */
+export type Cut = { start: number; end: number }
+
 export type Scene = {
   id: string
   index: number
@@ -26,6 +33,8 @@ export type Scene = {
   status: SceneStatus
   /** Length of the generated narration once voiced; null until voiced. */
   narrationSeconds: number | null
+  /** Footage spans the director marked to drop (original-video seconds). */
+  cuts?: Cut[]
   thumb?: string
 }
 

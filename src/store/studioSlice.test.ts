@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import reducer, {
-  freshStages,
+  freshProgress,
   patchStage,
   failActiveStage,
   setScenes,
@@ -29,22 +29,23 @@ const scene = (id: string, over: Partial<Scene> = {}): Scene => ({
 describe('studioSlice', () => {
   it('starts with every prep stage pending', () => {
     const s = reducer(undefined, { type: '@@init' })
-    expect(s.stages.length).toBeGreaterThan(0)
-    expect(s.stages.every((st) => st.status === 'pending')).toBe(true)
+    const ids = Object.keys(s.stageProgress)
+    expect(ids.length).toBeGreaterThan(0)
+    expect(ids.every((id) => s.stageProgress[id as keyof typeof s.stageProgress]?.status === 'pending')).toBe(true)
     expect(s.scenes).toEqual([])
     expect(s.sourceUrl).toBeNull()
   })
 
   it('patchStage merges into the matching stage only', () => {
     const s = reducer(undefined, patchStage({ id: 'upload', patch: { status: 'done', detail: 'ok' } }))
-    expect(s.stages.find((st) => st.id === 'upload')).toMatchObject({ status: 'done', detail: 'ok' })
-    expect(s.stages.find((st) => st.id === 'extract')?.status).toBe('pending')
+    expect(s.stageProgress.upload).toMatchObject({ status: 'done', detail: 'ok' })
+    expect(s.stageProgress.extract?.status).toBe('pending')
   })
 
   it('failActiveStage marks the active stage errored with the message', () => {
     let s = reducer(undefined, patchStage({ id: 'transcribe', patch: { status: 'active' } }))
     s = reducer(s, failActiveStage('boom'))
-    expect(s.stages.find((st) => st.id === 'transcribe')).toMatchObject({
+    expect(s.stageProgress.transcribe).toMatchObject({
       status: 'error',
       detail: 'boom',
     })
@@ -67,6 +68,6 @@ describe('studioSlice', () => {
     expect(s.words).toEqual([])
     expect(s.scenes).toEqual([])
     expect(s.selectedId).toBeNull()
-    expect(s.stages).toEqual(freshStages())
+    expect(s.stageProgress).toEqual(freshProgress())
   })
 })

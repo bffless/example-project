@@ -2,8 +2,22 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ⏳ queued · **Backend: BFFless `replicate`/`ai_handler` (multimodal
-LLM). The brain of the feature.**
+**Status:** ✅ done · **Backend: BFFless `replicate` → `google/gemini-3.1-pro`
+(multimodal). The brain of the feature.**
+
+> **Shipped.** `/api/scenes` is live in the `studio` rule set (rule
+> `138f27fb`): `prep` (build storage paths + the prompt + system instruction) →
+> up to 10 conditional `signed_url` steps (one per contact sheet, mirroring how
+> `/api/transcribe` signs the WAV so Replicate can fetch it) → `collect` →
+> `replicate` `google/gemini-3.1-pro` (`images`, `prompt`, `system_instruction`,
+> `thinking_level:high`) → `parse` (JSON-parse + clamp/coerce to the `Scene`
+> shape) → `respond`. Front end: `src/lib/director.ts` (pure: `timedTranscript`,
+> `toScenes`, `scenesToTimedWords` + tests), `studioApi.scenes`, the
+> `DirectorPanel` (direction input + send action) on the prep page, a synopsis
+> card + cut readout in Build, and the shortened script feeding the 02b diff's
+> right pane. MSW mock gated by `MOCK_STUDIO`. Validators deferred to story 07
+> like the upload/transcribe rules. ⚠️ `thinking_level:high` can approach the
+> 120 s rule cap on long clips — dial to `medium` if it times out.
 
 ## Goal
 
@@ -33,8 +47,9 @@ how it can decide what footage to cut, not only how to rewrite the script.
 2. `function_handler` — validate: clamp timestamps to `[0, duration]`, ensure
    ascending non-overlapping scene spans, clamp/normalize cut spans within each
    scene, coerce to the `Scene` shape from `src/lib/scenes.ts`.
-3. `response_handler` — `{ scenes: [{ title, start, end, transcript, draftText,
-   cuts: [{ start, end }] }] }`.
+3. `response_handler` — `{ synopsis, scenes: [{ title, start, end, transcript,
+   draftText, cuts: [{ start, end }] }] }`. (`synopsis` is the one-line logline
+   of the whole talk — a late addition; shown as a card in Build.)
 4. Validators: `auth_required` + `rate_limit`.
 
 ## Front-end
@@ -50,14 +65,16 @@ how it can decide what footage to cut, not only how to rewrite the script.
 
 ## Acceptance criteria
 
-- [ ] Real scenes come back with new script text, valid in-bounds ascending
+- [x] Real scenes come back with new script text, valid in-bounds ascending
       timestamps, and cut spans; they populate the queue and the chapter list.
-- [ ] The director receives the contact sheet as image input (multimodal), not
-      transcript alone.
-- [ ] Mock and real share the `Scene` shape (swap, don't rewrite the UI).
-- [ ] Timestamps + cut spans validated/clamped server-side; `auth_required` +
-      `rate_limit`.
-- [ ] build/lint/tests pass.
+- [x] The director receives the contact sheet as image input (multimodal), not
+      transcript alone (each sheet is signed and passed in `images`).
+- [x] Mock and real share the `Scene` shape (`toScenes` coerces both; swap, don't
+      rewrite the UI).
+- [x] Timestamps + cut spans validated/clamped server-side (`parse` step) **and**
+      client-side (`toScenes`). `auth_required` + `rate_limit` deferred to story
+      07 (mirrors the upload + transcribe rules) so local dev works.
+- [x] build/lint/tests pass (107 tests).
 
 ## Out of scope
 

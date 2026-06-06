@@ -8,8 +8,7 @@ describe('STAGE_DEFS', () => {
       'extract',
       'transcribe',
       'thumbnails',
-      'shorten',
-      'segment',
+      'director',
       'clone',
     ])
     for (const s of STAGE_DEFS) {
@@ -17,11 +16,19 @@ describe('STAGE_DEFS', () => {
     }
   })
 
-  it('gives the manual prep steps an action label and groups the rest', () => {
+  it('gives each prep step its own action label', () => {
     const labelled = STAGE_DEFS.filter((s) => s.actionLabel).map((s) => s.id)
-    // upload, extract+audio, transcribe, thumbnails each trigger a step; shorten
-    // owns the grouped "finish prep" action; segment + clone ride along with it.
-    expect(labelled).toEqual(['upload', 'extract', 'transcribe', 'thumbnails', 'shorten'])
+    // Every step is now a single deliberate action: upload, extract+audio,
+    // transcribe, thumbnails, the merged AI director (shorten + segment in one
+    // Gemini call), then clone.
+    expect(labelled).toEqual([
+      'upload',
+      'extract',
+      'transcribe',
+      'thumbnails',
+      'director',
+      'clone',
+    ])
   })
 })
 

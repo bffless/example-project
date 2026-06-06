@@ -13,19 +13,32 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { STAGE_DEFS, type Stage, type StageId } from '../lib/pipeline'
+import { STAGE_DEFS, type StageId, type StageStatus } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
 import type { ContactSheet } from '../lib/frames'
 
 /** A word with its time markers, as transcription returns them. */
 export type TranscriptWord = { text: string; start: number; end: number }
 
-/** Fresh prep board: every stage pending. */
-export const freshStages = (): Stage[] =>
-  STAGE_DEFS.map((s) => ({ ...s, status: 'pending' }))
+/**
+ * Per-step progress — the ONLY dynamic part of the prep board, and all we keep
+ * in state (and persist). The step *content* (title, note, where, action label)
+ * is static `STAGE_DEFS` and is recombined with this in the hook, so editing the
+ * board's shape in `STAGE_DEFS` takes effect immediately without a migration and
+ * without bloating localStorage. Keyed by `StageId`; a missing id reads pending.
+ */
+export type StageProgress = { status: StageStatus; detail?: string }
+export type StageProgressMap = Partial<Record<StageId, StageProgress>>
+
+/** Fresh prep board progress: every stage pending. */
+export const freshProgress = (): StageProgressMap => {
+  const out: StageProgressMap = {}
+  for (const s of STAGE_DEFS) out[s.id] = { status: 'pending' }
+  return out
+}
 
 export type StudioState = {
-  stages: Stage[]
+  stageProgress: StageProgressMap
   scenes: Scene[]
   /** Relative `/api/uploads/source/...` serve path once uploaded (proxies to bucket). */
   sourceUrl: string | null
@@ -35,6 +48,8 @@ export type StudioState = {
   audioPeaks: number[]
   contactSheets: ContactSheet[]
   words: TranscriptWord[]
+  /** One-line logline of the whole talk, from the master director (story 03). */
+  synopsis: string | null
   selectedId: string | null
   /** Source clip duration in seconds (from the <video> metadata). */
   duration: number
@@ -43,13 +58,14 @@ export type StudioState = {
 }
 
 const initialState: StudioState = {
-  stages: freshStages(),
+  stageProgress: freshProgress(),
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
   audioPeaks: [],
   contactSheets: [],
   words: [],
+  synopsis: null,
   selectedId: null,
   duration: 0,
   fileName: null,
@@ -59,16 +75,17 @@ const studioSlice = createSlice({
   name: 'studio',
   initialState,
   reducers: {
-    patchStage(state, action: PayloadAction<{ id: StageId; patch: Partial<Stage> }>) {
-      const stage = state.stages.find((s) => s.id === action.payload.id)
-      if (stage) Object.assign(stage, action.payload.patch)
+    patchStage(state, action: PayloadAction<{ id: StageId; patch: Partial<StageProgress> }>) {
+      const prev = state.stageProgress[action.payload.id] ?? { status: 'pending' }
+      state.stageProgress[action.payload.id] = { ...prev, ...action.payload.patch }
     },
     /** Mark whichever stage is currently `active` as errored (used on a thrown step). */
     failActiveStage(state, action: PayloadAction<string>) {
-      const stage = state.stages.find((s) => s.status === 'active')
-      if (stage) {
-        stage.status = 'error'
-        stage.detail = action.payload
+      for (const def of STAGE_DEFS) {
+        if (state.stageProgress[def.id]?.status === 'active') {
+          state.stageProgress[def.id] = { status: 'error', detail: action.payload }
+          break
+        }
       }
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
@@ -93,6 +110,9 @@ const studioSlice = createSlice({
     setWords(state, action: PayloadAction<TranscriptWord[]>) {
       state.words = action.payload
     },
+    setSynopsis(state, action: PayloadAction<string | null>) {
+      state.synopsis = action.payload
+    },
     setSelected(state, action: PayloadAction<string | null>) {
       state.selectedId = action.payload
     },
@@ -104,7 +124,7 @@ const studioSlice = createSlice({
     },
     /** Wipe everything back to a clean import — used by "Start over". */
     resetStudio() {
-      return { ...initialState, stages: freshStages() }
+      return { ...initialState, stageProgress: freshProgress() }
     },
   },
 })
@@ -119,6 +139,7 @@ export const {
   setAudioPeaks,
   setContactSheets,
   setWords,
+  setSynopsis,
   setSelected,
   setDuration,
   setFileName,
