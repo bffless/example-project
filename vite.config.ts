@@ -1,13 +1,24 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import https from 'node:https'
+
+// Force a fresh upstream connection per proxied request. The dev proxy otherwise
+// pools keep-alive sockets, but the Cloudflare-fronted upstream closes idle ones
+// at ~5s (the `Keep-Alive: timeout=5` we see on responses). Reusing a socket
+// Cloudflare just closed — far likelier under concurrent requests, e.g. the
+// parallel thumbnail registers — yields an ECONNRESET that http-proxy surfaces as
+// a 502 (empty text/plain body, no Cf-Ray) *before the request reaches the
+// origin* (hence those attempts never appear in the pipeline logs). Disabling
+// keep-alive trades a little latency for no stale-socket 502s in dev.
+const upstreamAgent = new https.Agent({ keepAlive: false })
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': { target: 'https://j5s.dev', changeOrigin: true, secure: true },
-      '/_bffless': { target: 'https://j5s.dev', changeOrigin: true, secure: true },
+      '/api': { target: 'https://j5s.dev', changeOrigin: true, secure: true, agent: upstreamAgent },
+      '/_bffless': { target: 'https://j5s.dev', changeOrigin: true, secure: true, agent: upstreamAgent },
     },
   },
   test: {

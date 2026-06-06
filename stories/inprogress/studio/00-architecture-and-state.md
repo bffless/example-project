@@ -105,9 +105,16 @@ frame; this is the finer-grained version.)
   director, `narrationSeconds`, `alignment`). The real director (story 03) replaces
   `buildScenes` and returns the same `Scene` shape — to be **extended with the cut
   info** (footage spans to drop) that the build step applies.
+- **State + persistence (story 00c)**: durable business state lives in the Redux
+  `studio` slice (`src/store/`), persisted to **localStorage** via redux-persist,
+  so a hard reload resumes mid-pipeline. `/api/*` calls go through **RTK Query**
+  (`studioApi`). Only transient UI (the in-memory `File`/object URL, `currentTime`,
+  `running`/`voicingId`) stays as React state. Mock everything via `MOCK_STUDIO`
+  in `src/mocks/handlers.ts`.
 - **Orchestration**: `src/components/Studio/useScenePipeline.ts` runs the prep
-  stages and owns the scene queue + per-scene edit/voice/build state. **Swap a
-  mocked stage for a real `/api/*` call here without touching the UI.**
+  stages and owns the scene queue + per-scene edit/voice/build state, now backed
+  by the Redux slice + RTK Query (same return shape). **Swap a mocked stage for a
+  real `/api/*` call here without touching the UI.**
 - **Final render = ffmpeg.wasm in the browser** (story 05). Multithreaded
   ffmpeg.wasm needs COOP/COEP cross-origin-isolation headers (set via a BFFless
   cache/response-header rule on `/studio`); single-threaded works without them —

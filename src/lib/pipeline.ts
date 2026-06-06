@@ -50,13 +50,18 @@ export const PHASES: { id: StudioPhase; label: string }[] = [
   { id: 'export', label: 'Export' },
 ]
 
-/** Which macro phase the producer is in, from the current pipeline state. */
+/**
+ * Which macro phase the producer is in, from the current pipeline state.
+ * `hasSource` is true when there's either an in-memory clip OR a persisted
+ * source reference from a restored session — so the stepper reflects saved
+ * progress after a hard reload, not just a freshly-attached file.
+ */
 export function studioPhase(s: {
-  hasFile: boolean
+  hasSource: boolean
   ready: boolean
   allBuilt: boolean
 }): StudioPhase {
-  if (!s.hasFile) return 'import'
+  if (!s.hasSource) return 'import'
   if (!s.ready) return 'prep'
   if (!s.allBuilt) return 'build'
   return 'export'

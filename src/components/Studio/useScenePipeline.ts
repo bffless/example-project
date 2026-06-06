@@ -1,16 +1,60 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
+import { useCallback, useMemo, useState } from 'react'
+import { type StageId } from '../../lib/pipeline'
 import { buildScenes, narrationSeconds, type Scene } from '../../lib/scenes'
 import { extractAudioWav } from '../../lib/audio'
 import { captureFramesAt, captureContactSheet, type ContactSheet } from '../../lib/frames'
-import { presignedUpload } from '../../lib/upload'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { useTranscribeMutation, useUploadMutation } from '../../store/studioApi'
+import {
+  patchStage,
+  failActiveStage,
+  setScenes,
+  patchScene as patchSceneAction,
+  setSourceUrl,
+  setAudioUrl,
+  setContactSheets,
+  setWords,
+  setSelected,
+  resetStudio,
+  type TranscriptWord,
+} from '../../store/studioSlice'
 
-const freshStages = (): Stage[] => STAGE_DEFS.map((s) => ({ ...s, status: 'pending' }))
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`
 
-/** A word with its time markers, as transcription returns them. */
-export type TranscriptWord = { text: string; start: number; end: number }
+/**
+ * Module-level in-flight guard for the prep step runner. Deliberately NOT a
+ * per-instance `useRef`: in React StrictMode (dev) the tree mounts twice, so two
+ * hook instances briefly coexist, each with its own ref — letting a step fire on
+ * both and double-hit a paid `/api/*` call (e.g. two `/api/transcribe`). A shared
+ * module flag flips synchronously before any work, so the second caller bails
+ * regardless of which instance it came from. Same singleton pattern as
+ * `useSession.ts`'s `inFlight` dedupe.
+ */
+let stepInFlight = false
+
+/**
+ * Turn whatever a failed step threw into a readable message. RTK Query's
+ * `unwrap()` rejects with a *serialized* error object (`{ status, error }` or
+ * `{ status, data }`), not an `Error` — so `String(e)` would give the useless
+ * "[object Object]". Pull the real message out of those shapes.
+ */
+function stageError(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (typeof e === 'string') return e
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>
+    if (typeof o.error === 'string') return o.error // FETCH_ERROR / our queryFn CUSTOM_ERROR
+    if (typeof o.message === 'string') return o.message
+    if (typeof o.data === 'string') return o.data
+    const data = o.data as { message?: unknown } | undefined
+    if (data && typeof data.message === 'string') return data.message
+    if ('status' in o) return `Request failed (${String(o.status)})`
+  }
+  return 'Unknown error'
+}
+
+export type { TranscriptWord }
 
 /** What each step needs: the source file, its object URL, and its duration. */
 export type StepContext = { file: File; src: string; duration: number }
@@ -18,46 +62,57 @@ export type StepContext = { file: File; src: string; duration: number }
 /**
  * Owns the one-time prep pipeline and the scene queue you build afterwards.
  *
- * Prep now runs **step by step** — the user triggers each step deliberately via
- * `next(ctx)`, which advances `currentStageId`. The real steps (upload, extract
- * + audio upload, transcribe via the real `/api/transcribe` WhisperX pipeline)
- * do real work; shorten/segment/clone are still mocked and grouped behind a
- * single "Finish prep" action. Swap a mocked step for its real `/api/*` call
- * here without touching the UI.
+ * Business state (stages, scenes, transcript, bucket serve URLs, contact sheets,
+ * selection) lives in the persisted Redux `studio` slice, so a hard reload
+ * resumes where you left off. Only transient UI flags (`running`, `voicingId`)
+ * are local React state — losing those on reload is fine. Network calls go
+ * through RTK Query (`/store/studioApi`).
+ *
+ * Prep runs **step by step** — the user triggers each step deliberately via
+ * `next(ctx)`, which advances `currentStageId`. Swap a mocked step for its real
+ * `/api/*` call here without touching the UI.
  */
 export function useScenePipeline() {
-  const [stages, setStages] = useState<Stage[]>(freshStages)
-  const [scenes, setScenes] = useState<Scene[]>([])
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [contactSheets, setContactSheets] = useState<ContactSheet[]>([])
-  const [words, setWords] = useState<TranscriptWord[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const dispatch = useAppDispatch()
+  const stages = useAppSelector((s) => s.studio.stages)
+  const scenes = useAppSelector((s) => s.studio.scenes)
+  const sourceUrl = useAppSelector((s) => s.studio.sourceUrl)
+  const audioUrl = useAppSelector((s) => s.studio.audioUrl)
+  const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
+  const words = useAppSelector((s) => s.studio.words)
+  const selectedId = useAppSelector((s) => s.studio.selectedId)
+
+  const [transcribeReq] = useTranscribeMutation()
+  const [uploadReq] = useUploadMutation()
+
+  // Transient UI state — not persisted.
   const [voicingId, setVoicingId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
-  // Synchronous in-flight guard. `running` (state) updates on the next render,
-  // so two fast clicks both read it as false and double-fire the step (e.g. two
-  // paid /api/transcribe calls). The ref flips immediately, so the second call
-  // bails before any work — the button's `disabled` is just the visual half.
-  const runningRef = useRef(false)
+  // The just-captured contact sheets, shown immediately while they upload. They
+  // carry the heavy base64 `dataUrl`, so they live here (transient) and NEVER in
+  // Redux/localStorage — only the uploaded sheets (bucket URL, empty dataUrl) are
+  // committed to the persisted slice.
+  const [pendingSheets, setPendingSheets] = useState<ContactSheet[]>([])
 
-  const patch = useCallback((id: StageId, p: Partial<Stage>) => {
-    setStages((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)))
-  }, [])
+  // Once uploaded, the persisted bucket-URL sheets win; until then show the
+  // local previews. Never both — the upload swap clears the pending set.
+  const contactSheets = persistedSheets.length ? persistedSheets : pendingSheets
 
-  const patchScene = useCallback((id: string, p: Partial<Scene>) => {
-    setScenes((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)))
-  }, [])
+  const patch = useCallback(
+    (id: StageId, p: Parameters<typeof patchStage>[0]['patch']) =>
+      dispatch(patchStage({ id, patch: p })),
+    [dispatch],
+  )
+
+  const patchScene = useCallback(
+    (id: string, p: Partial<Scene>) => dispatch(patchSceneAction({ id, patch: p })),
+    [dispatch],
+  )
 
   const reset = useCallback(() => {
-    setStages(freshStages())
-    setScenes([])
-    setSourceUrl(null)
-    setAudioUrl(null)
-    setContactSheets([])
-    setWords([])
-    setSelectedId(null)
-  }, [])
+    setPendingSheets([])
+    dispatch(resetStudio())
+  }, [dispatch])
 
   // The next prep step to run: the first stage that isn't done. Null once ready.
   const currentStageId = useMemo<StageId | null>(
@@ -72,11 +127,11 @@ export function useScenePipeline() {
   const uploadClip = useCallback(
     async ({ file }: StepContext) => {
       patch('upload', { status: 'active' })
-      const url = await presignedUpload(file, '/api/uploads/source')
-      setSourceUrl(url)
+      const { url } = await uploadReq({ file, kind: 'source' }).unwrap()
+      dispatch(setSourceUrl(url))
       patch('upload', { status: 'done', detail: `${mb(file.size)} → storage bucket` })
     },
-    [patch],
+    [patch, dispatch, uploadReq],
   )
 
   // Stage ② — extract the audio in-browser, then upload that WAV to the bucket
@@ -88,14 +143,14 @@ export function useScenePipeline() {
       const wavFile = new File([wav], `${file.name.replace(/\.[^.]+$/, '')}.wav`, {
         type: 'audio/wav',
       })
-      const url = await presignedUpload(wavFile, '/api/uploads/audio')
-      setAudioUrl(url)
+      const { url } = await uploadReq({ file: wavFile, kind: 'audio' }).unwrap()
+      dispatch(setAudioUrl(url))
       patch('extract', {
         status: 'done',
         detail: `16 kHz mono WAV · ${mb(wav.size)} → bucket`,
       })
     },
-    [patch],
+    [patch, dispatch, uploadReq],
   )
 
   // Stage ③ — transcribe the uploaded audio. POSTs the bucketed `audioUrl` to
@@ -105,23 +160,16 @@ export function useScenePipeline() {
   const transcribe = useCallback(
     async ({ duration }: StepContext) => {
       patch('transcribe', { status: 'active' })
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl }),
-      })
-      if (!res.ok) throw new Error(`Transcribe failed (${res.status})`)
-      const data = (await res.json()) as { words?: TranscriptWord[]; text?: string }
+      const data = await transcribeReq({ audioUrl }).unwrap()
       const got = data.words ?? []
-      setWords(got)
+      dispatch(setWords(got))
       const count = got.length || Math.round((duration / 60) * 150)
       patch('transcribe', {
         status: 'done',
         detail: `${count.toLocaleString()} words · ${Math.ceil(duration / 60)} min`,
       })
     },
-    [patch, audioUrl],
+    [patch, dispatch, transcribeReq, audioUrl],
   )
 
   // Stage ④ — sample interval thumbnails across the whole clip, compose them into
@@ -133,21 +181,29 @@ export function useScenePipeline() {
     async ({ src, duration }: StepContext) => {
       patch('thumbnails', { status: 'active' })
       const sheets = await captureContactSheet(src, duration) // real, tiled ≤10
-      setContactSheets(sheets) // show the blobs immediately, before the upload
-      const uploaded = await Promise.all(
-        sheets.map(async (sheet) => {
-          const blob = await (await fetch(sheet.dataUrl)).blob()
-          const ext = blob.type === 'image/png' ? 'png' : 'jpg'
-          const name = `contact-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
-          const file = new File([blob], name, { type: blob.type })
-          const url = await presignedUpload(file, '/api/uploads/thumbnails')
-          // The bucket URL is now the canonical state — drop the base64 blob so
-          // what we hold (and could later persist, e.g. to localStorage) is just
-          // a small URL, and the preview loads through the serve route.
-          return { ...sheet, url, dataUrl: '' }
-        }),
-      )
-      setContactSheets(uploaded)
+      // Show the freshly-captured blobs immediately, but keep them out of Redux
+      // (and therefore out of localStorage) — they're base64-heavy. If the upload
+      // below throws, these stay visible while the stage shows the error.
+      setPendingSheets(sheets)
+      // Upload sheets one at a time, not in parallel: concurrent registers were
+      // racing the dev proxy's keep-alive socket pool into ECONNRESET 502s (see
+      // the proxy `agent` note in vite.config.ts). Sequential is plenty fast for
+      // the handful of sheets and keeps a single in-flight request to the edge.
+      const uploaded: ContactSheet[] = []
+      for (const sheet of sheets) {
+        const blob = await (await fetch(sheet.dataUrl)).blob()
+        const ext = blob.type === 'image/png' ? 'png' : 'jpg'
+        const name = `contact-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
+        const file = new File([blob], name, { type: blob.type })
+        const { url } = await uploadReq({ file, kind: 'thumbnails' }).unwrap()
+        // The bucket URL is now the canonical state — drop the base64 blob so what
+        // we persist is just a small URL, and the preview loads through the serve
+        // route (the reverse-proxy-to-bucket path).
+        uploaded.push({ ...sheet, url, dataUrl: '' })
+      }
+      // Only the uploaded, URL-only sheets are committed to the persisted slice.
+      dispatch(setContactSheets(uploaded))
+      setPendingSheets([])
       const frames = uploaded.reduce((n, s) => n + s.count, 0)
       patch('thumbnails', {
         status: 'done',
@@ -156,7 +212,7 @@ export function useScenePipeline() {
           : 'no frames sampled',
       })
     },
-    [patch],
+    [patch, dispatch, uploadReq],
   )
 
   // Stages ⑤⑥⑦ — shorten + segment + clone, still mocked, run together. Segment
@@ -180,8 +236,8 @@ export function useScenePipeline() {
         64,
       ) // real
       const withThumbs = built.map((s, i) => ({ ...s, thumb: thumbs[i] }))
-      setScenes(withThumbs)
-      setSelectedId(withThumbs[0]?.id ?? null)
+      dispatch(setScenes(withThumbs))
+      dispatch(setSelected(withThumbs[0]?.id ?? null))
       patch('segment', {
         status: 'done',
         detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · text + timestamps`,
@@ -191,15 +247,15 @@ export function useScenePipeline() {
       await delay(900)
       patch('clone', { status: 'done', detail: 'voice model ready' })
     },
-    [patch, words],
+    [patch, dispatch, words],
   )
 
   /** Run the current prep step. Marks the active stage `error` if it throws. */
   const next = useCallback(
     async (ctx: StepContext) => {
       const id = currentStageId
-      if (!id || runningRef.current) return
-      runningRef.current = true
+      if (!id || stepInFlight) return
+      stepInFlight = true
       setRunning(true)
       try {
         if (id === 'upload') await uploadClip(ctx)
@@ -208,20 +264,15 @@ export function useScenePipeline() {
         else if (id === 'thumbnails') await generateThumbnails(ctx)
         else await finishPrep(ctx) // shorten/segment/clone grouped
       } catch (e) {
-        setStages((prev) =>
-          prev.map((s) =>
-            s.status === 'active'
-              ? { ...s, status: 'error', detail: e instanceof Error ? e.message : String(e) }
-              : s,
-          ),
-        )
+        dispatch(failActiveStage(stageError(e)))
       } finally {
-        runningRef.current = false
+        stepInFlight = false
         setRunning(false)
       }
     },
     [
       currentStageId,
+      dispatch,
       uploadClip,
       extractAndUploadAudio,
       transcribe,
@@ -230,7 +281,7 @@ export function useScenePipeline() {
     ],
   )
 
-  // ---- Scene build loop (unchanged) ----------------------------------------
+  // ---- Scene build loop -----------------------------------------------------
 
   const updateDraft = useCallback(
     (id: string, draftText: string) => {
@@ -246,24 +297,26 @@ export function useScenePipeline() {
     async (id: string) => {
       setVoicingId(id)
       await delay(800)
-      setScenes((prev) =>
-        prev.map((s) =>
-          s.id === id ? { ...s, narrationSeconds: narrationSeconds(s.draftText) } : s,
-        ),
-      )
+      const scene = scenes.find((s) => s.id === id)
+      if (scene) patchScene(id, { narrationSeconds: narrationSeconds(scene.draftText) })
       setVoicingId(null)
     },
-    [],
+    [scenes, patchScene],
   )
 
-  const markBuilt = useCallback((id: string) => {
-    setScenes((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, status: 'built' as const } : s))
+  const markBuilt = useCallback(
+    (id: string) => {
+      const next = scenes.map((s) =>
+        s.id === id ? { ...s, status: 'built' as const } : s,
+      )
+      dispatch(setScenes(next))
       const stillPending = next.find((s) => s.status === 'pending')
-      if (stillPending) setSelectedId(stillPending.id)
-      return next
-    })
-  }, [])
+      if (stillPending) dispatch(setSelected(stillPending.id))
+    },
+    [scenes, dispatch],
+  )
+
+  const select = useCallback((id: string | null) => dispatch(setSelected(id)), [dispatch])
 
   const allBuilt = useMemo(
     () => scenes.length > 0 && scenes.every((s) => s.status === 'built'),
@@ -286,7 +339,7 @@ export function useScenePipeline() {
     currentStageId,
     next,
     reset,
-    select: setSelectedId,
+    select,
     updateDraft,
     generateVoice,
     markBuilt,

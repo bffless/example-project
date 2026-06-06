@@ -8,10 +8,24 @@ import { TRANSCRIBE_FIXTURE } from './transcribeFixture'
  * to `false` to exercise the live pipelines (`/api/*` then bypasses to the Vite
  * proxy). Only active in dev — MSW isn't started in prod (see `main.tsx`).
  */
-const MOCK_STUDIO = true
+const MOCK_STUDIO = false
 
 /** A fake bucket host for the presigned PUT — intercepted below so no bytes leave. */
 const MOCK_BUCKET = 'https://mock-bucket.studio.local'
+
+/**
+ * Bytes "uploaded" this session, so the serve route can hand them back the way
+ * the real `file_serve` pipeline serves from the bucket — without this, the
+ * `<img>`/`<video>` GETs to `/api/uploads/...` fall through to the live proxy and
+ * 404 (the broken contact sheets + "Failed to fetch" SW errors). Only small
+ * objects (contact sheets) are kept; the source video/audio are skipped to avoid
+ * holding hundreds of MB in the worker. The Map lives in the service worker, so a
+ * hard reload clears it — served objects 404 afterward and the UI re-attaches.
+ */
+const objectStore = new Map<string, { body: ArrayBuffer; type: string }>()
+const MOCK_SERVE_MAX = 25_000_000
+const lastSegment = (url: string) =>
+  decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() ?? '')
 
 const studioHandlers = [
   // Presigned prepare (source + audio): hand back a fake bucket PUT URL (which we
@@ -26,8 +40,18 @@ const studioHandlers = [
     })
   }),
 
-  // The browser PUTs the bytes straight to the "bucket" — swallow it (200, no-op).
-  http.put(`${MOCK_BUCKET}/*`, () => new HttpResponse(null, { status: 200 })),
+  // The browser PUTs the bytes straight to the "bucket". Keep small objects so the
+  // serve route below can return them; skip large ones (source video/audio).
+  http.put(`${MOCK_BUCKET}/*`, async ({ request }) => {
+    const body = await request.arrayBuffer()
+    if (body.byteLength <= MOCK_SERVE_MAX) {
+      objectStore.set(lastSegment(request.url), {
+        body,
+        type: request.headers.get('content-type') ?? 'application/octet-stream',
+      })
+    }
+    return new HttpResponse(null, { status: 200 })
+  }),
 
   // Register (source + audio): return the flat `{ url }` the FE reads as the
   // stored object URL. Mirrors the real serve path so it looks/behaves the same.
@@ -37,6 +61,14 @@ const studioHandlers = [
     return HttpResponse.json({
       url: `/api/uploads/${params.kind}/mock/${encodeURIComponent(name)}`,
     })
+  }),
+
+  // Serve an uploaded object back (mirrors the real `file_serve` route). Returns
+  // the stored bytes, or 404 if they weren't kept / the worker restarted.
+  http.get('/api/uploads/:kind/*', ({ request }) => {
+    const obj = objectStore.get(lastSegment(request.url))
+    if (!obj) return new HttpResponse(null, { status: 404 })
+    return new HttpResponse(obj.body, { status: 200, headers: { 'Content-Type': obj.type } })
   }),
 
   // Transcription: return the real captured WhisperX response (82 words with

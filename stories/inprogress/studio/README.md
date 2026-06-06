@@ -38,6 +38,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 |---|-------|----------------|--------|
 | — | `../../done/00-scene-producer-prototype.md` | board + scene UX | ✅ done |
 | — | `00-architecture-and-state.md` | — | reference (read first) |
+| 00c | `00c-redux-state-persistence.md` | Redux + localStorage persist · RTK Query · mocks on | ✅ done (infra) |
 | 01 | `01-wire-upload-bucket.md` | ① bucket upload | ✅ done |
 | 01b | `01b-wire-audio-bucket.md` | ② extract + audio→bucket · stepper | ✅ done |
 | 02 | `02-wire-transcription.md` | ③ transcribe (WhisperX) | ✅ done* |

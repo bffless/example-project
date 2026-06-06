@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAppDispatch, useAppSelector } from '../store/hooks'
+import { setDuration, setFileName } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -17,9 +19,19 @@ import { studioPhase } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
 
 export function Studio() {
+  // The in-memory clip is transient — never persisted. After a hard reload it's
+  // gone, but the persisted serve reference (`pipe.sourceUrl`) and all pipeline
+  // state come back. When a remaining browser step needs the raw bytes we pull
+  // the clip back from the bucket automatically (no re-attach prompt); the banner
+  // only appears as a fallback if that fetch fails.
   const [file, setFile] = useState<File | null>(null)
-  const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
+  const [rehydrating, setRehydrating] = useState(false)
+  const [restoreError, setRestoreError] = useState<string | null>(null)
+
+  const dispatch = useAppDispatch()
+  const duration = useAppSelector((s) => s.studio.duration)
+  const fileName = useAppSelector((s) => s.studio.fileName)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
@@ -31,13 +43,79 @@ export function Studio() {
     }
   }, [url])
 
-  const onLoaded = useCallback((d: number) => setDuration(d), [])
+  // True once there's anything to work with — a freshly-attached clip OR a
+  // restored session's persisted source/scenes. Drives the import-vs-workspace
+  // split and the top-level stepper so progress survives a reload.
+  const hasPersisted = !!pipe.sourceUrl || pipe.scenes.length > 0
+  const hasSource = !!file || hasPersisted
+  // What the <video> plays: the local object URL when present, else the persisted
+  // serve path (proxies to the bucket). Null only before anything is loaded.
+  const previewSrc = url ?? pipe.sourceUrl
+
+  const onLoaded = useCallback((d: number) => dispatch(setDuration(d)), [dispatch])
 
   function selectFile(f: File) {
+    // Re-attaching the same clip to a restored session resumes it untouched;
+    // any other pick starts a fresh session.
+    const resuming = hasPersisted && f.name === fileName
+    setRestoreError(null)
     setFile(f)
-    setDuration(0)
+    setCurrentTime(0)
+    if (!resuming) {
+      pipe.reset()
+      dispatch(setFileName(f.name))
+      dispatch(setDuration(0))
+    }
+  }
+
+  function startOver() {
+    setFile(null)
+    setRestoreError(null)
     setCurrentTime(0)
     pipe.reset()
+  }
+
+  /**
+   * Pull the source clip back from the bucket into a `File` so the browser steps
+   * (extract audio, capture frames) can run after a reload — the raw bytes live
+   * only in memory and don't survive refresh, but the serve URL does. Returns the
+   * reconstructed File, or null on failure (caller falls back to the prompt).
+   */
+  async function rehydrateClip(): Promise<File | null> {
+    if (!pipe.sourceUrl) return null
+    setRehydrating(true)
+    setRestoreError(null)
+    try {
+      const res = await fetch(pipe.sourceUrl, { credentials: 'include' })
+      if (!res.ok) throw new Error(`Couldn't load the saved clip (${res.status})`)
+      const blob = await res.blob()
+      const f = new File([blob], fileName ?? 'clip', { type: blob.type || 'video/mp4' })
+      setFile(f)
+      return f
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : String(e))
+      return null
+    } finally {
+      setRehydrating(false)
+    }
+  }
+
+  // Run the current prep step. If the clip isn't in memory (restored session),
+  // fetch it back from the bucket first, then run with a temporary object URL we
+  // revoke once the step is done (the persisted `file`/`url` drive the preview).
+  async function runStep() {
+    if (file && url) {
+      pipe.next({ file, src: url, duration })
+      return
+    }
+    const f = await rehydrateClip()
+    if (!f) return
+    const tmpUrl = URL.createObjectURL(f)
+    try {
+      await pipe.next({ file: f, src: tmpUrl, duration })
+    } finally {
+      URL.revokeObjectURL(tmpUrl)
+    }
   }
 
   // Play just the selected scene: seek to its start and pause at its end.
@@ -71,7 +149,7 @@ export function Studio() {
   )
 
   const phase = studioPhase({
-    hasFile: !!file,
+    hasSource,
     ready: pipe.ready,
     allBuilt: pipe.allBuilt,
   })
@@ -90,10 +168,10 @@ export function Studio() {
 
       <Section
         eyebrow="— Producer"
-        title={file ? <>Prep, then build scene by scene<Dot /></> : <>Load one clip to begin<Dot /></>}
+        title={hasSource ? <>Prep, then build scene by scene<Dot /></> : <>Load one clip to begin<Dot /></>}
         divider={false}
       >
-        {!file || !url ? (
+        {!hasSource || !previewSrc ? (
           <div className="flex flex-col gap-8">
             <StudioStepper phase={phase} />
             <MediaImport onSelect={selectFile} />
@@ -102,20 +180,30 @@ export function Studio() {
           <div className="flex flex-col gap-8">
             <StudioStepper phase={phase} />
 
+            {restoreError && (
+              <RestoreBanner
+                fileName={fileName}
+                error={restoreError}
+                onReattach={selectFile}
+              />
+            )}
+
             {/* Control bar */}
             <div className="flex flex-wrap items-center justify-between gap-4 border rule bg-paper-deep/30 px-5 py-4">
               <p className="text-[14px] text-ink-soft">
                 {pipe.ready
                   ? `Prep complete · ${pipe.scenes.length} scenes`
-                  : pipe.running
-                    ? 'Working…'
-                    : 'Run each prep step below, in order.'}
+                  : rehydrating
+                    ? 'Restoring your clip…'
+                    : pipe.running
+                      ? 'Working…'
+                      : 'Run each prep step below, in order.'}
               </p>
               <button
                 type="button"
                 className="pill-ghost"
-                disabled={pipe.running}
-                onClick={() => setFile(null)}
+                disabled={pipe.running || rehydrating}
+                onClick={startOver}
               >
                 Start over
               </button>
@@ -131,8 +219,8 @@ export function Studio() {
                   <PipelineBoard
                     stages={pipe.stages}
                     currentStageId={pipe.currentStageId}
-                    busy={pipe.running}
-                    onAction={() => pipe.next({ file, src: url, duration })}
+                    busy={pipe.running || rehydrating}
+                    onAction={runStep}
                   />
                   <div>
                     {/* Invisible spacer mirroring the menu's header row so the video
@@ -142,7 +230,7 @@ export function Studio() {
                       <p className="font-mono text-[12px]">&nbsp;</p>
                     </div>
                     <PreviewPlayer
-                      src={url}
+                      src={previewSrc}
                       videoRef={videoRef}
                       cuts={[]}
                       onTime={setCurrentTime}
@@ -165,7 +253,7 @@ export function Studio() {
               <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
                 <div className="flex flex-col gap-6">
                   <PreviewPlayer
-                    src={url}
+                    src={previewSrc}
                     videoRef={videoRef}
                     cuts={[]}
                     onTime={() => {}}
@@ -223,6 +311,46 @@ function FinalCut({ scenes }: { scenes: Scene[] }) {
       <button type="button" className="pill-cta mt-4" disabled>
         Assemble &amp; export with ffmpeg — next phase
       </button>
+    </div>
+  )
+}
+
+/**
+ * Fallback shown only when auto-restoring the source clip from the bucket failed
+ * (e.g. the serve fetch errored). Pipeline progress and data are intact; the
+ * browser steps just need the clip's bytes, so we let the user re-pick the same
+ * file from disk. Re-picking the matching clip resumes without resetting anything.
+ */
+function RestoreBanner({
+  fileName,
+  error,
+  onReattach,
+}: {
+  fileName: string | null
+  error: string
+  onReattach: (file: File) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border border-terracotta/40 bg-terracotta/5 px-5 py-4">
+      <p className="text-[14px] text-ink-soft">
+        Couldn’t restore the clip from the bucket ({error}). Re-attach{' '}
+        {fileName ? <span className="font-mono text-ink">{fileName}</span> : 'the clip'} to continue —
+        your progress is saved.
+      </p>
+      <button type="button" className="pill-ghost" onClick={() => inputRef.current?.click()}>
+        Re-attach clip
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onReattach(f)
+        }}
+      />
     </div>
   )
 }

@@ -27,9 +27,9 @@ describe('STAGE_DEFS', () => {
 
 describe('studioPhase', () => {
   it('walks import → prep → build → export from state', () => {
-    expect(studioPhase({ hasFile: false, ready: false, allBuilt: false })).toBe('import')
-    expect(studioPhase({ hasFile: true, ready: false, allBuilt: false })).toBe('prep')
-    expect(studioPhase({ hasFile: true, ready: true, allBuilt: false })).toBe('build')
-    expect(studioPhase({ hasFile: true, ready: true, allBuilt: true })).toBe('export')
+    expect(studioPhase({ hasSource: false, ready: false, allBuilt: false })).toBe('import')
+    expect(studioPhase({ hasSource: true, ready: false, allBuilt: false })).toBe('prep')
+    expect(studioPhase({ hasSource: true, ready: true, allBuilt: false })).toBe('build')
+    expect(studioPhase({ hasSource: true, ready: true, allBuilt: true })).toBe('export')
   })
 })
