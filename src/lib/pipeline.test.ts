@@ -7,6 +7,7 @@ describe('STAGE_DEFS', () => {
       'upload',
       'extract',
       'transcribe',
+      'thumbnails',
       'shorten',
       'segment',
       'clone',
@@ -18,9 +19,9 @@ describe('STAGE_DEFS', () => {
 
   it('gives the manual prep steps an action label and groups the rest', () => {
     const labelled = STAGE_DEFS.filter((s) => s.actionLabel).map((s) => s.id)
-    // upload, extract+audio, transcribe each trigger a step; shorten owns the
-    // grouped "finish prep" action; segment + clone ride along with it.
-    expect(labelled).toEqual(['upload', 'extract', 'transcribe', 'shorten'])
+    // upload, extract+audio, transcribe, thumbnails each trigger a step; shorten
+    // owns the grouped "finish prep" action; segment + clone ride along with it.
+    expect(labelled).toEqual(['upload', 'extract', 'transcribe', 'thumbnails', 'shorten'])
   })
 })
 

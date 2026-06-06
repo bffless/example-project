@@ -4,6 +4,7 @@ import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
+import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneEditor } from '../components/Studio/SceneEditor'
 import { StudioStepper } from '../components/Studio/StudioStepper'
@@ -131,6 +132,11 @@ export function Studio() {
                       onTime={setCurrentTime}
                       onLoaded={onLoaded}
                     />
+                    {pipe.contactSheets.length > 0 && (
+                      <div className="mt-6">
+                        <ContactSheetPreview sheets={pipe.contactSheets} />
+                      </div>
+                    )}
                   </div>
                 </div>
 

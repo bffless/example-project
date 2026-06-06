@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
 import { buildScenes, narrationSeconds, type Scene } from '../../lib/scenes'
 import { extractAudioWav } from '../../lib/audio'
-import { captureFramesAt } from '../../lib/frames'
+import { captureFramesAt, captureContactSheet, type ContactSheet } from '../../lib/frames'
 import { presignedUpload } from '../../lib/upload'
 
 const freshStages = (): Stage[] => STAGE_DEFS.map((s) => ({ ...s, status: 'pending' }))
@@ -30,6 +30,7 @@ export function useScenePipeline() {
   const [scenes, setScenes] = useState<Scene[]>([])
   const [sourceUrl, setSourceUrl] = useState<string | null>(null)
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [contactSheets, setContactSheets] = useState<ContactSheet[]>([])
   const [words, setWords] = useState<TranscriptWord[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [voicingId, setVoicingId] = useState<string | null>(null)
@@ -53,6 +54,7 @@ export function useScenePipeline() {
     setScenes([])
     setSourceUrl(null)
     setAudioUrl(null)
+    setContactSheets([])
     setWords([])
     setSelectedId(null)
   }, [])
@@ -122,8 +124,29 @@ export function useScenePipeline() {
     [patch, audioUrl],
   )
 
-  // Stages ④⑤⑥ — shorten + segment + clone, still mocked, run together. Segment
-  // captures real thumbnails. Replace each with its real `/api/*` call later.
+  // Stage ④ — sample interval thumbnails across the whole clip and compose them
+  // into one timestamped contact sheet (real, browser-side). This is the visual
+  // context the master director (story 03) reads alongside the transcript; for
+  // now we generate it and show it so we can see what the AI will get.
+  const generateThumbnails = useCallback(
+    async ({ src, duration }: StepContext) => {
+      patch('thumbnails', { status: 'active' })
+      const sheets = await captureContactSheet(src, duration) // real, tiled ≤10
+      setContactSheets(sheets)
+      const frames = sheets.reduce((n, s) => n + s.count, 0)
+      const interval = sheets[0]?.interval ?? 0
+      patch('thumbnails', {
+        status: 'done',
+        detail: frames
+          ? `${frames} frames · ${sheets.length} sheet${sheets.length === 1 ? '' : 's'} · ~${Math.round(interval)}s apart`
+          : 'no frames sampled',
+      })
+    },
+    [patch],
+  )
+
+  // Stages ⑤⑥⑦ — shorten + segment + clone, still mocked, run together. Segment
+  // captures per-scene thumbnails. Replace each with its real `/api/*` call later.
   const finishPrep = useCallback(
     async ({ src, duration }: StepContext) => {
       patch('shorten', { status: 'active' })
@@ -168,6 +191,7 @@ export function useScenePipeline() {
         if (id === 'upload') await uploadClip(ctx)
         else if (id === 'extract') await extractAndUploadAudio(ctx)
         else if (id === 'transcribe') await transcribe(ctx)
+        else if (id === 'thumbnails') await generateThumbnails(ctx)
         else await finishPrep(ctx) // shorten/segment/clone grouped
       } catch (e) {
         setStages((prev) =>
@@ -182,7 +206,14 @@ export function useScenePipeline() {
         setRunning(false)
       }
     },
-    [currentStageId, uploadClip, extractAndUploadAudio, transcribe, finishPrep],
+    [
+      currentStageId,
+      uploadClip,
+      extractAndUploadAudio,
+      transcribe,
+      generateThumbnails,
+      finishPrep,
+    ],
   )
 
   // ---- Scene build loop (unchanged) ----------------------------------------
@@ -231,6 +262,7 @@ export function useScenePipeline() {
     scenes,
     sourceUrl,
     audioUrl,
+    contactSheets,
     words,
     selectedId,
     voicingId,

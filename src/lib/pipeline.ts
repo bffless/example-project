@@ -12,6 +12,7 @@ export type StageId =
   | 'upload'
   | 'extract'
   | 'transcribe'
+  | 'thumbnails'
   | 'shorten'
   | 'segment'
   | 'clone'
@@ -82,6 +83,13 @@ export const STAGE_DEFS: StageDef[] = [
     note: 'Send the uploaded audio to a Replicate speech-to-text model; get the words back with time markers.',
     where: 'pipeline',
     actionLabel: 'Transcribe audio',
+  },
+  {
+    id: 'thumbnails',
+    title: 'Sample thumbnails for the director',
+    note: 'Grab frames across the whole clip on an interval that scales with its length, and compose them into one contact sheet with a timestamp burned on each — the visual context the AI director reads alongside the transcript.',
+    where: 'browser',
+    actionLabel: 'Generate thumbnails',
   },
   {
     id: 'shorten',

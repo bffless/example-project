@@ -1,0 +1,61 @@
+import type { ContactSheet } from '../../lib/frames'
+import { clockLabel } from '../../lib/contactSheet'
+
+const fmtBytes = (b: number) =>
+  b >= 1_000_000 ? `${(b / 1_048_576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`
+
+/**
+ * The director's contact sheets, shown under the video during prep. The director
+ * (Gemini 3.1 Pro) takes up to 10 images, so a long clip is tiled across several
+ * sheets — we show **every** one, since this is exactly what the model receives;
+ * the list scrolls so it never takes over the page.
+ */
+export function ContactSheetPreview({ sheets }: { sheets: ContactSheet[] }) {
+  if (sheets.length === 0) return null
+
+  const frames = sheets.reduce((n, s) => n + s.count, 0)
+  const interval = Math.round(sheets[0]?.interval ?? 0)
+
+  return (
+    <div className="border rule bg-paper-deep/30 p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <p className="meta-label">Director contact sheets</p>
+        <p className="font-mono text-[12px] text-ink-mute">
+          {sheets.length} {sheets.length === 1 ? 'image' : 'images'} · {frames} frames · ~{interval}s
+          apart
+        </p>
+      </div>
+
+      {/* Every sheet, bounded + scrollable — this is what the model is sent. */}
+      <div className="flex max-h-[28rem] flex-col gap-4 overflow-y-auto pr-1">
+        {sheets.map((sheet) => {
+          const first = sheet.times[0] ?? 0
+          const last = sheet.times[sheet.times.length - 1] ?? first
+          return (
+            <figure key={sheet.index} className="flex flex-col gap-1">
+              <figcaption className="flex items-baseline justify-between font-mono text-[11px] text-ink-mute">
+                <span>
+                  Sheet {sheet.index + 1}/{sheet.total} · {clockLabel(first)}–{clockLabel(last)}
+                </span>
+                <span>
+                  {sheet.count} frames · {fmtBytes(sheet.bytes)}
+                </span>
+              </figcaption>
+              <img
+                src={sheet.dataUrl}
+                alt={`Frames ${clockLabel(first)} to ${clockLabel(last)} with burned-in timestamps`}
+                className="w-full rounded border border-paper-line"
+                draggable={false}
+              />
+            </figure>
+          )
+        })}
+      </div>
+
+      <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+        Visual context for the AI director — handed alongside the transcript so it can decide what
+        footage to cut, not just rewrite the words.
+      </p>
+    </div>
+  )
+}
