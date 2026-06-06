@@ -4,6 +4,11 @@
 
 **Status:** ⏳ queued · **Backend: BFFless `replicate` (voice clone + TTS).**
 
+> **Note (Build direction).** The per-scene voice flow here is right: the voice
+> **isn't pre-baked** — Build creates it from the new script and **re-voices when
+> you edit the text**. One tweak: alignment is narration length vs the **cut**
+> video span (the director's cut info from story 03), not the raw footage span.
+
 ## Goal
 
 Replace two mocks: (⑥) build a reusable **voice model** from the user's audio,

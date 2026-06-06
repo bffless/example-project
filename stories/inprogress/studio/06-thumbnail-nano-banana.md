@@ -5,13 +5,18 @@
 **Status:** ⏳ queued · **Backend: BFFless `replicate` (`google/nano-banana`).**
 Self-contained side feature; can ship independently of the pipeline stories.
 
+> **Not the director thumbnails.** This is the **final YouTube thumbnail image**,
+> an AI **output** we get **back** when everything's done — totally separate from
+> the interval contact sheet we **give** the master director as input (story 03 /
+> `00` "Two kinds of thumbnails"). Don't conflate the two.
+
 ## Goal
 
-Generate the video thumbnail in Studio, replacing the manual flow (a skill
-writes a prompt → paste into nano-banana by hand). Pick a scene's frame (we
-already capture one per scene), optionally add topic/notes, the pipeline drafts
-the image prompt and calls **`google/nano-banana`** on Replicate, and renders
-the result inline with regenerate/variations.
+Generate the **final YouTube thumbnail** in Studio, replacing the manual flow (a
+skill writes a prompt → paste into nano-banana by hand). Pick a reference frame
+(the current `videoRef` frame or a scene frame), optionally add topic/notes, the
+pipeline drafts the image prompt and calls **`google/nano-banana`** on Replicate,
+and renders the result inline with regenerate/variations.
 
 ## Backend (`/api/thumbnail` pipeline)
 

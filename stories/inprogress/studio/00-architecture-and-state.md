@@ -23,46 +23,80 @@ work one at a time).
 
 ## The locked flow
 
-**Prep (manual, step by step on import)** — `src/lib/pipeline.ts` `STAGE_DEFS` is
-the board; `useScenePipeline.next(ctx)` runs the current step. Real steps each
-have their own button; the still-mocked tail is grouped behind one "Finish prep".
+> This section is the **product target**. Some of it (the contact sheet, the
+> master director's cut info, the scene refiner) isn't built yet — it's the
+> direction, not the current code. Where today's code differs, it's called out.
 
-| # | Stage | Where | Real or mock today |
-|---|-------|-------|--------------------|
+**Prep — assemble the ingredients, then let a "master director" cut the talk.**
+`src/lib/pipeline.ts` `STAGE_DEFS` is the board; `useScenePipeline.next(ctx)`
+runs the current step.
+
+| # | Stage | Where | Today |
+|---|-------|-------|-------|
 | 1 | Save the clip to a bucket | pipeline | **real** (presigned, story 01) |
 | 2 | **Extract & upload audio** (16 kHz mono WAV → bucket) | browser + pipeline | **real** (presigned `/api/uploads/audio`, story 01b) |
-| 3 | Transcribe with timestamps | pipeline | mock (MSW `/api/transcribe`; whisper = story 02) |
-| 4 | **Shorten the transcript** (condense rambling) | pipeline | mock — grouped "Finish prep" |
-| 5 | **Group into scenes with timestamps** | pipeline | mock (+ real thumbnails) — grouped |
-| 6 | Clone your voice | pipeline | mock — grouped |
+| 3 | Transcribe with timestamps | pipeline | **real** (WhisperX, story 02) |
+| 4 | **Sample interval thumbnails → compose a timestamped contact sheet** | browser | mock (per-scene frames today; see below) |
+| 5 | **Master director** — send {transcript + contact sheet} to the AI; get **scenes + new script + cut info** back | pipeline | mock (`buildScenes`) — story 03 |
+| 6 | Clone your voice | pipeline | mock — story 04 |
 
-Stage 2 now does two things: extract the WAV in-browser **and** upload that WAV
-to the bucket on its own (presigned, `/api/uploads/audio`), so stage 3 can hand
-Replicate an audio URL — we transcribe the WAV, not the source video.
+Stage 2 extracts the WAV in-browser **and** uploads it on its own (presigned,
+`/api/uploads/audio`), so stage 3 hands Replicate an audio URL — we transcribe
+the WAV, not the source video.
 
-Stage 5 returns **scenes**, each = `{ tightened narration text, original-video
-start/end timestamps, thumbnail }`. These double as YouTube chapters.
+Stage 4 samples frames on an **interval that scales with clip length** and
+composes them into **one image with a timestamp burned on each frame**, so the
+director gets **visual context**, not just words.
 
-**Build (per scene, one at a time)** — the scene workspace:
-review the AI-shortened script → **re-voice it in the cloned voice (TTS)** →
-check narration length vs the footage span → align → **mark built**. When all
-scenes are built, **assemble** them with ffmpeg.wasm into the final cut.
+Stage 5 — the **master director** — takes {transcript + contact sheet} and
+returns **scenes**, each = `{ title, new script text, original-video start/end,
+cut info (footage spans to drop) }`. These double as YouTube chapters.
 
-Key consequence: the shortened narration is **shorter than the original footage
-span**, so on assemble the **footage is fit to the narration** (trim/speed —
-open design question, see story 05). Text-edit + regenerate is the first
-alignment tool; time-stretch comes later.
+**Build — voice each scene's script and line the cut video up with it.** Per
+scene, one at a time: **generate the cloned-voice narration from the new script**
+(it isn't pre-baked — you create it here), apply the director's **cut info** to
+the footage and **play the cut video** (the trimmed scene) against the narration
+to check it lines up; refine the script (edit/remove words) and **re-voice** until
+it's right; **mark built**. When all scenes are built, **assemble** them with
+ffmpeg.wasm into the final cut.
+
+- The voice **isn't there to begin with** — no pre-baked narration when you enter
+  a scene. You voice the script in Build, and **re-voice whenever you edit the
+  text**.
+- **End goal (heavy, later):** a **per-scene refiner** — a scene-level version of
+  the master director that samples **finer-interval thumbnails** for the one scene
+  and tightens its cut. May reuse the director pipeline or be its own.
+
+## Two kinds of thumbnails — don't conflate them
+
+1. **Director thumbnails — INPUT to the AI.** Interval-sampled contact sheets
+   (whole-clip in Prep; finer and per-scene in the Build refiner). We **give**
+   these to the AI so it can see the footage. Browser-side capture + compositing.
+2. **YouTube thumbnail — OUTPUT from the AI (story 06, nano-banana).** When
+   everything's done, we generate the final YouTube thumbnail image and get it
+   **back** from the AI. A separate, self-contained feature.
+
+## Open questions (to reconcile before building)
+
+- **Cut info vs. footage-fit.** The director now returns **cut info** per scene,
+  and Build voices the script there. Story 05 still frames assemble as "fit footage
+  to narration length" (trim/speed) — decide how much the director's cuts already
+  settle that vs. what assemble still has to stretch. See story 05's open design
+  question.
 
 ## Key technical facts
 
 - **Audio extraction is real, browser-side** (`src/lib/audio.ts`): WebAudio
   decode → OfflineAudioContext (mono + 16 kHz) → WAV PCM16 Blob. Upload the WAV
   (not the video) for STT.
-- **Scene thumbnails are real, browser-side** (`src/lib/frames.ts`
-  `captureFramesAt`): seek a detached `<video>` to each scene midpoint → canvas.
-- **Scene model** lives in `src/lib/scenes.ts` (`Scene`, `buildScenes` =
-  mock shorten+segment, `narrationSeconds`, `alignment`). The real stage-4/5
-  pipeline replaces `buildScenes` and must return the same `Scene` shape.
+- **Frame capture is real, browser-side** (`src/lib/frames.ts` `captureFramesAt`):
+  seek a detached `<video>` → canvas. Today it grabs one frame per scene midpoint;
+  the **director** needs the opposite — **interval-sampled frames composed into a
+  timestamped contact sheet** (new work) handed to the AI as visual context.
+- **Scene model** lives in `src/lib/scenes.ts` (`Scene`, `buildScenes` = mock
+  director, `narrationSeconds`, `alignment`). The real director (story 03) replaces
+  `buildScenes` and returns the same `Scene` shape — to be **extended with the cut
+  info** (footage spans to drop) that the build step applies.
 - **Orchestration**: `src/components/Studio/useScenePipeline.ts` runs the prep
   stages and owns the scene queue + per-scene edit/voice/build state. **Swap a
   mocked stage for a real `/api/*` call here without touching the UI.**

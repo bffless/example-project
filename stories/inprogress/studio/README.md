@@ -20,14 +20,15 @@ Replicate **WhisperX** (`align_output:true` for word timestamps). ⚠️ Needs t
 Story 02b added the **transcript editor** (a GitHub-diff-style time grid under
 the video) and **MSW dev mocks** (`MOCK_STUDIO`) so iterating never hits the
 bucket or the paid model — `/api/transcribe` returns a real captured fixture.
-**Next up: Story 03 — shorten + scene-split** (feeds the editor's right pane).
+**Next up: Story 03 — the AI master director** (transcript + thumbnail contact
+sheet → scenes + new script + cut info; feeds the editor's right pane).
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
 inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 02-wire-transcription (WhisperX; needs Replicate token)
              ✅ 02b-transcript-editor (time-grid diff view + dev mocks)
-             ▶  03-wire-shorten-segment        ← START HERE
+             ▶  03 master director (scenes + script + cuts)  ← START HERE
              ·  04 · 05 · 06 · 07              (queued)
 ```
 
@@ -41,7 +42,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 01b | `01b-wire-audio-bucket.md` | ② extract + audio→bucket · stepper | ✅ done |
 | 02 | `02-wire-transcription.md` | ③ transcribe (WhisperX) | ✅ done* |
 | 02b | `02b-transcript-editor.md` | transcript time-grid editor · dev mocks | ✅ done |
-| 03 | `03-wire-shorten-segment.md` | ④⑤ shorten + scene-split | ▶ **next up** |
+| 03 | `03-wire-shorten-segment.md` | ④⑤ master director (scenes + script + cuts) | ▶ **next up** |
 | 04 | `04-wire-voice-clone.md` | ⑥ clone + per-scene re-voice | ⏳ queued |
 | 05 | `05-wire-ffmpeg-assemble.md` | assemble (fit footage to voice) | ⏳ queued |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
