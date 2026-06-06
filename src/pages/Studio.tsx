@@ -12,6 +12,8 @@ import { buildPrepArtifacts } from '../lib/prepArtifacts'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneEditor } from '../components/Studio/SceneEditor'
 import { StudioStepper } from '../components/Studio/StudioStepper'
+import { AudioArtifact } from '../components/Studio/AudioArtifact'
+import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { formatTime } from '../lib/edl'
@@ -236,6 +238,16 @@ export function Studio() {
                       onTime={setCurrentTime}
                       onLoaded={onLoaded}
                     />
+                    {pipe.audioUrl && (
+                      <div className="mt-4">
+                        <AudioArtifact peaks={pipe.audioPeaks} audioUrl={pipe.audioUrl} />
+                      </div>
+                    )}
+                    {pipe.words.length > 0 && (
+                      <div className="mt-4">
+                        <TranscriptText words={pipe.words} />
+                      </div>
+                    )}
                     {pipe.contactSheets.length > 0 && (
                       <div className="mt-6">
                         <ContactSheetPreview sheets={pipe.contactSheets} />
@@ -243,50 +255,53 @@ export function Studio() {
                     )}
                   </div>
                 </div>
+              </div>
+            ) : (
+              /* Build phase: scene queue + per-scene editor, then the transcript
+                 time grid (original vs the shortened script) full-width below. */
+              <div className="flex flex-col gap-8">
+                <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
+                  <div className="flex flex-col gap-6">
+                    <PreviewPlayer
+                      src={previewSrc}
+                      videoRef={videoRef}
+                      cuts={[]}
+                      onTime={setCurrentTime}
+                      onLoaded={onLoaded}
+                    />
+                    <SceneList
+                      scenes={pipe.scenes}
+                      selectedId={pipe.selectedId}
+                      onSelect={pipe.select}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-6">
+                    {selected && (
+                      <SceneEditor
+                        scene={selected}
+                        voicing={pipe.voicingId === selected.id}
+                        onDraftChange={(t) => pipe.updateDraft(selected.id, t)}
+                        onGenerateVoice={() => pipe.generateVoice(selected.id)}
+                        onMarkBuilt={() => pipe.markBuilt(selected.id)}
+                        onPlayScene={() => playScene(selected)}
+                      />
+                    )}
+
+                    {pipe.allBuilt ? (
+                      <FinalCut scenes={pipe.scenes} />
+                    ) : (
+                      <p className="text-[13.5px] leading-relaxed text-ink-soft">
+                        Build each scene, then assemble the final cut. The chapter list
+                        below doubles as your YouTube timestamps.
+                      </p>
+                    )}
+                  </div>
+                </div>
 
                 {pipe.words.length > 0 && (
                   <TranscriptDiff words={pipe.words} currentTime={currentTime} />
                 )}
-              </div>
-            ) : (
-              /* Build phase: scene queue + per-scene editor */
-              <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
-                <div className="flex flex-col gap-6">
-                  <PreviewPlayer
-                    src={previewSrc}
-                    videoRef={videoRef}
-                    cuts={[]}
-                    onTime={() => {}}
-                    onLoaded={onLoaded}
-                  />
-                  <SceneList
-                    scenes={pipe.scenes}
-                    selectedId={pipe.selectedId}
-                    onSelect={pipe.select}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-6">
-                  {selected && (
-                    <SceneEditor
-                      scene={selected}
-                      voicing={pipe.voicingId === selected.id}
-                      onDraftChange={(t) => pipe.updateDraft(selected.id, t)}
-                      onGenerateVoice={() => pipe.generateVoice(selected.id)}
-                      onMarkBuilt={() => pipe.markBuilt(selected.id)}
-                      onPlayScene={() => playScene(selected)}
-                    />
-                  )}
-
-                  {pipe.allBuilt ? (
-                    <FinalCut scenes={pipe.scenes} />
-                  ) : (
-                    <p className="text-[13.5px] leading-relaxed text-ink-soft">
-                      Build each scene, then assemble the final cut. The chapter list
-                      below doubles as your YouTube timestamps.
-                    </p>
-                  )}
-                </div>
               </div>
             )}
           </div>

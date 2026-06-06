@@ -31,6 +31,8 @@ export type StudioState = {
   sourceUrl: string | null
   /** Relative `/api/uploads/audio/...` serve path once uploaded. */
   audioUrl: string | null
+  /** Compact waveform summary (normalized 0–1 peaks) of the extracted audio. */
+  audioPeaks: number[]
   contactSheets: ContactSheet[]
   words: TranscriptWord[]
   selectedId: string | null
@@ -45,6 +47,7 @@ const initialState: StudioState = {
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
+  audioPeaks: [],
   contactSheets: [],
   words: [],
   selectedId: null,
@@ -81,6 +84,9 @@ const studioSlice = createSlice({
     setAudioUrl(state, action: PayloadAction<string | null>) {
       state.audioUrl = action.payload
     },
+    setAudioPeaks(state, action: PayloadAction<number[]>) {
+      state.audioPeaks = action.payload
+    },
     setContactSheets(state, action: PayloadAction<ContactSheet[]>) {
       state.contactSheets = action.payload
     },
@@ -110,6 +116,7 @@ export const {
   patchScene,
   setSourceUrl,
   setAudioUrl,
+  setAudioPeaks,
   setContactSheets,
   setWords,
   setSelected,

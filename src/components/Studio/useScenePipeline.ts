@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { type StageId } from '../../lib/pipeline'
 import { buildScenes, narrationSeconds, type Scene } from '../../lib/scenes'
-import { extractAudioWav } from '../../lib/audio'
+import { extractAudio } from '../../lib/audio'
 import { captureFramesAt, captureContactSheet, type ContactSheet } from '../../lib/frames'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { useTranscribeMutation, useUploadMutation } from '../../store/studioApi'
@@ -12,6 +12,7 @@ import {
   patchScene as patchSceneAction,
   setSourceUrl,
   setAudioUrl,
+  setAudioPeaks,
   setContactSheets,
   setWords,
   setSelected,
@@ -78,6 +79,7 @@ export function useScenePipeline() {
   const scenes = useAppSelector((s) => s.studio.scenes)
   const sourceUrl = useAppSelector((s) => s.studio.sourceUrl)
   const audioUrl = useAppSelector((s) => s.studio.audioUrl)
+  const audioPeaks = useAppSelector((s) => s.studio.audioPeaks)
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
@@ -139,12 +141,16 @@ export function useScenePipeline() {
   const extractAndUploadAudio = useCallback(
     async ({ file }: StepContext) => {
       patch('extract', { status: 'active' })
-      const wav = await extractAudioWav(file) // real, browser-side
+      // One decode yields both the uploadable WAV and a compact waveform summary
+      // — so the resource card can show a stenograph of the extracted audio
+      // without re-decoding the whole clip just to draw it.
+      const { wav, peaks } = await extractAudio(file) // real, browser-side
       const wavFile = new File([wav], `${file.name.replace(/\.[^.]+$/, '')}.wav`, {
         type: 'audio/wav',
       })
       const { url } = await uploadReq({ file: wavFile, kind: 'audio' }).unwrap()
       dispatch(setAudioUrl(url))
+      dispatch(setAudioPeaks(peaks))
       patch('extract', {
         status: 'done',
         detail: `16 kHz mono WAV · ${mb(wav.size)} → bucket`,
@@ -329,6 +335,7 @@ export function useScenePipeline() {
     scenes,
     sourceUrl,
     audioUrl,
+    audioPeaks,
     contactSheets,
     words,
     selectedId,
