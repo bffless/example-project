@@ -13,6 +13,8 @@ import {
   chunk,
   gridDimensions,
   planContactSheet,
+  planSceneContactSheet,
+  SCENE_MIN_INTERVAL_SECONDS,
   clockLabel,
 } from './contactSheet'
 
@@ -189,6 +191,33 @@ describe('planContactSheet — dense for short clips, budget-capped for long', (
 
   it('degrades gracefully on an invalid duration', () => {
     expect(planContactSheet(0)).toEqual({ interval: 0, times: [], perSheet: 0 })
+  })
+
+  it('takes a denser floor when asked (per-scene refiner)', () => {
+    // Same 60s span: clip-wide floor is 5s (12 frames); a 1s floor packs ~60.
+    expect(planContactSheet(60).times.length).toBe(12)
+    expect(planContactSheet(60, 1).times.length).toBe(60)
+  })
+})
+
+describe('planSceneContactSheet — dense, windowed, original-timeline', () => {
+  it('is far denser than the clip-wide plan for the same span', () => {
+    const scene = planSceneContactSheet(0, 60)
+    const clip = planContactSheet(60)
+    expect(scene.times.length).toBeGreaterThan(clip.times.length)
+    expect(maxGap(scene.times)).toBeLessThanOrEqual(SCENE_MIN_INTERVAL_SECONDS + 0.001)
+  })
+
+  it('offsets timestamps back into the original-video timeline', () => {
+    const scene = planSceneContactSheet(120, 180)
+    expect(scene.times[0]).toBeGreaterThanOrEqual(120)
+    expect(scene.times[scene.times.length - 1]).toBeLessThanOrEqual(180)
+  })
+
+  it('still respects the frame + sheet budget on a long scene', () => {
+    const scene = planSceneContactSheet(0, 30 * 60)
+    expect(scene.times.length).toBeLessThanOrEqual(MAX_FRAMES)
+    expect(sheetCount(scene)).toBeLessThanOrEqual(MAX_SHEETS)
   })
 })
 

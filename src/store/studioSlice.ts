@@ -21,6 +21,29 @@ import type { ContactSheet } from '../lib/frames'
 export type TranscriptWord = { text: string; start: number; end: number }
 
 /**
+ * The narration voice the producer settled on in the clone prep step — either
+ * their own **cloned** voice (recorded → MiniMax voice-cloning → `voiceId`) or a
+ * picked **preset** voice. Durable: it's reused to voice every scene in Build and
+ * across runs, so it's persisted. `sampleUrl` is the uploaded recording the clone
+ * was made from (clone path only), kept for reference.
+ */
+export type VoiceChoice = {
+  voiceId: string
+  /** How we got it: a fresh clone, a reused saved id, or a MiniMax preset. */
+  source: 'clone' | 'saved' | 'preset'
+  label: string
+  sampleUrl?: string | null
+}
+
+/**
+ * A cloned voice id worth keeping. MiniMax stores cloned voices server-side by
+ * id, so once you've paid the $3 to clone, you can reuse that id forever without
+ * re-cloning. We remember every id you mint (and any you paste in) here, persisted
+ * to localStorage, so they're one click away next session.
+ */
+export type SavedVoice = { voiceId: string; label: string }
+
+/**
  * Per-step progress — the ONLY dynamic part of the prep board, and all we keep
  * in state (and persist). The step *content* (title, note, where, action label)
  * is static `STAGE_DEFS` and is recombined with this in the hook, so editing the
@@ -39,6 +62,14 @@ export const freshProgress = (): StageProgressMap => {
 
 export type StudioState = {
   stageProgress: StageProgressMap
+  /**
+   * Whether the producer has hopped back to Prep after finishing it. Persisted
+   * (not transient React state) so a hard reload keeps you on Prep instead of
+   * snapping forward to Build: `ready` alone can't tell "prep is done, show
+   * Build" from "prep is done but I'm currently revisiting it". Reset by
+   * resetStudio (Start over / fresh import).
+   */
+  revisitPrep: boolean
   scenes: Scene[]
   /** Relative `/api/uploads/source/...` serve path once uploaded (proxies to bucket). */
   sourceUrl: string | null
@@ -50,6 +81,10 @@ export type StudioState = {
   words: TranscriptWord[]
   /** One-line logline of the whole talk, from the master director (story 03). */
   synopsis: string | null
+  /** The narration voice (cloned, reused, or preset), set in the clone prep step. */
+  voice: VoiceChoice | null
+  /** Cloned voice ids the user has minted/saved, reusable without re-cloning. */
+  savedVoices: SavedVoice[]
   selectedId: string | null
   /** Source clip duration in seconds (from the <video> metadata). */
   duration: number
@@ -59,6 +94,7 @@ export type StudioState = {
 
 const initialState: StudioState = {
   stageProgress: freshProgress(),
+  revisitPrep: false,
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
@@ -66,6 +102,8 @@ const initialState: StudioState = {
   contactSheets: [],
   words: [],
   synopsis: null,
+  voice: null,
+  savedVoices: [],
   selectedId: null,
   duration: 0,
   fileName: null,
@@ -87,6 +125,10 @@ const studioSlice = createSlice({
           break
         }
       }
+    },
+    /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
+    setRevisitPrep(state, action: PayloadAction<boolean>) {
+      state.revisitPrep = action.payload
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
       state.scenes = action.payload
@@ -113,6 +155,21 @@ const studioSlice = createSlice({
     setSynopsis(state, action: PayloadAction<string | null>) {
       state.synopsis = action.payload
     },
+    setVoice(state, action: PayloadAction<VoiceChoice | null>) {
+      state.voice = action.payload
+    },
+    /** Remember a cloned/known voice id (newest first, deduped by id). */
+    addSavedVoice(state, action: PayloadAction<SavedVoice>) {
+      const id = action.payload.voiceId.trim()
+      if (!id) return
+      state.savedVoices = [
+        { voiceId: id, label: action.payload.label || id },
+        ...state.savedVoices.filter((v) => v.voiceId !== id),
+      ]
+    },
+    removeSavedVoice(state, action: PayloadAction<string>) {
+      state.savedVoices = state.savedVoices.filter((v) => v.voiceId !== action.payload)
+    },
     setSelected(state, action: PayloadAction<string | null>) {
       state.selectedId = action.payload
     },
@@ -122,9 +179,13 @@ const studioSlice = createSlice({
     setFileName(state, action: PayloadAction<string | null>) {
       state.fileName = action.payload
     },
-    /** Wipe everything back to a clean import — used by "Start over". */
-    resetStudio() {
-      return { ...initialState, stageProgress: freshProgress() }
+    /**
+     * Wipe everything back to a clean import — used by "Start over". Keeps the
+     * `savedVoices` library: those cloned ids cost real money and are reusable
+     * across clips/sessions, so starting a new project shouldn't lose them.
+     */
+    resetStudio(state) {
+      return { ...initialState, stageProgress: freshProgress(), savedVoices: state.savedVoices }
     },
   },
 })
@@ -132,6 +193,7 @@ const studioSlice = createSlice({
 export const {
   patchStage,
   failActiveStage,
+  setRevisitPrep,
   setScenes,
   patchScene,
   setSourceUrl,
@@ -140,6 +202,9 @@ export const {
   setContactSheets,
   setWords,
   setSynopsis,
+  setVoice,
+  addSavedVoice,
+  removeSavedVoice,
   setSelected,
   setDuration,
   setFileName,

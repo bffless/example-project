@@ -10,6 +10,8 @@
  * AI segmentation response (same `Scene` shape).
  */
 
+import type { ContactSheet } from './frames'
+
 export type SceneStatus = 'pending' | 'built'
 
 /**
@@ -18,6 +20,38 @@ export type SceneStatus = 'pending' | 'built'
  * The Build step applies these when it fits the footage to the narration.
  */
 export type Cut = { start: number; end: number }
+
+/**
+ * One anchored run of the new narration, in original-video seconds. The master
+ * director only hands us a flat `draftText` string with no placement; the
+ * per-scene refiner (story 03c) returns these — where each run of the rewritten
+ * script actually starts/ends, split into multiple segments when there's kept
+ * dead air/pause between them.
+ */
+export type NarrationSegment = {
+  text: string
+  start: number
+  end: number
+  /** Persisted serve path of this run's narration (story 03c), once voiced.
+   *  Absent until generated/recorded. */
+  audioUrl?: string
+  /** Real measured length of that audio clip, in seconds. */
+  audioSeconds?: number
+  /** How this run was voiced: AI text-to-speech, or the user's own recording. */
+  audioSource?: 'ai' | 'recorded'
+}
+
+/**
+ * The second-pass refiner's output for a scene (story 03c) — kept in a SEPARATE
+ * field so the master director's first-pass `draftText`/`cuts` are never
+ * overwritten and the producer can revert (`refined = null`). `source`
+ * distinguishes the AI's refinement from later hand-edits in the diff viewer.
+ */
+export type SceneRefinement = {
+  segments: NarrationSegment[]
+  cuts: Cut[]
+  source: 'ai' | 'manual'
+}
 
 export type Scene = {
   id: string
@@ -33,8 +67,17 @@ export type Scene = {
   status: SceneStatus
   /** Length of the generated narration once voiced; null until voiced. */
   narrationSeconds: number | null
-  /** Footage spans the director marked to drop (original-video seconds). */
+  /** Footage spans the director marked to drop (original-video seconds). The
+   *  master director's first pass — never overwritten; refined edits live in
+   *  `refined.cuts`. */
   cuts?: Cut[]
+  /** Per-scene dense contact sheets captured for the refiner (story 03c,
+   *  button 1). Like the prep sheets, only the bucket `url` is persisted — the
+   *  base64 `dataUrl` is dropped after upload. */
+  sheets?: ContactSheet[]
+  /** Second-pass refiner output (story 03c). Absent/null = fall back to the
+   *  director baseline (`draftText` + `cuts`). */
+  refined?: SceneRefinement | null
   thumb?: string
 }
 

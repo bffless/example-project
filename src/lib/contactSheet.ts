@@ -62,9 +62,10 @@ export type ContactSheetPlan = {
  * count we'd want if image/size limits didn't exist. (Short clips get plenty of
  * frames this way instead of being pinned to the 30s coverage floor.)
  */
-export function frameCount(duration: number): number {
+export function frameCount(duration: number, minInterval = MIN_INTERVAL_SECONDS): number {
   if (!Number.isFinite(duration) || duration <= 0) return 0
-  return Math.max(1, Math.ceil(duration / MIN_INTERVAL_SECONDS))
+  const step = minInterval > 0 ? minInterval : MIN_INTERVAL_SECONDS
+  return Math.max(1, Math.ceil(duration / step))
 }
 
 /**
@@ -113,11 +114,15 @@ export function gridDimensions(count: number): { cols: number; rows: number } {
  * The clip-wide plan: how many frames to sample, their timestamps, and how many
  * cells per sheet — balancing coverage, detail, and the image cap.
  */
-export function planContactSheet(duration: number): ContactSheetPlan {
-  const dense = frameCount(duration)
+export function planContactSheet(
+  duration: number,
+  minInterval = MIN_INTERVAL_SECONDS,
+): ContactSheetPlan {
+  const dense = frameCount(duration, minInterval)
   if (dense === 0) return { interval: 0, times: [], perSheet: 0 }
-  // Aim for MIN_INTERVAL density, never sparser than MAX_INTERVAL, never over the
-  // budget. (dense ≥ coverage whenever MIN < MAX, so the floor is belt-and-braces.)
+  // Aim for `minInterval` density, never sparser than MAX_INTERVAL, never over the
+  // budget. (dense ≥ coverage whenever minInterval < MAX, so the floor is
+  // belt-and-braces.)
   const coverage = Math.ceil(duration / MAX_INTERVAL_SECONDS)
   const total = Math.min(MAX_FRAMES, Math.max(coverage, dense))
   return {
@@ -125,6 +130,29 @@ export function planContactSheet(duration: number): ContactSheetPlan {
     times: sampleTimes(duration, total),
     perSheet: cellsPerSheet(total),
   }
+}
+
+/**
+ * Finest spacing for a single scene's dense sheet (story 03c) — far tighter than
+ * the clip-wide `MIN_INTERVAL_SECONDS` because the whole frame budget is spent on
+ * ONE scene. At 1s, a scene up to `MAX_FRAMES` seconds long gets a frame every
+ * second; longer scenes are capped by the budget and the spacing widens.
+ */
+export const SCENE_MIN_INTERVAL_SECONDS = 1
+
+/**
+ * A plan for ONE scene's dense contact sheet (story 03c). Same balancing as the
+ * clip-wide plan but over the window `[start, end]` AND with a 1s density floor —
+ * so a single scene packs frames densely (up to the 120-frame / 10-sheet budget)
+ * instead of inheriting the clip-wide 5s spacing. That's the whole point of the
+ * second pass: more frames, closer together, for sharper cut + placement calls.
+ * Timestamps are offset back to original-video seconds so the burned-in clocks
+ * (and the AI's answers) stay in the clip's timeline.
+ */
+export function planSceneContactSheet(start: number, end: number): ContactSheetPlan {
+  const span = end - start
+  const plan = planContactSheet(span, SCENE_MIN_INTERVAL_SECONDS)
+  return { ...plan, times: plan.times.map((t) => t + start) }
 }
 
 /**

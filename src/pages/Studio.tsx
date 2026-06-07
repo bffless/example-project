@@ -1,25 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { setDuration, setFileName } from '../store/studioSlice'
+import { setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
-import { PrepArtifacts } from '../components/Studio/PrepArtifacts'
-import { buildPrepArtifacts } from '../lib/prepArtifacts'
-import { scenesToTimedWords } from '../lib/director'
+import { effectiveCuts, effectiveSegments, segmentsToTimedWords } from '../lib/refiner'
 import { SceneList } from '../components/Studio/SceneList'
-import { SceneEditor } from '../components/Studio/SceneEditor'
+import { SceneTabs } from '../components/Studio/SceneTabs'
+import { SceneMeta } from '../components/Studio/SceneMeta'
+import { SceneRefinePanel } from '../components/Studio/SceneRefinePanel'
+import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
+import { VoiceStudio } from '../components/Studio/VoiceStudio'
 import { StudioStepper } from '../components/Studio/StudioStepper'
 import { AudioArtifact } from '../components/Studio/AudioArtifact'
 import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
-import { formatTime } from '../lib/edl'
-import { studioPhase } from '../lib/pipeline'
-import type { Scene } from '../lib/scenes'
+import { studioPhase, type StudioPhase } from '../lib/pipeline'
 
 export function Studio() {
   // The in-memory clip is transient — never persisted. After a hard reload it's
@@ -28,16 +28,23 @@ export function Studio() {
   // the clip back from the bucket automatically (no re-attach prompt); the banner
   // only appears as a fallback if that fetch fails.
   const [file, setFile] = useState<File | null>(null)
-  const [currentTime, setCurrentTime] = useState(0)
   const [rehydrating, setRehydrating] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
   // Free-text direction the user hands the master director (e.g. "keep the demo
   // at 12:30, make the intro punchy"). Only used by the director prep step.
   const [direction, setDirection] = useState('')
-
+  // The voice step's resource is revealed by clicking its board action (rather
+  // than running a pipeline inline) — and stays open once a voice exists.
+  const [showVoiceStudio, setShowVoiceStudio] = useState(false)
   const dispatch = useAppDispatch()
   const duration = useAppSelector((s) => s.studio.duration)
   const fileName = useAppSelector((s) => s.studio.fileName)
+  // Once prep is complete the workspace shows Build. This lets the user hop back
+  // to Prep (to tweak the director, re-pick a voice, etc.) without losing any
+  // work — a view toggle that touches no pipeline state. Persisted in Redux (not
+  // local useState) so a hard reload while revisiting Prep keeps you on Prep
+  // rather than snapping forward to Build.
+  const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
@@ -66,7 +73,6 @@ export function Studio() {
     const resuming = hasPersisted && f.name === fileName
     setRestoreError(null)
     setFile(f)
-    setCurrentTime(0)
     if (!resuming) {
       pipe.reset()
       dispatch(setFileName(f.name))
@@ -77,7 +83,7 @@ export function Studio() {
   function startOver() {
     setFile(null)
     setRestoreError(null)
-    setCurrentTime(0)
+    // pipe.reset() dispatches resetStudio, which already clears revisitPrep.
     pipe.reset()
   }
 
@@ -124,37 +130,52 @@ export function Studio() {
     }
   }
 
-  // Play just the selected scene: seek to its start and pause at its end.
-  const playScene = useCallback((scene: Scene) => {
-    const v = videoRef.current
-    if (!v) return
-    v.currentTime = scene.start
-    void v.play()
-    const stopAtEnd = () => {
-      if (v.currentTime >= scene.end) {
-        v.pause()
-        v.removeEventListener('timeupdate', stopAtEnd)
-      }
+  // The board's action button. Most steps run inline; the voice step instead
+  // reveals the VoiceStudio resource at the bottom of prep (recording + clone or
+  // preset happen there, not through the pipeline runner).
+  function onBoardAction() {
+    if (pipe.currentStageId === 'clone') {
+      setShowVoiceStudio(true)
+      return
     }
-    v.addEventListener('timeupdate', stopAtEnd)
-  }, [])
+    void runStep()
+  }
 
   const selected = pipe.scenes.find((s) => s.id === pipe.selectedId) ?? null
 
   // The shortened script laid back on the timeline, for the diff's right pane.
-  const editedWords = useMemo(() => scenesToTimedWords(pipe.scenes), [pipe.scenes])
+  // Uses the refiner's anchored segments when a scene has been refined (words
+  // flow at the speaking rate from each segment's start, leaving the kept pauses
+  // empty); falls back to a single draftText segment for un-refined scenes.
+  const editedWords = useMemo(
+    () => pipe.scenes.flatMap((s) => segmentsToTimedWords(effectiveSegments(s))),
+    [pipe.scenes],
+  )
 
-  const artifacts = useMemo(
+  // Dropped footage spans across all scenes (refiner's cuts, else director's),
+  // drawn as red cells in the diff viewer.
+  const cutSpans = useMemo(
+    () => pipe.scenes.flatMap((s) => effectiveCuts(s)),
+    [pipe.scenes],
+  )
+
+  // Per-segment voice controls across all scenes — each narration run gets an
+  // inline record/AI/play control in the diff viewer's New pane.
+  const segmentControls = useMemo<SegmentControl[]>(
     () =>
-      buildPrepArtifacts({
-        hasSource: !!pipe.sourceUrl,
-        hasAudio: !!pipe.audioUrl,
-        wordCount: pipe.words.length,
-        sheetCount: pipe.contactSheets.length,
-        frameCount: pipe.contactSheets.reduce((n, s) => n + s.count, 0),
-        sheetsSaved: pipe.contactSheets.filter((s) => s.url).length,
-      }),
-    [pipe.sourceUrl, pipe.audioUrl, pipe.words, pipe.contactSheets],
+      pipe.scenes.flatMap((s) =>
+        effectiveSegments(s).map((seg, i) => ({
+          sceneId: s.id,
+          index: i,
+          start: seg.start,
+          text: seg.text,
+          audioUrl: seg.audioUrl,
+          audioSeconds: seg.audioSeconds,
+          audioSource: seg.audioSource,
+          busy: pipe.voicingSegKey === `${s.id}:${i}`,
+        })),
+      ),
+    [pipe.scenes, pipe.voicingSegKey],
   )
 
   const phase = studioPhase({
@@ -162,6 +183,35 @@ export function Studio() {
     ready: pipe.ready,
     allBuilt: pipe.allBuilt,
   })
+
+  // Show the prep view while prep is unfinished OR when the user has chosen to
+  // revisit it after completing it. The top stepper then reflects Prep as current
+  // and lets them jump back to Build.
+  const inPrep = !pipe.ready || revisitPrep
+  const displayPhase = inPrep ? 'prep' : phase
+  // Prep & Build are freely navigable once prep is done; before that you can only
+  // be in Prep.
+  const navigablePhases: StudioPhase[] = pipe.ready ? ['prep', 'build'] : []
+  function navigatePhase(p: StudioPhase) {
+    if (p === 'prep') dispatch(setRevisitPrep(true))
+    else if (p === 'build') dispatch(setRevisitPrep(false))
+  }
+
+  // Setting the voice is the last prep step, so completing it flips `ready` and
+  // would auto-jump to Build. Keep the producer on Prep instead (to sample the
+  // voice, change it, etc.) — moving to Build stays an explicit choice.
+  function chooseVoiceClone(blob: Blob) {
+    dispatch(setRevisitPrep(true))
+    pipe.cloneFromRecording(blob)
+  }
+  function chooseVoicePreset(id: string) {
+    dispatch(setRevisitPrep(true))
+    pipe.pickPresetVoice(id)
+  }
+  function chooseVoiceSaved(id: string) {
+    dispatch(setRevisitPrep(true))
+    pipe.reuseVoiceId(id)
+  }
 
   return (
     <>
@@ -187,7 +237,11 @@ export function Studio() {
           </div>
         ) : (
           <div className="flex flex-col gap-8">
-            <StudioStepper phase={phase} />
+            <StudioStepper
+              phase={displayPhase}
+              navigable={navigablePhases}
+              onNavigate={navigatePhase}
+            />
 
             {restoreError && (
               <RestoreBanner
@@ -208,28 +262,40 @@ export function Studio() {
                       ? 'Working…'
                       : 'Run each prep step below, in order.'}
               </p>
-              <button
-                type="button"
-                className="pill-ghost"
-                disabled={pipe.running || rehydrating}
-                onClick={startOver}
-              >
-                Start over
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Once prep is done, Build can hop back to Prep (no work lost).
+                    Going forward to Build is the bottom "Continue" CTA. */}
+                {pipe.ready && !revisitPrep && (
+                  <button
+                    type="button"
+                    className="pill-ghost"
+                    onClick={() => dispatch(setRevisitPrep(true))}
+                  >
+                    ← Back to prep
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="pill-ghost"
+                  disabled={pipe.running || rehydrating}
+                  onClick={startOver}
+                >
+                  Start over
+                </button>
+              </div>
             </div>
 
-            {!pipe.ready ? (
+            {inPrep ? (
               /* Prep phase: the notes board (left, a third) + the source preview
                  (right, two thirds), then the transcript editor full-width below
                  once transcription has produced words. */
               <div className="flex flex-col gap-8">
-                <PrepArtifacts artifacts={artifacts} />
                 <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
                   <PipelineBoard
                     stages={pipe.stages}
                     currentStageId={pipe.currentStageId}
                     busy={pipe.running || rehydrating}
-                    onAction={runStep}
+                    onAction={onBoardAction}
                     panelStageId="director"
                   />
                   <div>
@@ -245,7 +311,6 @@ export function Studio() {
                       src={previewSrc}
                       videoRef={videoRef}
                       cuts={[]}
-                      onTime={setCurrentTime}
                       onLoaded={onLoaded}
                     />
                     {pipe.audioUrl && (
@@ -293,67 +358,94 @@ export function Studio() {
                         </div>
                       </div>
                     )}
+                    {/* The voice step: a resource under the scenes & chapters,
+                        sized to this right column (not full-bleed). Revealed by
+                        the board's "Choose your voice" action (or whenever a voice
+                        already exists). Record + clone or pick a preset here —
+                        it's the last prep step before Build. */}
+                    {(showVoiceStudio || pipe.voice) && (
+                      <div className="mt-6">
+                        <VoiceStudio
+                          voice={pipe.voice}
+                          savedVoices={pipe.savedVoices}
+                          cloning={pipe.cloning}
+                          samplingVoice={pipe.samplingVoice}
+                          onClone={chooseVoiceClone}
+                          onPickPreset={chooseVoicePreset}
+                          onReuseVoiceId={chooseVoiceSaved}
+                          onForgetVoice={pipe.forgetVoice}
+                          onClearVoice={pipe.clearVoice}
+                          onGenerateSample={pipe.generateSample}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
-                {/* The original vs shortened script, full-width, the moment the
-                    director produces the new script — not held back to Build. */}
-                {pipe.words.length > 0 && pipe.scenes.length > 0 && (
-                  <TranscriptDiff
-                    words={pipe.words}
-                    editedWords={editedWords}
-                    currentTime={currentTime}
-                  />
+                {/* Once every prep step is done (incl. the voice), the producer
+                    moves to Build deliberately — completing prep no longer
+                    auto-advances. */}
+                {pipe.ready && (
+                  <div className="flex flex-wrap items-center justify-between gap-4 border rule bg-terracotta/5 px-5 py-4">
+                    <p className="text-[14px] text-ink-soft">
+                      Prep complete — {pipe.scenes.length} scene
+                      {pipe.scenes.length === 1 ? '' : 's'} and your voice is ready.
+                    </p>
+                    <button
+                      type="button"
+                      className="pill-cta"
+                      onClick={() => dispatch(setRevisitPrep(false))}
+                    >
+                      Continue to build →
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
-              /* Build phase: scene queue + per-scene editor, then the transcript
-                 time grid (original vs the shortened script) full-width below. */
-              <div className="flex flex-col gap-8">
+              /* Build phase: a scene tab strip across the top, then the source
+                 video over the full-width transcript time-grid diff. The diff is
+                 the main editing area — where we'll work the shortened script
+                 against the original — so it gets the whole page width. */
+              <div className="flex flex-col gap-6">
                 {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
-                <div className="grid gap-8 lg:grid-cols-[300px_1fr]">
-                  <div className="flex flex-col gap-6">
+                <SceneTabs
+                  scenes={pipe.scenes}
+                  selectedId={pipe.selectedId}
+                  onSelect={pipe.select}
+                />
+                {/* Video capped on the left; the space to its right carries the
+                    selected scene's metadata. The diff below still gets the full
+                    page width. */}
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
+                  <div className="lg:max-w-2xl lg:flex-[3]">
                     <PreviewPlayer
                       src={previewSrc}
                       videoRef={videoRef}
                       cuts={[]}
-                      onTime={setCurrentTime}
                       onLoaded={onLoaded}
                     />
-                    <SceneList
-                      scenes={pipe.scenes}
-                      selectedId={pipe.selectedId}
-                      onSelect={pipe.select}
-                    />
                   </div>
-
-                  <div className="flex flex-col gap-6">
-                    {selected && (
-                      <SceneEditor
-                        scene={selected}
-                        voicing={pipe.voicingId === selected.id}
-                        onDraftChange={(t) => pipe.updateDraft(selected.id, t)}
-                        onGenerateVoice={() => pipe.generateVoice(selected.id)}
-                        onMarkBuilt={() => pipe.markBuilt(selected.id)}
-                        onPlayScene={() => playScene(selected)}
-                      />
-                    )}
-
-                    {pipe.allBuilt ? (
-                      <FinalCut scenes={pipe.scenes} />
-                    ) : (
-                      <p className="text-[13.5px] leading-relaxed text-ink-soft">
-                        Build each scene, then assemble the final cut. The chapter list
-                        below doubles as your YouTube timestamps.
-                      </p>
-                    )}
-                  </div>
+                  {selected && <SceneMeta scene={selected} className="lg:flex-[2]" />}
                 </div>
-
+                {selected && (
+                  <SceneRefinePanel
+                    scene={selected}
+                    sheeting={pipe.sheetingId === selected.id}
+                    refining={pipe.refiningId === selected.id}
+                    error={pipe.sceneError}
+                    onGenerateSheets={() => pipe.generateSceneSheets(selected.id)}
+                    onRefine={() => pipe.refineScene(selected.id)}
+                    onClear={() => pipe.clearRefinement(selected.id)}
+                  />
+                )}
                 {pipe.words.length > 0 && (
                   <TranscriptDiff
                     words={pipe.words}
                     editedWords={editedWords}
-                    currentTime={currentTime}
+                    cuts={cutSpans}
+                    segments={segmentControls}
+                    canGenerateAI={!!pipe.voice}
+                    onGenerateAI={pipe.generateSegmentNarration}
+                    onRecord={pipe.recordSegmentNarration}
                   />
                 )}
               </div>
@@ -425,25 +517,6 @@ function SynopsisCard({ synopsis }: { synopsis: string }) {
     <div className="border-l-2 border-terracotta bg-terracotta/5 px-5 py-4">
       <p className="meta-label">The director’s take</p>
       <p className="mt-1.5 font-serif text-[18px] leading-snug text-ink">{synopsis}</p>
-    </div>
-  )
-}
-
-function FinalCut({ scenes }: { scenes: Scene[] }) {
-  return (
-    <div className="border rule bg-paper p-5">
-      <p className="meta-label">All scenes built</p>
-      <h3 className="mt-1 font-serif text-[20px] text-ink">Chapters &amp; final cut</h3>
-      <ul className="mt-3 flex flex-col gap-1 font-mono text-[12.5px] text-ink-soft">
-        {scenes.map((s) => (
-          <li key={s.id}>
-            <span className="text-terracotta-ink">{formatTime(s.start)}</span> {s.title}
-          </li>
-        ))}
-      </ul>
-      <button type="button" className="pill-cta mt-4" disabled>
-        Assemble &amp; export with ffmpeg — next phase
-      </button>
     </div>
   )
 }

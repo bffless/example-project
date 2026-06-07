@@ -20,6 +20,10 @@
   --color-terracotta-hover: #c24e33;
   --color-terracotta-ink: #7a2d1d;
 
+  /* Muted sage green — the "voiced" span highlight in the diff viewer */
+  --color-voice: #4f8a5b;
+  --color-voice-ink: #2f5c39;
+
   --font-sans:
     'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     sans-serif;

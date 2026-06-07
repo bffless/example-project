@@ -5,7 +5,7 @@ type Props = {
   src: string
   videoRef: RefObject<HTMLVideoElement | null>
   cuts: Cut[]
-  onTime: (time: number) => void
+  onTime?: (time: number) => void
   onLoaded: (duration: number) => void
 }
 
@@ -31,7 +31,7 @@ export function PreviewPlayer({ src, videoRef, cuts, onTime, onLoaded }: Props) 
         video!.currentTime = Math.min(hit.end, video!.duration || hit.end)
         return
       }
-      onTime(video!.currentTime)
+      onTime?.(video!.currentTime)
     }
     function onMeta() {
       onLoaded(video!.duration)

@@ -26,8 +26,25 @@ the creator's free-text direction to **`google/gemini-3.1-pro`**, which returns 
 one-line **synopsis** plus **scenes** (tightened script, original-video span,
 parseable `cuts`). The prep page got a **Director panel** (direction input + send
 action), Build shows the synopsis + per-scene cuts, and the shortened script now
-fills the 02b diff's right pane. **Next up: Story 04 — voice clone + per-scene
-re-voice.**
+fills the 02b diff's right pane. **Story 04 shipped the voice step**: a
+**VoiceStudio** resource at the bottom of prep where you either **clone your own
+voice** (mic recorder + live level meter → `/api/voice/clone`), **reuse a saved
+`voice_id`**, or **pick a MiniMax preset**, then **Generate a sample** to hear it
+(live `/api/voice/say`, `speech-2.8-turbo`). The **$3 clone is now ENABLED**
+(`minimax/voice-cloning`; recording re-encoded to WAV first; minted ids auto-saved
+for free reuse) — built disabled-first behind a preset stub, flipped on after
+verification. **Story 03c shipped the per-scene refiner + diff-viewer rework**: a
+second, zoomed-in pass — `/api/refine-scene` (rule `afacb572`, Gemini 3.1 Pro fed
+**dense per-scene** contact sheets) returns anchored narration **segments** +
+refined **cuts**, written non-destructively to `scene.refined` (the director's
+first pass is never overwritten; revert = clear it). The Build diff viewer is now
+the edit surface: scene **tabs** + a `SceneMeta` panel beside the video, the
+time-grid diff full-width below with **cuts as red cells**, equal-height panes,
+and **per-segment inline voicing** — **record it yourself** (mic → WAV → bucket)
+or **AI** (`/api/voice/narrate`, persisted mp3) — plus a **green** span showing
+each clip's real length with the words fit to it. **Next up: manual cut editing
+(03d phase) — let the user add/remove cuts directly in the diff viewer.** Then the
+wps knob, per-scene scope, the 03e filmstrip, and Story 05 — ffmpeg assemble.
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
@@ -35,8 +52,10 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 02-wire-transcription (WhisperX; needs Replicate token)
              ✅ 02b-transcript-editor (time-grid diff view + dev mocks)
              ✅ 03 master director (Gemini 3.1 Pro → synopsis + scenes + cuts)
-             ▶  04 voice clone + per-scene re-voice  ← START HERE
-             ·  05 · 06 · 07                  (queued)
+             ✅ 04 voice step (clone enabled / preset + live TTS preview)
+             🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
+                 ↳ ▶ next: manual cut editing · then wps knob · per-scene scope · 03e filmstrip
+             ·  05 ffmpeg assemble · 06 · 07           (queued)
 ```
 
 ## Order & status
@@ -51,7 +70,8 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 02 | `02-wire-transcription.md` | ③ transcribe (WhisperX) | ✅ done* |
 | 02b | `02b-transcript-editor.md` | transcript time-grid editor · dev mocks | ✅ done |
 | 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
-| 04 | `04-wire-voice-clone.md` | ⑥ clone + per-scene re-voice | ▶ **next up** |
+| 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
+| 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
 | 05 | `05-wire-ffmpeg-assemble.md` | assemble (fit footage to voice) | ⏳ queued |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |

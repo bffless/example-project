@@ -1,0 +1,63 @@
+import type { Scene } from '../../lib/scenes'
+
+type Props = {
+  scenes: Scene[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+}
+
+/**
+ * The scene queue as a horizontal tab strip — one tab per scene, so the work
+ * area below (video + transcript diff) can run the full width of the page. Built
+ * scenes are checked off; the active tab carries the terracotta underline. The
+ * strip scrolls horizontally when the scenes outrun the page width.
+ */
+export function SceneTabs({ scenes, selectedId, onSelect }: Props) {
+  const built = scenes.filter((s) => s.status === 'built').length
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <p className="meta-label">Scenes · chapters</p>
+        <p className="font-mono text-[12px] text-ink-mute">
+          {built}/{scenes.length} built
+        </p>
+      </div>
+      <div role="tablist" className="flex gap-1 overflow-x-auto border-b rule">
+        {scenes.map((scene) => {
+          const active = scene.id === selectedId
+          const done = scene.status === 'built'
+          return (
+            <button
+              key={scene.id}
+              role="tab"
+              aria-selected={active}
+              type="button"
+              onClick={() => onSelect(scene.id)}
+              className={[
+                '-mb-px flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-[13.5px] transition-colors',
+                active
+                  ? 'border-terracotta text-ink'
+                  : 'border-transparent text-ink-soft hover:border-paper-line hover:text-ink',
+              ].join(' ')}
+            >
+              <span
+                className={[
+                  'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
+                  done
+                    ? 'bg-terracotta text-paper'
+                    : active
+                      ? 'border border-terracotta text-terracotta-ink'
+                      : 'border border-paper-line text-ink-faint',
+                ].join(' ')}
+              >
+                {done ? '✓' : scene.index + 1}
+              </span>
+              <span className="max-w-[14rem] truncate">{scene.title}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

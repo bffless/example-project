@@ -84,7 +84,120 @@ const studioHandlers = [
     const body = (await request.json().catch(() => ({}))) as { duration?: number; direction?: string }
     return HttpResponse.json(mockDirector(body.duration ?? 0, body.direction ?? ''))
   }),
+
+  // Per-scene refiner (story 03c): canned anchored segments + refined cuts so the
+  // diff viewer has realistic placement without a paid Gemini call. Splits the
+  // posted first-pass `draftText` into two runs around the kept-pause/cut, each
+  // anchored to the scene's retained footage. Mirrors the real `/api/refine-scene`
+  // shape: { segments: [{ text, start, end }], cuts: [{ start, end }] }.
+  http.post('/api/refine-scene', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      start?: number
+      end?: number
+      draftText?: string
+      cuts?: { start: number; end: number }[]
+    }
+    return HttpResponse.json(mockRefiner(body))
+  }),
+
+  // Scene narration (story 03c): a short tone stands in for the persisted mp3 so
+  // the diff-viewer audio players work offline. Returns a data-URL "serve path"
+  // the <audio> can play directly.
+  http.post('/api/voice/narrate', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { text?: string }
+    const words = (body.text ?? '').trim().split(/\s+/).filter(Boolean).length
+    const seconds = Math.max(1, Math.round(words / 2.5))
+    return HttpResponse.json({ audioUrl: toneWavDataUrl(Math.min(seconds, 4)) })
+  }),
+
+  // Voice clone (story 04): return a real MiniMax preset id as the stub — matches
+  // the live clone-disabled pipeline, so the TTS preview below has a usable
+  // voice and no $3 clone is ever spent.
+  http.post('/api/voice/clone', () => HttpResponse.json({ voiceId: 'Friendly_Person' })),
+
+  // Voice say (TTS preview): a short audible tone stands in for synthesized
+  // narration, with a word-count-derived duration, so the preview plays offline
+  // without a paid speech call.
+  http.post('/api/voice/say', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { text?: string }
+    const words = (body.text ?? '').trim().split(/\s+/).filter(Boolean).length
+    const durationSeconds = Math.max(1, Math.round(words / 2.5))
+    return HttpResponse.json({
+      audioUrl: toneWavDataUrl(Math.min(durationSeconds, 4)),
+      durationSeconds,
+    })
+  }),
 ]
+
+/**
+ * A deterministic canned refiner response for one scene: split the first-pass
+ * `draftText` into two runs around the kept pause (the first-pass cut, or the
+ * scene's middle third if none), each anchored to the retained footage on either
+ * side. Returns refined cuts that tighten the pause slightly so it visibly
+ * differs from the director's first pass.
+ */
+function mockRefiner(body: {
+  start?: number
+  end?: number
+  draftText?: string
+  cuts?: { start: number; end: number }[]
+}) {
+  const start = Number.isFinite(body.start) ? (body.start as number) : 0
+  const end = Number.isFinite(body.end) && (body.end as number) > start ? (body.end as number) : start + 1
+  const span = end - start
+  // The pause to keep: the director's first cut, else the middle third.
+  const first = body.cuts?.[0]
+  const pauseStart = first ? first.start : start + span * 0.45
+  const pauseEnd = first ? first.end : start + span * 0.62
+
+  const words = (body.draftText ?? '').trim().split(/\s+/).filter(Boolean)
+  const mid = Math.ceil(words.length / 2)
+  const head = words.slice(0, mid).join(' ')
+  const tail = words.slice(mid).join(' ')
+
+  const segments = [
+    head && { text: head, start, end: pauseStart },
+    tail && { text: tail, start: pauseEnd, end },
+  ].filter(Boolean)
+
+  // "Refine" the cut: trim 0.3s off each edge so it reads as a tightened pass.
+  const cuts = [{ start: pauseStart + 0.3, end: Math.max(pauseStart + 0.4, pauseEnd - 0.3) }]
+  return { segments, cuts }
+}
+
+/** A tiny mono 440 Hz tone encoded as a base64 WAV data URL — a stand-in clip. */
+function toneWavDataUrl(seconds: number): string {
+  const rate = 8000
+  const n = Math.max(1, Math.floor(rate * seconds))
+  const buffer = new ArrayBuffer(44 + n * 2)
+  const view = new DataView(buffer)
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + n * 2, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, rate, true)
+  view.setUint32(28, rate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, n * 2, true)
+  for (let i = 0; i < n; i++) {
+    // gentle fade so it doesn't click; quiet amplitude
+    const env = Math.min(1, i / 400, (n - i) / 400)
+    const s = Math.sin((2 * Math.PI * 440 * i) / rate) * 0.2 * env
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  const bytes = new Uint8Array(buffer)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return `data:audio/wav;base64,${btoa(bin)}`
+}
 
 /** A deterministic canned director response sized to the clip's duration. */
 function mockDirector(duration: number, direction: string) {

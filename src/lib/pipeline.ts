@@ -107,9 +107,11 @@ export const STAGE_DEFS: StageDef[] = [
   },
   {
     id: 'clone',
-    title: 'Clone your voice',
-    note: 'Build a reusable voice model from your extracted audio via a Replicate voice-clone pipeline, ready to re-voice each scene.',
-    where: 'pipeline',
-    actionLabel: 'Clone voice',
+    title: 'Clone or choose your voice',
+    note: 'Set the voice your scenes are narrated in: record a short sample to clone your own voice (MiniMax voice-cloning), or pick one of MiniMax’s preset voices. Opens a recorder below the scenes.',
+    where: 'browser+pipeline',
+    // Owned by the VoiceStudio resource, not the board runner: this button just
+    // reveals it (see Studio.tsx). Recording + clone/preset happen there.
+    actionLabel: 'Choose your voice',
   },
 ]

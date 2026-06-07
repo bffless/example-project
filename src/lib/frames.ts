@@ -4,7 +4,14 @@
  * thumbnail per scene, and to build the director's timestamped contact sheet.
  */
 
-import { planContactSheet, gridDimensions, chunk, clockLabel } from './contactSheet'
+import {
+  planContactSheet,
+  planSceneContactSheet,
+  gridDimensions,
+  chunk,
+  clockLabel,
+  type ContactSheetPlan,
+} from './contactSheet'
 
 /** Capture `count` evenly-spaced JPEG-dataURL frames across the clip. */
 export async function captureFrames(
@@ -236,7 +243,31 @@ export async function captureContactSheet(
   duration: number,
   cellHeight = CONTACT_SHEET_CELL,
 ): Promise<ContactSheet[]> {
-  const plan = planContactSheet(duration)
+  return captureSheetsForPlan(src, planContactSheet(duration), cellHeight)
+}
+
+/**
+ * Dense contact sheets for ONE scene's window (story 03c) — the refiner's input.
+ * Same compositing as the clip-wide sheets, but the whole frame budget is spent
+ * on `[start, end]` for much tighter spacing. Timestamps stay in original-video
+ * seconds (the plan offsets them), so the burned-in clocks line up with the clip.
+ */
+export async function captureSceneContactSheet(
+  src: string,
+  start: number,
+  end: number,
+  cellHeight = CONTACT_SHEET_CELL,
+): Promise<ContactSheet[]> {
+  return captureSheetsForPlan(src, planSceneContactSheet(start, end), cellHeight)
+}
+
+/** Capture + compose the tiles a plan describes. Shared by the clip-wide and
+ *  per-scene sheet builders. */
+async function captureSheetsForPlan(
+  src: string,
+  plan: ContactSheetPlan,
+  cellHeight: number,
+): Promise<ContactSheet[]> {
   if (plan.times.length === 0 || plan.perSheet === 0) return []
   const timeTiles = chunk(plan.times, plan.perSheet)
   // Supersample: capture above the cell (capped at source by captureFramesAt),
@@ -251,6 +282,6 @@ export async function captureContactSheet(
     const sheet = await composeContactSheet(frames, tileTimes, cellHeight)
     if (sheet.dataUrl) sheets.push(sheet)
   }
-  // Stamp clip-wide interval and tile position (compose() can't infer them).
+  // Stamp the sampling interval and tile position (compose() can't infer them).
   return sheets.map((s, i) => ({ ...s, interval: plan.interval, index: i, total: sheets.length }))
 }

@@ -12,6 +12,9 @@
 
 export type TWord = { text: string; start: number; end: number }
 
+/** A dropped footage span, in seconds — drawn as red cells on the grid. */
+export type CutSpan = { start: number; end: number }
+
 /** One time-slice column in a row: the words that begin during that slice. */
 export type GridCell = TWord[]
 
@@ -51,11 +54,16 @@ export function segmentsPerLine(
  * Words keep their input order within a cell, so a transcript already sorted by
  * `start` reads naturally. Negative starts clamp to 0; a word landing exactly on
  * the row boundary clamps into the last cell of its row.
+ *
+ * `minSeconds` forces the grid to span at least that long even past the last
+ * word — so two panes can be pinned to the same height, and a trailing cut with
+ * no words underneath still has rows to render on.
  */
 export function buildTranscriptGrid(
   words: TWord[],
   secondsPerLine: number = DEFAULT_SECONDS_PER_LINE,
   segmentSeconds: number = DEFAULT_SEGMENT_SECONDS,
+  minSeconds = 0,
 ): GridLine[] {
   const perLine = Math.max(1, secondsPerLine)
   const seg = segmentSeconds > 0 ? segmentSeconds : DEFAULT_SEGMENT_SECONDS
@@ -79,6 +87,13 @@ export function buildTranscriptGrid(
     cells[col].push(w)
   }
 
+  // Extend to `minSeconds` so both diff panes stay the same height and trailing
+  // cuts (which have no words) still get rows.
+  if (Number.isFinite(minSeconds) && minSeconds > 0) {
+    const minLine = Math.ceil(minSeconds / perLine) - 1
+    if (minLine > maxLine) maxLine = minLine
+  }
+
   const lines: GridLine[] = []
   for (let i = 0; i <= maxLine; i++) {
     lines.push({
@@ -96,6 +111,33 @@ export function formatClock(seconds: number): string {
   const m = Math.floor(s / 60)
   const rem = s % 60
   return `${m}:${rem.toString().padStart(2, '0')}`
+}
+
+/**
+ * For one row, which columns fall inside a cut span — so the renderer can fill
+ * those cells red. A cell covers `[startSec + col*seg, +seg)`; it's cut if that
+ * slice overlaps any cut span at all.
+ */
+export function cutColumns(
+  startSec: number,
+  cols: number,
+  segmentSeconds: number = DEFAULT_SEGMENT_SECONDS,
+  cuts: CutSpan[] = [],
+): boolean[] {
+  const seg = segmentSeconds > 0 ? segmentSeconds : DEFAULT_SEGMENT_SECONDS
+  const out: boolean[] = new Array(cols).fill(false)
+  if (!cuts.length) return out
+  for (let col = 0; col < cols; col++) {
+    const cellStart = startSec + col * seg
+    const cellEnd = cellStart + seg
+    for (const c of cuts) {
+      if (cellEnd > c.start && cellStart < c.end) {
+        out[col] = true
+        break
+      }
+    }
+  }
+  return out
 }
 
 /**

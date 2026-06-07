@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildTranscriptGrid,
+  cutColumns,
   formatClock,
   gridPosition,
   segmentsPerLine,
@@ -10,6 +11,38 @@ import {
 } from './transcriptGrid'
 
 const w = (text: string, start: number, end = start + 0.2): TWord => ({ text, start, end })
+
+describe('buildTranscriptGrid minSeconds', () => {
+  it('extends the grid past the last word to span minSeconds', () => {
+    // One word at 0:01, but force the grid to cover 20s at 2s/line → 10 rows.
+    const lines = buildTranscriptGrid([w('hi', 1)], 2, 0.25, 20)
+    expect(lines.length).toBe(10)
+    expect(lines[lines.length - 1].startSec).toBe(18)
+  })
+
+  it('does not shrink a grid that already runs longer than minSeconds', () => {
+    const lines = buildTranscriptGrid([w('late', 40)], 2, 0.25, 10)
+    expect(lines[lines.length - 1].startSec).toBe(40)
+  })
+})
+
+describe('cutColumns', () => {
+  it('flags the columns whose time slice overlaps a cut', () => {
+    // row at 0s, 1s cells (5 cols over 5s); cut 2–4s covers cols 2 and 3.
+    const cols = cutColumns(0, 5, 1, [{ start: 2, end: 4 }])
+    expect(cols).toEqual([false, false, true, true, false])
+  })
+
+  it('maps cuts onto the right row by startSec', () => {
+    // row starting at 10s; a 12–13s cut hits the 3rd cell (10,11,12,...).
+    const cols = cutColumns(10, 5, 1, [{ start: 12, end: 13 }])
+    expect(cols).toEqual([false, false, true, false, false])
+  })
+
+  it('returns all-false when there are no cuts', () => {
+    expect(cutColumns(0, 4, 1, [])).toEqual([false, false, false, false])
+  })
+})
 
 describe('segmentsPerLine', () => {
   it('divides the line into segment-wide cells', () => {

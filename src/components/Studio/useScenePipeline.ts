@@ -1,11 +1,26 @@
 import { useCallback, useMemo, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
-import { narrationSeconds, type Scene } from '../../lib/scenes'
+import { narrationSeconds, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { timedTranscript, toScenes } from '../../lib/director'
-import { extractAudio } from '../../lib/audio'
-import { captureFramesAt, captureContactSheet, type ContactSheet } from '../../lib/frames'
+import { toRefinement, effectiveSegments } from '../../lib/refiner'
+import { extractAudio, extractAudioWav } from '../../lib/audio'
+import {
+  captureFramesAt,
+  captureContactSheet,
+  captureSceneContactSheet,
+  type ContactSheet,
+} from '../../lib/frames'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { useTranscribeMutation, useScenesMutation, useUploadMutation } from '../../store/studioApi'
+import {
+  useTranscribeMutation,
+  useScenesMutation,
+  useRefineSceneMutation,
+  useNarrateMutation,
+  useUploadMutation,
+  useVoiceCloneMutation,
+  useVoiceSayMutation,
+} from '../../store/studioApi'
+import { presetLabel } from '../../lib/voices'
 import {
   patchStage,
   failActiveStage,
@@ -17,6 +32,9 @@ import {
   setContactSheets,
   setWords,
   setSynopsis,
+  setVoice,
+  addSavedVoice,
+  removeSavedVoice,
   setSelected,
   resetStudio,
   type TranscriptWord,
@@ -24,6 +42,22 @@ import {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`
+
+/**
+ * Measure an audio clip's real length by loading just its metadata — the TTS
+ * pipeline doesn't report a duration, so we read it off the served file (works
+ * for both bucket serve paths and the mock's data-URL tone). Resolves 0 on error.
+ */
+function measureAudioDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const audio = new Audio()
+    audio.preload = 'metadata'
+    const done = (v: number) => resolve(Number.isFinite(v) && v > 0 ? v : 0)
+    audio.addEventListener('loadedmetadata', () => done(audio.duration))
+    audio.addEventListener('error', () => done(0))
+    audio.src = url
+  })
+}
 
 /**
  * Module-level in-flight guard for the prep step runner. Deliberately NOT a
@@ -102,15 +136,33 @@ export function useScenePipeline() {
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
+  const voice = useAppSelector((s) => s.studio.voice)
+  const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
 
   const [transcribeReq] = useTranscribeMutation()
   const [scenesReq] = useScenesMutation()
+  const [refineSceneReq] = useRefineSceneMutation()
+  const [narrateReq] = useNarrateMutation()
   const [uploadReq] = useUploadMutation()
+  const [voiceCloneReq] = useVoiceCloneMutation()
+  const [voiceSayReq] = useVoiceSayMutation()
 
   // Transient UI state — not persisted.
   const [voicingId, setVoicingId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  // Per-scene refiner (story 03c) busy flags + last error. Transient: the scene
+  // being captured-for, the scene being refined, and any error from either.
+  const [sheetingId, setSheetingId] = useState<string | null>(null)
+  const [refiningId, setRefiningId] = useState<string | null>(null)
+  // Which segment is currently being voiced (AI or record-upload), as
+  // `${sceneId}:${segmentIndex}` — so only that one row shows a spinner.
+  const [voicingSegKey, setVoicingSegKey] = useState<string | null>(null)
+  const [sceneError, setSceneError] = useState<string | null>(null)
+  // The clone prep step's two busy flags: cloning a recording, and synthesizing
+  // the post-selection preview sample. Transient — fine to lose on reload.
+  const [cloning, setCloning] = useState(false)
+  const [samplingVoice, setSamplingVoice] = useState(false)
   // The just-captured contact sheets, shown immediately while they upload. They
   // carry the heavy base64 `dataUrl`, so they live here (transient) and NEVER in
   // Redux/localStorage — only the uploaded sheets (bucket URL, empty dataUrl) are
@@ -282,12 +334,93 @@ export function useScenePipeline() {
     [patch, dispatch, words, persistedSheets, scenesReq],
   )
 
-  // Stage ⑦ — clone the voice (still mocked; real Replicate clone is story 04).
-  const cloneVoice = useCallback(async () => {
-    patch('clone', { status: 'active' })
-    await delay(900)
-    patch('clone', { status: 'done', detail: 'voice model ready' })
-  }, [patch])
+  // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
+  // the VoiceStudio resource at the bottom of prep, which calls one of these two
+  // actions. Either produces the one durable `voice` (cloned or preset) that
+  // Build re-voices each scene with.
+
+  // Clone path: upload the recorded sample, then mint a voice id. The real $3
+  // `minimax/voice-cloning` call is DISABLED server-side — the pipeline returns a
+  // real preset id as a stub, so the recording is uploaded but the clone itself
+  // costs nothing for now. The returned id still drives the live TTS preview.
+  const cloneFromRecording = useCallback(
+    async (blob: Blob) => {
+      if (cloning) return
+      setCloning(true)
+      patch('clone', { status: 'active' })
+      try {
+        // MediaRecorder gives us webm/opus (Chrome) or mp4 (Safari), but MiniMax
+        // voice-cloning only accepts mp3/m4a/wav. Decode the take and re-encode it
+        // to a 24 kHz mono WAV before upload so the clone never rejects the format
+        // (reuses the same WebAudio path as audio extraction).
+        const recorded = new File([blob], 'voice-sample', { type: blob.type || 'audio/webm' })
+        const wav = await extractAudioWav(recorded, 24000)
+        const file = new File([wav], 'voice-sample.wav', { type: 'audio/wav' })
+        const { url: sampleUrl } = await uploadReq({ file, kind: 'voice' }).unwrap()
+        const { voiceId } = await voiceCloneReq({ sampleUrl }).unwrap()
+        const label = 'Your cloned voice'
+        dispatch(setVoice({ voiceId, source: 'clone', label, sampleUrl }))
+        // Remember the id so it's reusable next session without re-paying the $3.
+        dispatch(addSavedVoice({ voiceId, label }))
+        patch('clone', { status: 'done', detail: `cloned voice ready · ${voiceId}` })
+      } catch (e) {
+        patch('clone', { status: 'error', detail: stageError(e) })
+      } finally {
+        setCloning(false)
+      }
+    },
+    [cloning, patch, dispatch, uploadReq, voiceCloneReq],
+  )
+
+  // Preset path: no recording, no upload, no cost — just store the picked id.
+  const pickPresetVoice = useCallback(
+    (voiceId: string) => {
+      const label = presetLabel(voiceId)
+      dispatch(setVoice({ voiceId, source: 'preset', label }))
+      patch('clone', { status: 'done', detail: `preset · ${label}` })
+    },
+    [dispatch, patch],
+  )
+
+  // Reuse a previously-cloned voice id (pasted or picked from the saved list) —
+  // no clone call, no $3. MiniMax keeps cloned voices server-side by id.
+  const reuseVoiceId = useCallback(
+    (rawId: string, rawLabel?: string) => {
+      const voiceId = rawId.trim()
+      if (!voiceId) return
+      const label = (rawLabel ?? '').trim() || voiceId
+      dispatch(setVoice({ voiceId, source: 'saved', label }))
+      dispatch(addSavedVoice({ voiceId, label }))
+      patch('clone', { status: 'done', detail: `saved voice · ${voiceId}` })
+    },
+    [dispatch, patch],
+  )
+
+  const forgetVoice = useCallback(
+    (voiceId: string) => dispatch(removeSavedVoice(voiceId)),
+    [dispatch],
+  )
+
+  // Re-do the voice step: clear the choice and reset the stage to pending.
+  const clearVoice = useCallback(() => {
+    dispatch(setVoice(null))
+    patch('clone', { status: 'pending', detail: undefined })
+  }, [dispatch, patch])
+
+  // Preview: speak a short canned line in the chosen voice so the producer can
+  // hear it (live, cheap TTS). Returns the audio URL for the resource to play.
+  const generateSample = useCallback(async (): Promise<string | null> => {
+    if (!voice || samplingVoice) return null
+    setSamplingVoice(true)
+    try {
+      const text =
+        'Here is a quick sample of how your narration will sound across the scenes.'
+      const { audioUrl } = await voiceSayReq({ text, voiceId: voice.voiceId }).unwrap()
+      return audioUrl
+    } finally {
+      setSamplingVoice(false)
+    }
+  }, [voice, samplingVoice, voiceSayReq])
 
   /** Run the current prep step. Marks the active stage `error` if it throws. */
   const next = useCallback(
@@ -301,8 +434,9 @@ export function useScenePipeline() {
         else if (id === 'extract') await extractAndUploadAudio(ctx)
         else if (id === 'transcribe') await transcribe(ctx)
         else if (id === 'thumbnails') await generateThumbnails(ctx)
-        else if (id === 'clone') await cloneVoice()
-        else await runDirector(ctx) // shorten + segment, one Gemini call
+        else if (id === 'director') await runDirector(ctx) // shorten + segment, one Gemini call
+        // 'clone' isn't run here — the VoiceStudio resource owns it (record/clone
+        // or pick a preset), so reaching it via the board is a no-op.
       } catch (e) {
         dispatch(failActiveStage(stageError(e)))
       } finally {
@@ -318,8 +452,146 @@ export function useScenePipeline() {
       transcribe,
       generateThumbnails,
       runDirector,
-      cloneVoice,
     ],
+  )
+
+  // ---- Per-scene refiner (story 03c) ----------------------------------------
+
+  // Button 1: capture DENSE contact sheets for just this scene's window and
+  // upload them (url-only persisted, like the prep sheets). Captures off the
+  // persisted source serve URL so it works after a reload without the in-memory
+  // clip. Separate from the whole-clip prep sheets.
+  const generateSceneSheets = useCallback(
+    async (id: string) => {
+      if (sheetingId || refiningId) return
+      const scene = scenes.find((s) => s.id === id)
+      if (!scene || !sourceUrl) return
+      setSheetingId(id)
+      setSceneError(null)
+      try {
+        const sheets = await captureSceneContactSheet(sourceUrl, scene.start, scene.end)
+        const uploaded: ContactSheet[] = []
+        for (const sheet of sheets) {
+          const blob = await (await fetch(sheet.dataUrl)).blob()
+          const ext = blob.type === 'image/png' ? 'png' : 'jpg'
+          const name = `scene-${scene.index + 1}-sheet-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
+          const file = new File([blob], name, { type: blob.type })
+          const { url } = await uploadReq({ file, kind: 'thumbnails' }).unwrap()
+          // Persist URL-only — drop the base64 blob so localStorage stays small.
+          uploaded.push({ ...sheet, url, dataUrl: '' })
+        }
+        patchScene(id, { sheets: uploaded })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setSheetingId(null)
+      }
+    },
+    [sheetingId, refiningId, scenes, sourceUrl, uploadReq, patchScene],
+  )
+
+  // Button 2: hand the scene's transcript + the director's first-pass
+  // script/cuts + the dense sheets to /api/refine-scene, store the result in
+  // `scene.refined` (NON-destructive — `draftText`/`cuts` are never touched).
+  const refineScene = useCallback(
+    async (id: string) => {
+      if (sheetingId || refiningId) return
+      const scene = scenes.find((s) => s.id === id)
+      if (!scene) return
+      setRefiningId(id)
+      setSceneError(null)
+      try {
+        const scoped = words.filter((w) => w.start >= scene.start && w.start < scene.end)
+        const sheetUrls = (scene.sheets ?? []).map((s) => s.url).filter((u): u is string => !!u)
+        const data = await refineSceneReq({
+          start: scene.start,
+          end: scene.end,
+          transcript: timedTranscript(scoped),
+          draftText: scene.draftText,
+          cuts: scene.cuts ?? [],
+          sheetUrls,
+          direction: '',
+        }).unwrap()
+        patchScene(id, { refined: toRefinement(data, scene) })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setRefiningId(null)
+      }
+    },
+    [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene],
+  )
+
+  // Throw out the refinement and revert to the director's first pass.
+  const clearRefinement = useCallback(
+    (id: string) => {
+      setSceneError(null)
+      patchScene(id, { refined: null })
+    },
+    [patchScene],
+  )
+
+  // Write one segment's audio back into `scene.refined` (creating a refinement
+  // from the baseline if the scene wasn't refined yet), and recompute the scene's
+  // total narration length from the voiced segments. Shared by AI + record.
+  const setSegmentAudio = useCallback(
+    (sceneId: string, segIndex: number, audio: Partial<NarrationSegment>) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const segments = base.segments.map((seg, i) => (i === segIndex ? { ...seg, ...audio } : seg))
+      const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+      patchScene(sceneId, { refined: { ...base, segments }, narrationSeconds: total })
+    },
+    [scenes, patchScene],
+  )
+
+  // Voice ONE segment with the saved voice via the persisted-TTS pipeline. The
+  // robot/AI option, now per-segment (not the whole scene at once).
+  const generateSegmentNarration = useCallback(
+    async (sceneId: string, segIndex: number) => {
+      if (voicingSegKey || !voice) return
+      const scene = scenes.find((s) => s.id === sceneId)
+      const seg = scene && effectiveSegments(scene)[segIndex]
+      if (!seg) return
+      setVoicingSegKey(`${sceneId}:${segIndex}`)
+      setSceneError(null)
+      try {
+        const { audioUrl } = await narrateReq({ text: seg.text, voiceId: voice.voiceId }).unwrap()
+        const audioSeconds = await measureAudioDuration(audioUrl)
+        setSegmentAudio(sceneId, segIndex, { audioUrl, audioSeconds, audioSource: 'ai' })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setVoicingSegKey(null)
+      }
+    },
+    [voicingSegKey, voice, scenes, narrateReq, setSegmentAudio],
+  )
+
+  // Voice ONE segment with the user's OWN recording: re-encode the take to WAV,
+  // upload it (reusing the voice/ bucket), measure it, store it on the segment.
+  // This is the "record it myself, it's actually me" path.
+  const recordSegmentNarration = useCallback(
+    async (sceneId: string, segIndex: number, blob: Blob) => {
+      if (voicingSegKey) return
+      setVoicingSegKey(`${sceneId}:${segIndex}`)
+      setSceneError(null)
+      try {
+        const recorded = new File([blob], 'segment', { type: blob.type || 'audio/webm' })
+        const wav = await extractAudioWav(recorded, 24000)
+        const file = new File([wav], `segment-${segIndex + 1}.wav`, { type: 'audio/wav' })
+        const { url } = await uploadReq({ file, kind: 'voice' }).unwrap()
+        const audioSeconds = await measureAudioDuration(url)
+        setSegmentAudio(sceneId, segIndex, { audioUrl: url, audioSeconds, audioSource: 'recorded' })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setVoicingSegKey(null)
+      }
+    },
+    [voicingSegKey, uploadReq, setSegmentAudio],
   )
 
   // ---- Scene build loop -----------------------------------------------------
@@ -374,15 +646,34 @@ export function useScenePipeline() {
     contactSheets,
     words,
     synopsis,
+    voice,
+    savedVoices,
     selectedId,
     voicingId,
     running,
+    cloning,
+    samplingVoice,
+    sheetingId,
+    refiningId,
+    voicingSegKey,
+    sceneError,
     ready,
     allBuilt,
     currentStageId,
     next,
     reset,
     select,
+    generateSceneSheets,
+    refineScene,
+    clearRefinement,
+    generateSegmentNarration,
+    recordSegmentNarration,
+    cloneFromRecording,
+    pickPresetVoice,
+    reuseVoiceId,
+    forgetVoice,
+    clearVoice,
+    generateSample,
     updateDraft,
     generateVoice,
     markBuilt,
