@@ -2,8 +2,16 @@ import { useCallback, useMemo, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { timedTranscript, toScenes } from '../../lib/director'
-import { toRefinement, effectiveSegments, addCut, removeCut } from '../../lib/refiner'
-import { extractAudio, extractAudioWav } from '../../lib/audio'
+import {
+  toRefinement,
+  effectiveSegments,
+  addCut,
+  removeCut,
+  fitsGap,
+  insertSegment,
+  removeSegment,
+} from '../../lib/refiner'
+import { extractAudio, extractAudioWav, sliceAudioWav } from '../../lib/audio'
 import {
   captureFramesAt,
   captureContactSheet,
@@ -155,6 +163,8 @@ export function useScenePipeline() {
   // being captured-for, the scene being refined, and any error from either.
   const [sheetingId, setSheetingId] = useState<string | null>(null)
   const [refiningId, setRefiningId] = useState<string | null>(null)
+  // The scene currently slicing+uploading an original-audio clip (story 03d).
+  const [adoptingId, setAdoptingId] = useState<string | null>(null)
   // Which segment is currently being voiced (AI or record-upload), as
   // `${sceneId}:${segmentIndex}` — so only that one row shows a spinner.
   const [voicingSegKey, setVoicingSegKey] = useState<string | null>(null)
@@ -539,6 +549,80 @@ export function useScenePipeline() {
     [scenes, patchScene],
   )
 
+  // Adopt a span of the source clip's ORIGINAL audio as a New-pane run (story
+  // 03d): slice `[origStart, origEnd]` out of the whole-clip audio, upload it as
+  // a real clip, and drop it into the scene at `dropStart` — fill-gaps-only, so
+  // it must sit inside an empty gap (no overlap with existing runs). Writes
+  // `scene.refined` (`source: 'manual'`), never the director baseline.
+  const adoptOriginalAudio = useCallback(
+    async (sceneId: string, origStart: number, origEnd: number, dropStart: number) => {
+      if (adoptingId) return
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene || !audioUrl) return
+      const duration = origEnd - origStart
+      const segs = effectiveSegments(scene)
+      if (!fitsGap(segs, scene, dropStart, duration)) {
+        setSceneError("That clip doesn't fit the gap there — make room or pick a longer gap.")
+        return
+      }
+      setAdoptingId(sceneId)
+      setSceneError(null)
+      try {
+        const wav = await sliceAudioWav(audioUrl, origStart, origEnd)
+        const file = new File([wav], `original-${Math.round(origStart)}-${Math.round(origEnd)}.wav`, {
+          type: 'audio/wav',
+        })
+        const { url } = await uploadReq({ file, kind: 'voice' }).unwrap()
+        const measured = await measureAudioDuration(url)
+        const len = measured > 0 ? measured : duration
+        const text = words
+          .filter((w) => w.start >= origStart && w.start < origEnd)
+          .map((w) => w.text)
+          .join(' ')
+        const seg: NarrationSegment = {
+          text,
+          start: dropStart,
+          end: dropStart + len,
+          audioUrl: url,
+          audioSeconds: len,
+          audioSource: 'original',
+        }
+        const base =
+          scene.refined ?? { segments: segs, cuts: scene.cuts ?? [], source: 'ai' as const }
+        const segments = insertSegment(base.segments, seg)
+        // Keeping original audio here contradicts a cut over the same span — so
+        // un-cut it, otherwise the run would render red (cut wins over voiced).
+        const cuts = removeCut(base.cuts, { start: seg.start, end: seg.end })
+        const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+        patchScene(sceneId, {
+          refined: { ...base, segments, cuts, source: 'manual' },
+          narrationSeconds: total,
+        })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setAdoptingId(null)
+      }
+    },
+    [adoptingId, scenes, audioUrl, words, uploadReq, patchScene],
+  )
+
+  // Delete one New-pane run, reopening its gap (story 03d) — e.g. to clear room
+  // for an original-audio clip. Materializes `refined` from the baseline so it's
+  // revertible, recomputes the scene's narration length, tags it `manual`.
+  const deleteSegment = useCallback(
+    (sceneId: string, segIndex: number) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const segments = removeSegment(base.segments, segIndex)
+      const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+      patchScene(sceneId, { refined: { ...base, segments, source: 'manual' }, narrationSeconds: total })
+    },
+    [scenes, patchScene],
+  )
+
   // Throw out the refinement and revert to the director's first pass.
   const clearRefinement = useCallback(
     (id: string) => {
@@ -672,6 +756,7 @@ export function useScenePipeline() {
     samplingVoice,
     sheetingId,
     refiningId,
+    adoptingId,
     voicingSegKey,
     sceneError,
     ready,
@@ -683,6 +768,8 @@ export function useScenePipeline() {
     generateSceneSheets,
     refineScene,
     editSceneCut,
+    adoptOriginalAudio,
+    deleteSegment,
     clearRefinement,
     generateSegmentNarration,
     recordSegmentNarration,

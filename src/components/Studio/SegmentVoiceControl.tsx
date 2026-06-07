@@ -12,7 +12,7 @@ export type SegmentControl = {
   text: string
   audioUrl?: string
   audioSeconds?: number
-  audioSource?: 'ai' | 'recorded'
+  audioSource?: 'ai' | 'recorded' | 'original'
   /** This segment is mid-voicing (AI call or record upload). */
   busy: boolean
 }
@@ -24,6 +24,15 @@ type Props = {
   onGenerateAI: () => void
   onRecord: (blob: Blob) => void
   onPlay: (url: string) => void
+  /** Delete this run, reopening its gap (story 03d). */
+  onDelete: () => void
+}
+
+/** How the run was voiced, for the inline label. */
+const sourceLabel: Record<NonNullable<SegmentControl['audioSource']>, string> = {
+  recorded: 'you',
+  ai: 'AI',
+  original: 'original',
 }
 
 const btn =
@@ -36,7 +45,7 @@ const btn =
  * button + length + source ("you"/"AI") show, with re-record / re-AI. Kept to one
  * row tall so the two diff panes stay aligned.
  */
-export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay }: Props) {
+export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete }: Props) {
   const recorder = useRecorder()
   const submitted = useRef(false)
 
@@ -83,7 +92,7 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
                 ▶
               </button>
               <span className="font-mono text-ink-mute">
-                {(audioSeconds ?? 0).toFixed(1)}s · {audioSource === 'recorded' ? 'you' : 'AI'}
+                {(audioSeconds ?? 0).toFixed(1)}s · {audioSource ? sourceLabel[audioSource] : 'AI'}
               </span>
             </>
           )}
@@ -98,6 +107,15 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
             title={canAI ? undefined : 'Choose a narration voice in prep first'}
           >
             ✨ {audioUrl ? 'Re-AI' : 'AI'}
+          </button>
+          <button
+            type="button"
+            className={`${btn} ml-auto`}
+            onClick={onDelete}
+            title="Delete this run (reopens the gap)"
+            aria-label="Delete this run"
+          >
+            ✕
           </button>
         </>
       )}

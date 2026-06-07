@@ -216,6 +216,25 @@ like everything else in the refiner layer.
 - Re-uses the existing `effectiveCuts` read path + red-cell rendering; this added
   only the *write* side + a drag preview (terracotta ring = add, neutral = remove).
 
+## ✅ Reuse original audio + delete runs — shipped
+
+Use a slice of the source clip's OWN audio as a New-pane run (no re-voicing) and
+delete runs to make room. Fill-gaps-only, non-destructive (writes
+`scene.refined`, `source: 'manual'`).
+
+- **Two-step grab → place.** Drag-select a span on the **Original** pane to grab
+  it (green outline, "Placing Xs" banner); the **New** pane then glows its gaps
+  and a click on a gap the clip fits drops it there. Esc / Cancel aborts. Chosen
+  click-to-place over free cross-pane drag (far more reliable; same two-step feel).
+- **Real audio clip.** `sliceAudioWav(audioUrl, start, end)` slices the whole-clip
+  WAV (original-video second = audio second) and uploads it (`kind: 'voice'`) → a
+  standalone clip played like any other run, `audioSource: 'original'`.
+- **Pure helpers** (`refiner.ts`, tested): `gaps`, `fitsGap` (placement guard),
+  `insertSegment`/`removeSegment`. `useScenePipeline.adoptOriginalAudio` (slice →
+  upload → fit-check → insert) + `deleteSegment` (reopens the gap).
+- **Delete a run**: an ✕ on each inline `SegmentVoiceControl` removes that run;
+  the source label now reads you / AI / **original**.
+
 ## Goal
 
 Turn the transcript time-grid (`TranscriptDiff`) into the per-scene edit surface.
@@ -256,7 +275,10 @@ Turn the transcript time-grid (`TranscriptDiff`) into the per-scene edit surface
 - [x] Drag-paint edits cuts into `refined` (`source: 'manual'`), revertible —
       add/extend (start on kept) and contract/split (start on red). Pure
       `addCut`/`removeCut`/`normalizeCuts` in `refiner.ts`, unit-tested.
-- [x] build/lint/tests pass (132 tests).
+- [x] Reuse original audio: grab a span on the Original pane → place into a New
+      gap as an `audioSource:'original'` run (sliced + uploaded clip), fill-gaps
+      only; delete runs to make room. Pure `gaps`/`fitsGap`/`insert/removeSegment`.
+- [x] build/lint/tests pass (141 tests).
 
 ---
 

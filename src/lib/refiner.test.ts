@@ -7,8 +7,13 @@ import {
   normalizeCuts,
   addCut,
   removeCut,
+  gaps,
+  fitsGap,
+  insertSegment,
+  removeSegment,
   type RefineSceneRaw,
 } from './refiner'
+import type { NarrationSegment } from './scenes'
 import type { Scene } from './scenes'
 
 /** A minimal scene spanning [start, end] with a director first-pass draft/cuts. */
@@ -204,5 +209,67 @@ describe('removeCut', () => {
     expect(
       removeCut([{ start: 13, end: 24 }, { start: 43, end: 53 }], { start: 10, end: 30 }),
     ).toEqual([{ start: 43, end: 53 }])
+  })
+})
+
+describe('gaps', () => {
+  const sc = { start: 0, end: 100 }
+  const seg = (start: number, end: number): NarrationSegment => ({ text: 'x', start, end })
+
+  it('returns the empty spans around the segments', () => {
+    expect(gaps([seg(10, 30), seg(60, 80)], sc)).toEqual([
+      { start: 0, end: 10 },
+      { start: 30, end: 60 },
+      { start: 80, end: 100 },
+    ])
+  })
+
+  it('is the whole scene when there are no segments', () => {
+    expect(gaps([], sc)).toEqual([{ start: 0, end: 100 }])
+  })
+
+  it('ignores overlapping/touching segments when carving gaps', () => {
+    expect(gaps([seg(0, 40), seg(20, 60)], sc)).toEqual([{ start: 60, end: 100 }])
+  })
+})
+
+describe('fitsGap', () => {
+  const sc = { start: 0, end: 100 }
+  const seg = (start: number, end: number): NarrationSegment => ({ text: 'x', start, end })
+  const segs = [seg(10, 30), seg(60, 80)] // gaps: 0–10, 30–60, 80–100
+
+  it('accepts a clip that fits inside a single gap', () => {
+    expect(fitsGap(segs, sc, 35, 20)).toBe(true) // 35–55 ⊂ 30–60
+  })
+
+  it('rejects a clip that overlaps a run', () => {
+    expect(fitsGap(segs, sc, 55, 20)).toBe(false) // 55–75 hits the 60–80 run
+  })
+
+  it('rejects a clip that spills past the scene', () => {
+    expect(fitsGap(segs, sc, 90, 20)).toBe(false) // 90–110 > scene end
+  })
+
+  it('rejects a zero/negative duration', () => {
+    expect(fitsGap(segs, sc, 35, 0)).toBe(false)
+  })
+})
+
+describe('insertSegment / removeSegment', () => {
+  const seg = (start: number, end: number): NarrationSegment => ({ text: `${start}`, start, end })
+
+  it('inserts keeping ascending order', () => {
+    expect(insertSegment([seg(0, 10), seg(60, 80)], seg(30, 50))).toEqual([
+      seg(0, 10),
+      seg(30, 50),
+      seg(60, 80),
+    ])
+  })
+
+  it('removes by index', () => {
+    expect(removeSegment([seg(0, 10), seg(30, 50), seg(60, 80)], 1)).toEqual([
+      seg(0, 10),
+      seg(60, 80),
+    ])
   })
 })

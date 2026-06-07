@@ -46,6 +46,30 @@ export async function extractAudio(
 }
 
 /**
+ * Slice `[start, end]` (seconds) out of an already-uploaded audio clip and
+ * re-encode it as a standalone WAV — used to "use the original audio here"
+ * (story 03d): the source clip's own audio for a span becomes a real narration
+ * clip we upload to the bucket, played like any other run. The whole-clip audio
+ * was extracted 1:1 with the video timeline, so original-video seconds index
+ * straight into it. Clamps the range to the decoded audio.
+ */
+export async function sliceAudioWav(
+  url: string,
+  start: number,
+  end: number,
+  targetRate = 16000,
+): Promise<Blob> {
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) throw new Error(`Couldn't load audio (${res.status})`)
+  const blob = await res.blob()
+  const file = new File([blob], 'audio.wav', { type: blob.type || 'audio/wav' })
+  const samples = await decodeToMono(file, targetRate)
+  const lo = Math.max(0, Math.floor(Math.min(start, end) * targetRate))
+  const hi = Math.min(samples.length, Math.ceil(Math.max(start, end) * targetRate))
+  return encodeWav(samples.subarray(lo, Math.max(lo, hi)), targetRate)
+}
+
+/**
  * Compute the waveform peaks from an already-uploaded audio URL — the fallback
  * for sessions whose audio was extracted before peaks were persisted (or any
  * time the summary is missing). Fetches the small WAV and decodes it once; the

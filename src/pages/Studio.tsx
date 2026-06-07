@@ -7,7 +7,7 @@ import { MediaImport } from '../components/Studio/MediaImport'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
-import { effectiveCuts, effectiveSegments, segmentsToTimedWords } from '../lib/refiner'
+import { effectiveCuts, effectiveSegments, segmentsToTimedWords, gaps } from '../lib/refiner'
 import { sceneAtTime } from '../lib/scenes'
 import type { CutSpan } from '../lib/transcriptGrid'
 import { SceneList } from '../components/Studio/SceneList'
@@ -188,6 +188,21 @@ export function Studio() {
     (span: CutSpan, op: 'add' | 'remove') => {
       const owner = sceneAtTime(pipe.scenes, span.start)
       if (owner) pipe.editSceneCut(owner.id, span, op)
+    },
+    [pipe],
+  )
+
+  // Empty gaps on the New timeline an original-audio clip can be dropped into.
+  const gapSpans = useMemo(
+    () => pipe.scenes.flatMap((s) => gaps(effectiveSegments(s), s)),
+    [pipe.scenes],
+  )
+
+  // Drop a grabbed original-audio clip — route to the scene owning the drop time.
+  const onAdoptOriginal = useCallback(
+    (origStart: number, origEnd: number, dropStart: number) => {
+      const owner = sceneAtTime(pipe.scenes, dropStart)
+      if (owner) pipe.adoptOriginalAudio(owner.id, origStart, origEnd, dropStart)
     },
     [pipe],
   )
@@ -461,6 +476,9 @@ export function Studio() {
                     onGenerateAI={pipe.generateSegmentNarration}
                     onRecord={pipe.recordSegmentNarration}
                     onEditCut={onEditCut}
+                    dropTargets={gapSpans}
+                    onAdoptOriginal={onAdoptOriginal}
+                    onDeleteSegment={pipe.deleteSegment}
                   />
                 )}
               </div>

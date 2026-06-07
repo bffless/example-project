@@ -37,8 +37,10 @@ export type NarrationSegment = {
   audioUrl?: string
   /** Real measured length of that audio clip, in seconds. */
   audioSeconds?: number
-  /** How this run was voiced: AI text-to-speech, or the user's own recording. */
-  audioSource?: 'ai' | 'recorded'
+  /** How this run was voiced: AI text-to-speech, the user's own recording, or a
+   *  slice of the source clip's ORIGINAL audio dropped back into the new edit
+   *  (story 03d — "use the original audio here", no re-voicing). */
+  audioSource?: 'ai' | 'recorded' | 'original'
 }
 
 /**

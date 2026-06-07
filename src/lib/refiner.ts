@@ -139,6 +139,50 @@ export function removeCut(cuts: Cut[], span: Cut): Cut[] {
 }
 
 /**
+ * The empty spans on a scene's New timeline — the complement of its narration
+ * segments within `[scene.start, scene.end]`. These are the "gaps" (kept dead
+ * air) an original-audio clip can be dropped into. Sub-0.05s slivers are dropped.
+ */
+export function gaps(segments: NarrationSegment[], scene: Pick<Scene, 'start' | 'end'>): Cut[] {
+  const sorted = [...segments].sort((a, b) => a.start - b.start)
+  const out: Cut[] = []
+  let cursor = scene.start
+  for (const seg of sorted) {
+    if (seg.start - cursor > 0.05) out.push({ start: cursor, end: seg.start })
+    cursor = Math.max(cursor, seg.end)
+  }
+  if (scene.end - cursor > 0.05) out.push({ start: cursor, end: scene.end })
+  return out
+}
+
+/**
+ * Can a clip of `duration` seconds be dropped at `dropStart` — i.e. does
+ * `[dropStart, dropStart + duration]` sit entirely inside a single gap (within
+ * the scene, not overlapping any existing run)? The guard for placing an
+ * original-audio clip; placement is fill-gaps-only.
+ */
+export function fitsGap(
+  segments: NarrationSegment[],
+  scene: Pick<Scene, 'start' | 'end'>,
+  dropStart: number,
+  duration: number,
+): boolean {
+  if (duration <= 0) return false
+  const end = dropStart + duration
+  return gaps(segments, scene).some((g) => dropStart >= g.start - 0.05 && end <= g.end + 0.05)
+}
+
+/** Insert a segment and keep the list sorted ascending by start. */
+export function insertSegment(segments: NarrationSegment[], seg: NarrationSegment): NarrationSegment[] {
+  return [...segments, seg].sort((a, b) => a.start - b.start)
+}
+
+/** Drop the segment at `index` (no-op if out of range). */
+export function removeSegment(segments: NarrationSegment[], index: number): NarrationSegment[] {
+  return segments.filter((_, i) => i !== index)
+}
+
+/**
  * The narration segments to render for a scene: the refiner's if present, else a
  * single segment spanning the whole scene from the director's `draftText` (the
  * old even-spread fallback). Lets the diff viewer read one shape regardless.
