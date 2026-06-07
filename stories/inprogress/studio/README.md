@@ -42,9 +42,14 @@ the edit surface: scene **tabs** + a `SceneMeta` panel beside the video, the
 time-grid diff full-width below with **cuts as red cells**, equal-height panes,
 and **per-segment inline voicing** — **record it yourself** (mic → WAV → bucket)
 or **AI** (`/api/voice/narrate`, persisted mp3) — plus a **green** span showing
-each clip's real length with the words fit to it. **Next up: manual cut editing
-(03d phase) — let the user add/remove cuts directly in the diff viewer.** Then the
-wps knob, per-scene scope, the 03e filmstrip, and Story 05 — ffmpeg assemble.
+each clip's real length with the words fit to it. **Story 03e shipped the sprite
+filmstrip gutter**: a fixed ~150px column down the left of the diff viewer showing
+the contact-sheet frame nearest each row's time — reusing the already-captured
+sheets as CSS sprites (`src/lib/filmstrip.ts`, `cellWidth/cellHeight/gap` now
+persisted on `ContactSheet`), row-aligned to the grid (incl. segment spacers) so
+it scrolls in lockstep. **Next up: manual cut editing (03d phase) — let the user
+add/remove cuts directly in the diff viewer.** Then the wps knob, per-scene scope,
+and Story 05 — ffmpeg assemble.
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
@@ -54,7 +59,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 03 master director (Gemini 3.1 Pro → synopsis + scenes + cuts)
              ✅ 04 voice step (clone enabled / preset + live TTS preview)
              🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
-                 ↳ ▶ next: manual cut editing · then wps knob · per-scene scope · 03e filmstrip
+                 ↳ ✅ 03e sprite filmstrip · ▶ next: manual cut editing · then wps knob · per-scene scope
              ·  05 ffmpeg assemble · 06 · 07           (queued)
 ```
 

@@ -292,22 +292,45 @@ A ~160px-wide column on the left of the diff viewer, running top→bottom
 **time-aligned to the grid**, so the row at 0:12 shows the 0:12 frame — you can see
 where the text lands visually as you scroll.
 
-## Approach
+## Approach (shipped)
 
-- Reuse the **contact sheets as sprites** — no new image generation. Prefer the
-  scene's dense `sheets` (03c, button 1); fall back to the whole-clip prep sheets.
-- Each frame is sliced from its sheet via CSS `background-position` using the
-  sheet's `cols`/`rows`/`width`/`height` and the frame's index (from `times[]`).
-- **Height math:** a grid row is `secondsPerLine` seconds tall; frames are sampled
-  every `interval` seconds, so each frame occupies `interval / secondsPerLine` rows
-  of vertical space, positioned by its time. The column's total height equals the
-  grid's, so it scrolls in lockstep. Thumbnails are cropped (`cover`) to their time
-  slot to stay aligned rather than tiling perfectly.
+- Reuse the **contact sheets as sprites** — no new image generation. The frame
+  index (`src/lib/filmstrip.ts`, pure + tested) flattens every sheet's cells into
+  one time-sorted list: per-scene dense `sheets` first (so they win on overlap),
+  then the whole-clip prep sheets fill everywhere else. `frameAt` finds the cell
+  nearest a row's time; `spriteStyle` crops it via `background-position`.
+- **Cell geometry is now persisted metadata.** `composeContactSheet` stamps
+  `cellWidth`/`cellHeight`/`gap` onto each `ContactSheet` (alongside the existing
+  `width/height/cols/rows/times[]`) — derivable, but saved so the sprite math is
+  self-contained and survives any change to the gap/layout. Both prep and refiner
+  sheets get it for free (one shared compositor).
+- **Alignment, not a time→pixel ruler.** The original spec planned to size each
+  frame by `interval / secondsPerLine` rows — but the panes have **non-uniform**
+  row heights (a per-segment voice control injects an `h-9` spacer above some
+  rows), so a pure time ruler would drift. Instead the `Filmstrip` column runs the
+  **same** `buildTranscriptGrid` + segment-row mapping as the Original pane and
+  emits the same spacer, so it stays in lockstep row-for-row at any zoom. One
+  frame per row (nearest its start second), centre-cropped to the flat row box.
+- Layout: a fixed ~150px gutter, **left of the resizable Original|New split** (so
+  the divider's percentage math is unaffected); `hidden lg:block` like the divider.
+- **Hover-to-peek:** at rest each cell shows the centred band (frame scaled to the
+  gutter width, vertically centred, clipped to the row); on hover the whole frame
+  pops over its neighbours with a slight border + shadow.
+- **Tall-rows toggle** (`tall frames` / `compact rows` in the diff header): grows
+  **every** row — the gutter cell AND the Original/New panes (via a `rowHeight`
+  threaded into `Row`'s `grid-auto-rows`) — to a full frame's height, so frames
+  show in full while staying row-aligned to the words. The row divider lives on a
+  wrapper outside the sized box so the gutter and panes don't drift by 1px/row.
 
 ## Acceptance criteria
 
-- [ ] Left gutter of time-aligned thumbnails, sliced from contact sheets (sprite),
+- [x] Left gutter of time-aligned thumbnails, sliced from contact sheets (sprite),
       no extra image generation.
-- [ ] Frame shown at a given row matches that row's time; scrolls in lockstep.
-- [ ] Uses the scene's dense sheets when present, else the prep sheets.
-- [ ] build/lint/tests pass.
+- [x] Frame shown at a given row matches that row's time; aligned to the grid rows
+      (incl. the segment spacers), so it scrolls in lockstep.
+- [x] Uses the scene's dense sheets when present, else the prep sheets
+      (`buildFilmstrip` order + `frameAt` nearest).
+- [x] Cell geometry (`cellWidth/cellHeight/gap`) persisted on `ContactSheet` via
+      the shared compositor; `filmstrip.ts` unit-tested (9 tests).
+- [x] build/lint/tests pass (150 tests; the 2 lint errors are pre-existing in
+      `ChatPopup/ChatPanel.tsx`, untouched here).
