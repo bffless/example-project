@@ -188,29 +188,33 @@ buttons with minimal UI; the phases below build the actual viewer on top.
 > scene and reading the refiner's output.
 
 **Status:** mostly shipped — no playhead, **cuts as red cells**, equal/aligned
-panes, segmented right pane, **green voiced span + word-fit**, and per-segment
-inline voicing (record/AI) all landed with 03c. **▶ NEXT UP: manual cut editing**
-(below). Still after that: global wps knob, true per-scene scoping.
+panes, segmented right pane, **green voiced span + word-fit**, per-segment inline
+voicing (record/AI), and now **manual cut editing** (below) all landed. Still
+after that: global wps knob, true per-scene scoping.
 
-## ▶ Next: manual cut editing (add / remove cuts)
+## ✅ Manual cut editing (add / extend / contract) — shipped
 
-Let the user fix the AI's cuts by hand, directly in the diff viewer — **add** a
-cut over footage the model kept, or **remove** one it dropped. Non-destructive,
+Let the user fix the AI's cuts by hand, directly in the diff viewer. Non-destructive,
 like everything else in the refiner layer.
 
-- **Remove a cut:** click a red (cut) cell → that cut span is deleted (or split,
-  if the click lands mid-span) from the effective cut set.
-- **Add a cut:** select a range on the grid (drag, or click start then end) over
-  non-cut cells → add that span to the cuts.
-- Writes the result to `scene.refined.cuts` with `source: 'manual'` (creating a
-  refinement from the director baseline if the scene wasn't refined yet — same
-  `setSegmentAudio`-style merge). The director's `cuts` are never touched, so
-  `clearRefinement` still reverts cleanly.
-- Re-uses the existing `effectiveCuts` read path + the red-cell rendering; this is
-  purely the *write* side. Snap added/removed spans to whole cells (the current
-  `segmentSeconds` granularity) so edits are predictable.
-- Open question: cell-drag selection UX on a dense quarter-second grid — consider
-  a coarser click-to-toggle at 1s granularity first, refine later.
+- **Drag-to-paint** on the grid cells. The cell the drag *starts* on fixes the op:
+  start on **kept** footage → **add** (drag to size a new cut, or drag from a cell
+  adjacent to an existing cut to **extend** it — the merge grows it); start on a
+  **red** cell → **remove** (drag to **contract** a cut from its edge, or carve the
+  middle to split it). A single click is a one-cell edit.
+- Pure cut math in `refiner.ts`: `addCut(cuts, span, scene)` (clamp + merge),
+  `removeCut(cuts, span)` (subtract/split), `normalizeCuts` (sort/coalesce/drop
+  slivers) — all unit-tested. Both ops fold into ONE flat `refined.cuts` list (no
+  separate additive "user cuts" overlay — un-cutting is a subtraction, which an
+  additive layer can't express).
+- `useScenePipeline.editSceneCut(sceneId, span, op)` writes `scene.refined.cuts`
+  with `source: 'manual'`, materializing the refinement from the director baseline
+  on the first edit (same `setSegmentAudio`-style merge). `scene.cuts` is never
+  touched, so `clearRefinement` still reverts cleanly.
+- Edits route to the scene that owns the drag's start time (`sceneAtTime`), clamped
+  to that scene. Spans snap to whole cells (current `segmentSeconds` granularity).
+- Re-uses the existing `effectiveCuts` read path + red-cell rendering; this added
+  only the *write* side + a drag preview (terracotta ring = add, neutral = remove).
 
 ## Goal
 
@@ -249,8 +253,10 @@ Turn the transcript time-grid (`TranscriptDiff`) into the per-scene edit surface
       with no words still shows.
 - [ ] Global wps knob re-flows the right pane (rate-based, per segment). _(rate is
       `WORDS_PER_SECOND` default for now; knob TBD)_
-- [ ] Clicking cells edits cuts into `refined` (`source: 'manual'`), revertible.
-- [x] build/lint/tests pass (123 tests).
+- [x] Drag-paint edits cuts into `refined` (`source: 'manual'`), revertible —
+      add/extend (start on kept) and contract/split (start on red). Pure
+      `addCut`/`removeCut`/`normalizeCuts` in `refiner.ts`, unit-tested.
+- [x] build/lint/tests pass (132 tests).
 
 ---
 

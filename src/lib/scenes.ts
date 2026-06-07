@@ -103,6 +103,19 @@ export function sceneVideoSeconds(scene: Scene): number {
   return Math.max(0, scene.end - scene.start)
 }
 
+/**
+ * Which scene owns a given original-video second. Scenes tile the timeline
+ * contiguously, so `[start, end)` is half-open; the very last second falls into
+ * the final scene (its `end` is inclusive). Used to route a click on the
+ * whole-talk diff grid to the right scene's cut layer. Null if `t` is before
+ * the first scene or there are no scenes.
+ */
+export function sceneAtTime(scenes: Scene[], t: number): Scene | null {
+  for (const s of scenes) if (t >= s.start && t < s.end) return s
+  const last = scenes[scenes.length - 1]
+  return last && t >= last.start && t <= last.end ? last : null
+}
+
 export type Alignment = { deltaSeconds: number; status: 'short' | 'long' | 'aligned' }
 
 /** Compare voiced narration length to the scene's video length. */

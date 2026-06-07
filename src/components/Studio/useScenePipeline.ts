@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
-import { narrationSeconds, type NarrationSegment, type Scene } from '../../lib/scenes'
+import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { timedTranscript, toScenes } from '../../lib/director'
-import { toRefinement, effectiveSegments } from '../../lib/refiner'
+import { toRefinement, effectiveSegments, addCut, removeCut } from '../../lib/refiner'
 import { extractAudio, extractAudioWav } from '../../lib/audio'
 import {
   captureFramesAt,
@@ -522,6 +522,23 @@ export function useScenePipeline() {
     [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene],
   )
 
+  // Hand-edit a scene's cuts directly on the diff grid (story 03d). `add` paints
+  // a new/extended cut over the span; `remove` contracts/splits an existing one.
+  // Materializes `refined` from the director baseline on the first edit (same
+  // merge as `setSegmentAudio`), tags it `manual`, and NEVER touches `scene.cuts`
+  // — so `clearRefinement` still reverts to the AI's first pass cleanly.
+  const editSceneCut = useCallback(
+    (sceneId: string, span: Cut, op: 'add' | 'remove') => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const cuts = op === 'add' ? addCut(base.cuts, span, scene) : removeCut(base.cuts, span)
+      patchScene(sceneId, { refined: { ...base, cuts, source: 'manual' } })
+    },
+    [scenes, patchScene],
+  )
+
   // Throw out the refinement and revert to the director's first pass.
   const clearRefinement = useCallback(
     (id: string) => {
@@ -665,6 +682,7 @@ export function useScenePipeline() {
     select,
     generateSceneSheets,
     refineScene,
+    editSceneCut,
     clearRefinement,
     generateSegmentNarration,
     recordSegmentNarration,

@@ -89,6 +89,56 @@ export function toRefinement(raw: RefineSceneRaw, scene: Scene): SceneRefinement
 }
 
 /**
+ * Merge a cut list into a clean, sorted, non-overlapping set: drop sub-cell
+ * slivers, sort by start, and coalesce spans that touch or overlap (within the
+ * 0.05s float tolerance). Both hand-edit primitives below funnel through this so
+ * the stored `refined.cuts` is always tidy — e.g. adding the dead air between two
+ * adjacent cuts collapses all three into one.
+ */
+export function normalizeCuts(cuts: Cut[]): Cut[] {
+  const sorted = [...cuts]
+    .filter((c) => c.end - c.start > 0.05)
+    .sort((a, b) => a.start - b.start)
+  const out: Cut[] = []
+  for (const c of sorted) {
+    const last = out[out.length - 1]
+    if (last && c.start <= last.end + 0.05) last.end = Math.max(last.end, c.end)
+    else out.push({ start: c.start, end: c.end })
+  }
+  return out
+}
+
+/**
+ * Hand-edit: add a cut span (clamped to the scene), merging it into any cut it
+ * touches. Covers both **add a new cut** (span over kept footage) and **extend a
+ * cut** (span adjacent to an existing one — the merge grows it).
+ */
+export function addCut(cuts: Cut[], span: Cut, scene: Pick<Scene, 'start' | 'end'>): Cut[] {
+  const clamped = clampSpan(span.start, span.end, scene.start, scene.end)
+  if (!clamped) return normalizeCuts(cuts)
+  return normalizeCuts([...cuts, clamped])
+}
+
+/**
+ * Hand-edit: remove a span from the cut set — **contract a cut** from its edge,
+ * or carve out the middle (which splits one cut into two). Spans the removal
+ * doesn't touch pass through untouched.
+ */
+export function removeCut(cuts: Cut[], span: Cut): Cut[] {
+  const out: Cut[] = []
+  for (const c of cuts) {
+    if (span.end <= c.start || span.start >= c.end) {
+      out.push(c) // no overlap — keep whole
+      continue
+    }
+    if (c.start < span.start) out.push({ start: c.start, end: span.start }) // left remainder
+    if (c.end > span.end) out.push({ start: span.end, end: c.end }) // right remainder
+    // fully covered → dropped
+  }
+  return normalizeCuts(out)
+}
+
+/**
  * The narration segments to render for a scene: the refiner's if present, else a
  * single segment spanning the whole scene from the director's `draftText` (the
  * old even-spread fallback). Lets the diff viewer read one shape regardless.

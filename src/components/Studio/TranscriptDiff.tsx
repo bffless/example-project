@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   buildTranscriptGrid,
   cutColumns,
@@ -19,7 +19,9 @@ type Props = {
    *  of `words` until the director/refiner produces a tightened version. */
   editedWords?: TWord[]
   /** Footage spans being dropped (refiner's `cuts`, else the director's), in
-   *  original-video seconds. Rendered as red cells on both panes. */
+   *  original-video seconds. Rendered as red cells on the New pane only — the
+   *  Original is an untouched reference; the deletion is from the working
+   *  timeline, not the source. */
   cuts?: CutSpan[]
   /** Narration runs — an inline voice control (record / AI / play) renders on the
    *  New pane at each run's start row. */
@@ -28,7 +30,17 @@ type Props = {
   canGenerateAI?: boolean
   onGenerateAI?: (sceneId: string, index: number) => void
   onRecord?: (sceneId: string, index: number, blob: Blob) => void
+  /** Hand-edit the cuts by dragging on the grid. The drag's start cell decides
+   *  the op: starting on kept footage **adds** a cut (drag to size / extend an
+   *  adjacent one); starting on a red cell **removes** (contract or split). The
+   *  span is in original-video seconds, snapped to whole cells. Omit to make the
+   *  grid read-only (the prep previews). */
+  onEditCut?: (span: CutSpan, op: 'add' | 'remove') => void
 }
+
+/** An in-progress cut drag: the cell it began on, the cell under the pointer
+ *  now, and the op fixed at pointer-down. */
+type Drag = { start: number; end: number; op: 'add' | 'remove' }
 
 // One clip plays at a time: stop the previous before starting the next.
 let currentAudio: HTMLAudioElement | null = null
@@ -37,6 +49,31 @@ function playClip(url: string) {
   const audio = new Audio(url)
   currentAudio = audio
   void audio.play().catch(() => {})
+}
+
+// Resizable split: the Original pane's width as a % of the row, clamped so
+// neither pane can collapse. Persisted to localStorage so the panes come back
+// the same size after a reload (a view preference, like seconds-per-line).
+const SPLIT_KEY = 'studio.diff.leftPct'
+const SPLIT_MIN = 20
+const SPLIT_MAX = 80
+const DEFAULT_SPLIT = 50
+
+function readSplit(): number {
+  try {
+    const v = Number(localStorage.getItem(SPLIT_KEY))
+    return Number.isFinite(v) && v >= SPLIT_MIN && v <= SPLIT_MAX ? v : DEFAULT_SPLIT
+  } catch {
+    return DEFAULT_SPLIT
+  }
+}
+
+function writeSplit(pct: number) {
+  try {
+    localStorage.setItem(SPLIT_KEY, String(Math.round(pct)))
+  } catch {
+    /* private mode / disabled storage — just don't persist */
+  }
 }
 
 /** Last second any of these words occupies (0 if none / untimed). */
@@ -63,8 +100,9 @@ type Controls = {
  * side — original (left) vs the new/shortened transcript (right). Line numbers
  * are timestamps; each row is `secondsPerLine` seconds sliced into
  * `segmentSeconds` cells. Both panes are pinned to the same height so timestamps
- * line up; dropped footage (`cuts`) is filled red on both. Each narration run
- * gets an inline voice control (record / AI / play) on the New pane.
+ * line up; dropped footage (`cuts`) is filled red on the New pane only (the
+ * Original is an untouched reference). Each narration run gets an inline voice
+ * control (record / AI / play) on the New pane.
  */
 export function TranscriptDiff({
   words,
@@ -74,10 +112,83 @@ export function TranscriptDiff({
   canGenerateAI = false,
   onGenerateAI,
   onRecord,
+  onEditCut,
 }: Props) {
   const [secondsPerLine, setSecondsPerLine] = useState(DEFAULT_SECONDS_PER_LINE)
   const [segmentSeconds, setSegmentSeconds] = useState(DEFAULT_SEGMENT_SECONDS)
   const right = editedWords ?? words
+
+  // Resizable panes: drag the divider to give the New pane more room. `leftPct`
+  // is the Original pane's width; the New pane takes the rest. Lazy-initialised
+  // from (and persisted back to) localStorage so it survives a reload.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [leftPct, setLeftPct] = useState(readSplit)
+  const [resizing, setResizing] = useState(false)
+
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (e: PointerEvent) => {
+      const el = containerRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const pct = ((e.clientX - rect.left) / rect.width) * 100
+      setLeftPct(Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, pct)))
+    }
+    const stop = () => setResizing(false)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+    }
+  }, [resizing])
+
+  // Persist only once the drag settles (not on every move), and the no-op write
+  // on mount is harmless.
+  useEffect(() => {
+    if (!resizing) writeSplit(leftPct)
+  }, [resizing, leftPct])
+
+  // Cut hand-editing: a pointer-drag across cells (story 03d). The op is fixed at
+  // pointer-down by the start cell's state, so the whole gesture either adds or
+  // removes. Commit on pointer-up anywhere (window listener) so releasing off the
+  // grid still lands the edit. `pending` previews the affected span as you drag.
+  const editable = !!onEditCut
+  const [drag, setDrag] = useState<Drag | null>(null)
+
+  const onCellDown = useCallback(
+    (time: number, isCut: boolean) => {
+      if (!editable) return
+      setDrag({ start: time, end: time, op: isCut ? 'remove' : 'add' })
+    },
+    [editable],
+  )
+  const onCellEnter = useCallback((time: number) => {
+    setDrag((d) => (d ? { ...d, end: time } : d))
+  }, [])
+
+  useEffect(() => {
+    if (!drag || !onEditCut) return
+    const commit = () => {
+      setDrag((d) => {
+        if (d) {
+          const start = Math.min(d.start, d.end)
+          const end = Math.max(d.start, d.end) + segmentSeconds // include the end cell's slot
+          onEditCut({ start, end }, d.op)
+        }
+        return null
+      })
+    }
+    window.addEventListener('pointerup', commit)
+    return () => window.removeEventListener('pointerup', commit)
+  }, [drag, onEditCut, segmentSeconds])
+
+  const pending: CutSpan | null = drag
+    ? { start: Math.min(drag.start, drag.end), end: Math.max(drag.start, drag.end) + segmentSeconds }
+    : null
+  const cellEdit: CellEdit | null = editable
+    ? { onCellDown, onCellEnter, pending, pendingOp: drag?.op ?? null }
+    : null
 
   // Pin both panes to the same span: the latest of either transcript or any cut,
   // so they're equal height and a trailing cut with no words still shows.
@@ -100,6 +211,7 @@ export function TranscriptDiff({
             {segmentSeconds === 1 ? 'second' : `${segmentSeconds}s`} ·{' '}
             <span className="text-terracotta-ink">red</span> = cut ·{' '}
             <span className="text-voice-ink">green</span> = voiced
+            {editable && ' · drag empty cells to cut, drag red cells to un-cut'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 font-mono text-[12px] text-ink-mute">
@@ -118,29 +230,49 @@ export function TranscriptDiff({
         </div>
       </div>
 
-      <div className="grid gap-px bg-paper-line lg:grid-cols-2">
-        <Pane
-          label="Original"
-          sublabel="from transcription"
-          words={words}
-          secondsPerLine={secondsPerLine}
-          segmentSeconds={segmentSeconds}
-          cuts={cuts}
-          minSeconds={span}
-          segments={segments}
-          controls={null}
+      <div
+        ref={containerRef}
+        className={['flex flex-col lg:flex-row', resizing ? 'select-none' : ''].join(' ')}
+        style={{ '--lw': `${leftPct}%` } as CSSProperties}
+      >
+        <div className="min-w-0 border-b rule lg:basis-[var(--lw)] lg:shrink-0 lg:grow-0 lg:border-b-0">
+          <Pane
+            label="Original"
+            sublabel="from transcription"
+            words={words}
+            secondsPerLine={secondsPerLine}
+            segmentSeconds={segmentSeconds}
+            cuts={[]}
+            minSeconds={span}
+            segments={segments}
+            controls={null}
+            edit={null}
+          />
+        </div>
+        {/* drag handle — only meaningful in the lg side-by-side layout */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            setResizing(true)
+          }}
+          className="hidden shrink-0 cursor-col-resize bg-paper-line transition-colors hover:bg-terracotta/50 lg:block lg:w-1.5"
         />
-        <Pane
-          label="New"
-          sublabel={editedWords ? 'shortened' : 'copy — shorten in prep'}
-          words={right}
-          secondsPerLine={secondsPerLine}
-          segmentSeconds={segmentSeconds}
-          cuts={cuts}
-          minSeconds={span}
-          segments={segments}
-          controls={controls}
-        />
+        <div className="min-w-0 lg:flex-1">
+          <Pane
+            label="New"
+            sublabel={editedWords ? 'shortened' : 'copy — shorten in prep'}
+            words={right}
+            secondsPerLine={secondsPerLine}
+            segmentSeconds={segmentSeconds}
+            cuts={cuts}
+            minSeconds={span}
+            segments={segments}
+            controls={controls}
+            edit={cellEdit}
+          />
+        </div>
       </div>
     </div>
   )
@@ -178,6 +310,14 @@ function Select<T extends number>({
   )
 }
 
+/** Cut hand-editing wiring handed down to each cell — null when read-only. */
+type CellEdit = {
+  onCellDown: (time: number, isCut: boolean) => void
+  onCellEnter: (time: number) => void
+  pending: CutSpan | null
+  pendingOp: 'add' | 'remove' | null
+}
+
 type PaneProps = {
   label: string
   sublabel: string
@@ -188,6 +328,7 @@ type PaneProps = {
   minSeconds: number
   segments: SegmentControl[]
   controls: Controls | null
+  edit: CellEdit | null
 }
 
 function Pane({
@@ -200,6 +341,7 @@ function Pane({
   minSeconds,
   segments,
   controls,
+  edit,
 }: PaneProps) {
   const lines = useMemo(
     () => buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
@@ -270,6 +412,7 @@ function Pane({
                   segmentSeconds={segmentSeconds}
                   cuts={cuts}
                   voiced={voiced}
+                  edit={edit}
                 />
               </div>
             )
@@ -287,6 +430,7 @@ function Row({
   segmentSeconds,
   cuts,
   voiced,
+  edit,
 }: {
   line: GridLine
   template: string
@@ -294,9 +438,12 @@ function Row({
   segmentSeconds: number
   cuts: CutSpan[]
   voiced: CutSpan[]
+  edit: CellEdit | null
 }) {
   const cutCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, cuts)
   const voicedCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, voiced)
+  const pendingCols =
+    edit?.pending ? cutColumns(line.startSec, line.cells.length, segmentSeconds, [edit.pending]) : []
 
   return (
     <div className="grid border-t border-paper-line/60" style={{ gridTemplateColumns: template }}>
@@ -308,12 +455,29 @@ function Row({
       {line.cells.map((cell, col) => (
         <div
           key={col}
+          onPointerDown={
+            edit
+              ? (e) => {
+                  e.preventDefault() // don't start a text selection while painting
+                  edit.onCellDown(line.startSec + col * segmentSeconds, cutCols[col])
+                }
+              : undefined
+          }
+          onPointerEnter={edit ? () => edit.onCellEnter(line.startSec + col * segmentSeconds) : undefined}
           className={[
             'flex min-h-[2rem] items-center px-1',
+            edit ? 'cursor-pointer select-none' : '',
             // separators only on whole-second boundaries, so quarter-slices stay quiet
             col > 0 && col % perSecond === 0 ? 'border-l border-paper-line/50' : '',
             // dropped footage red; else the voiced span green (cut wins on overlap)
             cutCols[col] ? 'bg-terracotta/30' : voicedCols[col] ? 'bg-voice/25' : '',
+            // drag preview: outline the cells the gesture will add (terracotta) or
+            // remove (neutral), so you see the span before releasing.
+            pendingCols[col]
+              ? edit?.pendingOp === 'remove'
+                ? 'ring-2 ring-inset ring-ink-faint'
+                : 'ring-2 ring-inset ring-terracotta'
+              : '',
           ].join(' ')}
         >
           {/* nowrap + visible overflow: a word sits at its slot and bleeds right

@@ -4,6 +4,9 @@ import {
   effectiveSegments,
   effectiveCuts,
   segmentsToTimedWords,
+  normalizeCuts,
+  addCut,
+  removeCut,
   type RefineSceneRaw,
 } from './refiner'
 import type { Scene } from './scenes'
@@ -135,5 +138,71 @@ describe('segmentsToTimedWords', () => {
 
   it('returns [] for no segments', () => {
     expect(segmentsToTimedWords([])).toEqual([])
+  })
+})
+
+describe('normalizeCuts', () => {
+  it('sorts, drops slivers, and coalesces touching/overlapping spans', () => {
+    expect(
+      normalizeCuts([
+        { start: 13, end: 24 },
+        { start: 0, end: 9 },
+        { start: 9, end: 13 }, // bridges the first two → all three merge
+        { start: 60, end: 60.02 }, // sub-cell sliver → dropped
+        { start: 43, end: 53 },
+      ]),
+    ).toEqual([
+      { start: 0, end: 24 },
+      { start: 43, end: 53 },
+    ])
+  })
+})
+
+describe('addCut', () => {
+  const sc = { start: 0, end: 100 }
+
+  it('adds a brand-new cut over kept footage', () => {
+    expect(addCut([{ start: 0, end: 9 }], { start: 30, end: 40 }, sc)).toEqual([
+      { start: 0, end: 9 },
+      { start: 30, end: 40 },
+    ])
+  })
+
+  it('extends an existing cut when the new span is adjacent', () => {
+    // the 9–13 dead air between two cuts, added → the three collapse to one
+    expect(
+      addCut([{ start: 0, end: 9 }, { start: 13, end: 24 }], { start: 9, end: 13 }, sc),
+    ).toEqual([{ start: 0, end: 24 }])
+  })
+
+  it('clamps the added span to the scene span', () => {
+    expect(addCut([], { start: 90, end: 200 }, sc)).toEqual([{ start: 90, end: 100 }])
+  })
+
+  it('ignores a span that clamps to nothing', () => {
+    expect(addCut([{ start: 0, end: 9 }], { start: 200, end: 300 }, sc)).toEqual([
+      { start: 0, end: 9 },
+    ])
+  })
+})
+
+describe('removeCut', () => {
+  it('contracts a cut from its edge', () => {
+    expect(removeCut([{ start: 0, end: 9 }], { start: 5, end: 9 })).toEqual([
+      { start: 0, end: 5 },
+    ])
+  })
+
+  it('splits a cut when the removal carves out the middle', () => {
+    expect(removeCut([{ start: 0, end: 20 }], { start: 8, end: 12 })).toEqual([
+      { start: 0, end: 8 },
+      { start: 12, end: 20 },
+    ])
+  })
+
+  it('drops a fully-covered cut and leaves others untouched', () => {
+    expect(
+      removeCut([{ start: 13, end: 24 }, { start: 43, end: 53 }], { start: 10, end: 30 }),
+    ).toEqual([{ start: 43, end: 53 }])
   })
 })

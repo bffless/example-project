@@ -8,6 +8,8 @@ import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
 import { effectiveCuts, effectiveSegments, segmentsToTimedWords } from '../lib/refiner'
+import { sceneAtTime } from '../lib/scenes'
+import type { CutSpan } from '../lib/transcriptGrid'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneTabs } from '../components/Studio/SceneTabs'
 import { SceneMeta } from '../components/Studio/SceneMeta'
@@ -176,6 +178,18 @@ export function Studio() {
         })),
       ),
     [pipe.scenes, pipe.voicingSegKey],
+  )
+
+  // A cut hand-edit on the diff grid. The grid hands us a span on the whole-talk
+  // timeline; route it to whichever scene owns its start, clamped to that scene
+  // by `editSceneCut`. (A drag that crosses a scene boundary edits only the
+  // start scene — fine, scenes are built one at a time.)
+  const onEditCut = useCallback(
+    (span: CutSpan, op: 'add' | 'remove') => {
+      const owner = sceneAtTime(pipe.scenes, span.start)
+      if (owner) pipe.editSceneCut(owner.id, span, op)
+    },
+    [pipe],
   )
 
   const phase = studioPhase({
@@ -446,6 +460,7 @@ export function Studio() {
                     canGenerateAI={!!pipe.voice}
                     onGenerateAI={pipe.generateSegmentNarration}
                     onRecord={pipe.recordSegmentNarration}
+                    onEditCut={onEditCut}
                   />
                 )}
               </div>
