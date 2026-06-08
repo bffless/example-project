@@ -67,10 +67,15 @@ is **honored** (kept silent) so export = what the grid shows. The cut also **sav
 like every other resource**: **Save to my library** uploads the MP4 via a new
 presigned `export` flow (rules `2ec4f942`/`7459fb60`/`bea10a3d`) and persists only
 the serve URL (`finalCutUrl`), so a refresh brings the saved cut back to
-play/download — re-assemble + save overwrites it. **Next up: manual cut
-editing (03d phase) — let the user add/remove cuts directly in the diff viewer** —
-then the wps knob, per-scene scope, and the story 05 polish follow-up (loudnorm +
-crossfades).
+play/download — re-assemble + save overwrites it. Scenes carry a manual **Mark
+built / re-open** toggle (tab ✓ + readiness line; never auto-set). **Story 05
+optimizations are slated next but NOT done**: audio polish (per-segment `loudnorm`
++ short `acrossfade`), a stream-copy/no-re-encode speed path, and — **parked** —
+multithreaded ffmpeg.wasm (`core-mt` is incompatible with `@ffmpeg/ffmpeg@0.12.15`'s
+module worker + classic pthread workers; reverted to single-threaded). See story 05's
+"Optimizations — slated next". **Next up overall: manual cut editing (03d phase) —
+let the user add/remove cuts directly in the diff viewer** — then the wps knob and
+per-scene scope.
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket

@@ -16,7 +16,16 @@
 > that's the producer's own done-tracker; the panel lets them stitch the scenes
 > together and preview the cut anytime (un-voiced runs render silent, flagged).
 > Trailing dead space is **honored** (kept silent), matching the grid.
-> Loudnorm/crossfades remain the tracked follow-up.
+>
+> **Built tracker.** "Built" is the producer's own per-scene "good to go" flag, set
+> via a **Mark built / re-open** toggle in `SceneMeta` (it drives the tab ✓ and the
+> `built/total` count) — never set automatically by assembling or saving. The export
+> panel surfaces an **all-scenes-built** readiness line, but as a *signal, not a hard
+> gate* (you can still assemble a preview anytime). `toggleBuilt` in `useScenePipeline`.
+>
+> **Optimizations** (audio loudnorm/crossfades, stream-copy speed, multithreaded
+> core) are **slated next — none done yet**; see the "Optimizations — slated next"
+> section below (incl. why multithreaded ffmpeg.wasm is parked).
 >
 > **Save (persist the cut).** The assembled MP4 isn't just downloadable — **Save to
 > my library** uploads it to the bucket via the presigned `export` flow and persists
@@ -174,7 +183,60 @@ debugging a fancy filter — get a playable MP4 out, then sprinkle quality on.
 - [x] build/lint/tests pass *(my files lint clean; 2 pre-existing lint errors live in
       unrelated `ChatPopup/ChatPanel.tsx`).*
 
+## Optimizations — slated next (NOT done yet)
+
+The MVP renders correctly; these are the layered-on improvements, in priority
+order. **None implemented yet** — listed here so the next pickup has the context.
+
+### Audio polish (the most audible gap — do first)
+The `original` screen-rec audio and the mic/AI takes sit at **different volumes
+and room tones**, and back-to-back that's the most obvious artifact. Currently we
+only resample every clip to one common 48 kHz mono format and concat — no level
+work at all.
+- **Loudness normalization** (EBU R128 / ffmpeg `loudnorm`) **per segment** so every
+  clip lands at the same target loudness (e.g. −16 LUFS). Two-pass ideally
+  (measure → apply); single-pass is an acceptable first cut.
+- **Short crossfades** (`acrossfade`, ~10–20 ms) at segment joins to kill the clicks
+  where clips butt together / against silence.
+- Room-tone mismatch between `original` and `recorded` clips is **not** an ffmpeg
+  fix — it's a "re-record this run in your own voice" decision. Surface it in the
+  UI, don't chase it in the filter graph.
+
+### Speed
+- **Avoid re-encoding where possible (biggest win).** Today we re-encode the whole
+  timeline with libx264 (slow). The kept video pieces are all trims of the *same*
+  source, so a keyframe-aware **stream-copy** path (concat demuxer, `-c copy`) could
+  be orders of magnitude faster than any threading — at the cost of snapping cuts to
+  keyframes (or re-encoding only the boundary segments). This is the real prize.
+- **Encode-setting knobs.** Already `-preset ultrafast`; could expose a
+  preview-quality vs final-quality toggle (higher `-crf`, cap resolution/fps for a
+  fast preview).
+
+### Multithreaded ffmpeg.wasm — INVESTIGATED, PARKED (don't retry blindly)
+Tried `@ffmpeg/core-mt` (threaded libx264 via `SharedArrayBuffer` + pthreads) with
+COOP `same-origin` + COEP `credentialless` (dev headers + graceful single-threaded
+fallback). **It does not work with `@ffmpeg/ffmpeg@0.12.15` + `core-mt@0.12.10` in
+a bundler** — reverted. The blocker is a module/worker-type mismatch, not a config
+typo:
+- `@ffmpeg/ffmpeg`'s main worker is hard-coded `{type:"module"}`, so it loads the
+  core via `import()` → needs the **ESM** core.
+- The ESM core spawns its pthread workers as **classic** workers, but the ESM
+  pthread-worker file uses `import()` → illegal in a classic worker →
+  `Uncaught SyntaxError: Cannot use import statement outside a module`.
+- Swapping to the UMD pthread worker just moves the same ESM-syntax failure down to
+  its `importScripts(coreURL)`. **No single `coreURL` satisfies both** a module main
+  worker and classic pthread workers.
+
+To revisit: pin a known-good `@ffmpeg/ffmpeg` + `core-mt` pairing, or ship a custom
+**classic** main worker (`classWorkerURL`) so the whole chain is UMD/classic — and
+verify in a real browser (can't be unit-tested). **Prod COOP/COEP headers are moot
+until then** — single-threaded needs no cross-origin isolation. BFFless has **no MCP
+tool** for response headers (cache rules are caching-only; proxy `headerConfig` is
+for `/api/*` routes); it's set in the UI under **Settings → Response Headers**, and
+the values would be `Cross-Origin-Opener-Policy: same-origin` +
+`Cross-Origin-Embedder-Policy: credentialless` on `/**`.
+
 ## Out of scope
 
-Loudness/crossfade audio polish (follow-up), thumbnail (06), billing (07),
-multithreaded ffmpeg + COOP/COEP (follow-up).
+Thumbnail (06), billing (07). Audio polish + speed optimizations above are the
+**next-up** follow-ups for this story (not yet done).
