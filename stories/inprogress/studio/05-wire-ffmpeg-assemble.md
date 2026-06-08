@@ -65,21 +65,34 @@ Adds up: ~20.6s segment video + 4.15s dead space + 28.25s cut = **53s exactly**.
 Note seg 2 spans 24–43 but cut 3 starts at 37.1; **cut wins**, so its kept video
 is 24–37.1 = 13.1s ≈ its 12.96s of audio. Each segment's kept video ≈ its audio.
 
-## 🐞 Tackle this first — trailing dead space
+## Trailing dead space
 
 In the example the last cut ends at **50** but the source is **53s**, so 50–53 is
-neither cut nor segment → 3s of **silent video tacked onto the end of the export**.
-The UI paints red to the bottom so it *looks* fully cut, but the **state** stops
-cutting at 50. **This is a bug and the first thing to fix**, before/at the start
-of the assemble work:
+neither cut nor segment → 3s of footage with no narration. There are two separate
+layers here; keep them distinct:
 
-- Trailing footage after the last segment must not survive. Simplest fix: when
-  assembling, **trim the export at the end of the last segment** (drop any dead
-  space after it). Equivalently, treat "dead space after the final segment" as an
-  implicit cut.
-- Decide whether to also fix it at the source (extend the last cut / clamp on
-  edit) so the state itself is clean, or only at assemble. Assemble must be robust
-  to it regardless.
+**Edit-time visibility — ✅ FIXED (commit `f05d1cf`).** The bug was that the diff
+grid sized itself from *content* (the last transcript word / last cut), so when
+the talk ends before the clip does (speech stops ~0:50 on a 0:53 clip) the editor
+drew **no rows past the last word** — that trailing footage was invisible and
+**couldn't be hand-cut**. Fix: `TranscriptDiff` takes a `duration` prop and floors
+the grid span at the clip length (`src/components/Studio/TranscriptDiff.tsx`,
+wired from `src/pages/Studio.tsx`). The trailing footage now renders as normal
+**editable** cells the producer can drag to clip themselves. We deliberately did
+**not** auto-trim it — the producer keeps manual control (an earlier auto-cut
+attempt was reverted; it hid the footage instead of letting them edit it).
+
+**Assemble-time default — still open for this story.** Whatever trailing dead
+space the producer *doesn't* clip is, per the three-state rule, kept silent video.
+Decide what assemble does with a tail the producer left uncut: keep it silent, or
+trim at the last segment. Lean toward **honoring the edit** (keep what's not cut)
+so export = what the grid shows — but it should at least be robust to a last scene
+whose `end` stops short of `duration` (see the `toScenes` note below).
+
+> Defensive follow-up (not done): clamp the last scene's `end` up to `duration` in
+> `toScenes` so the **real** director can never leave trailing footage unowned by
+> any scene (which would render the cells but block editing — the mock scenes
+> already span `[0, duration]`, so this only bites the live director).
 
 ## MVP first, enhancements second
 
@@ -122,7 +135,8 @@ debugging a fancy filter — get a playable MP4 out, then sprinkle quality on.
 
 ## Acceptance criteria
 
-- [ ] Trailing dead space no longer produces silent video at the end of the export.
+- [x] Trailing footage is visible + hand-cuttable in the editor (full-duration grid,
+      commit `f05d1cf`) — not auto-trimmed.
 - [ ] All scenes built → assemble produces a playable MP4: cuts removed, the three
       states honored (cut/segment/dead), audio in sync, in scene order.
 - [ ] ffmpeg core is lazy-loaded; progress shows; errors surfaced.

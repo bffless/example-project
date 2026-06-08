@@ -47,9 +47,13 @@ filmstrip gutter**: a fixed ~150px column down the left of the diff viewer showi
 the contact-sheet frame nearest each row's time — reusing the already-captured
 sheets as CSS sprites (`src/lib/filmstrip.ts`, `cellWidth/cellHeight/gap` now
 persisted on `ContactSheet`), row-aligned to the grid (incl. segment spacers) so
-it scrolls in lockstep. **Next up: manual cut editing (03d phase) — let the user
-add/remove cuts directly in the diff viewer.** Then the wps knob, per-scene scope,
-and Story 05 — ffmpeg assemble.
+it scrolls in lockstep. **The diff grid now draws out to the full clip
+`duration`** (not just the last transcript word/cut), so trailing footage where the
+talk ends before the clip does (e.g. speech stops ~0:50 on a 0:53 clip) renders as
+**editable** rows the producer can hand-cut — it was previously invisible. **Next
+up: manual cut editing (03d phase) — let the user add/remove cuts directly in the
+diff viewer.** Then the wps knob, per-scene scope, and Story 05 — ffmpeg assemble
+(plan written up incl. the cut/segment/dead-space timeline model).
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
