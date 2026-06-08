@@ -12,6 +12,8 @@ import {
 type Props = {
   scene: Scene
   className?: string
+  /** Flip this scene's built flag (the producer's "good to go" tracker). */
+  onToggleBuilt?: (id: string) => void
 }
 
 /**
@@ -20,7 +22,7 @@ type Props = {
  * — footage span, the director's cuts, how hard the script was condensed, and
  * (once voiced) whether the narration fits the footage.
  */
-export function SceneMeta({ scene, className = '' }: Props) {
+export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
   const span = sceneVideoSeconds(scene)
   const cuts = scene.cuts ?? []
   const dropped = cuts.reduce((sum, c) => sum + Math.max(0, c.end - c.start), 0)
@@ -38,14 +40,22 @@ export function SceneMeta({ scene, className = '' }: Props) {
     <div className={['border rule bg-paper-deep/30 p-5', className].join(' ')}>
       <div className="flex items-center justify-between gap-3">
         <p className="meta-label">Scene {scene.index + 1}</p>
-        <span
+        {/* The built flag is a toggle: mark a scene "good to go", or click again to
+            re-open it. Drives the tab ✓ and the export readiness. */}
+        <button
+          type="button"
+          onClick={() => onToggleBuilt?.(scene.id)}
+          aria-pressed={done}
+          title={done ? 'Built — click to re-open this scene' : 'Mark this scene built'}
           className={[
-            'rounded-full px-2.5 py-0.5 font-mono text-[11px]',
-            done ? 'bg-terracotta text-paper' : 'border border-paper-line text-ink-mute',
+            'rounded-full px-2.5 py-0.5 font-mono text-[11px] transition-colors',
+            done
+              ? 'bg-terracotta text-paper hover:bg-terracotta-ink'
+              : 'border border-paper-line text-ink-mute hover:border-terracotta hover:text-terracotta-ink',
           ].join(' ')}
         >
-          {done ? 'built' : 'pending'}
-        </span>
+          {done ? '✓ built' : 'Mark built'}
+        </button>
       </div>
       <h3 className="mt-1 font-serif text-[20px] leading-tight text-ink">{scene.title}</h3>
 

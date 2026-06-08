@@ -90,6 +90,13 @@ export type StudioState = {
   duration: number
   /** Original filename, so a restored session can prompt to re-attach the clip. */
   fileName: string | null
+  /**
+   * The assembled final cut's `/api/uploads/export/...` serve path once the
+   * producer has SAVED it to the bucket (story 05). URL-only, like every other
+   * resource — the heavy MP4 blob is never persisted — so a hard reload brings
+   * the saved cut back to play/download. Null until saved; re-saving overwrites it.
+   */
+  finalCutUrl: string | null
 }
 
 const initialState: StudioState = {
@@ -107,6 +114,7 @@ const initialState: StudioState = {
   selectedId: null,
   duration: 0,
   fileName: null,
+  finalCutUrl: null,
 }
 
 const studioSlice = createSlice({
@@ -179,6 +187,11 @@ const studioSlice = createSlice({
     setFileName(state, action: PayloadAction<string | null>) {
       state.fileName = action.payload
     },
+    /** The saved final cut's serve path (story 05). Re-saving overwrites it;
+     *  clearing (null) drops the saved reference without touching anything else. */
+    setFinalCutUrl(state, action: PayloadAction<string | null>) {
+      state.finalCutUrl = action.payload
+    },
     /**
      * Wipe everything back to a clean import — used by "Start over". Keeps the
      * `savedVoices` library: those cloned ids cost real money and are reusable
@@ -208,6 +221,7 @@ export const {
   setSelected,
   setDuration,
   setFileName,
+  setFinalCutUrl,
   resetStudio,
 } = studioSlice.actions
 

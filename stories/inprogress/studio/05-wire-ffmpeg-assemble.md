@@ -2,7 +2,32 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ⏳ queued · **Browser (ffmpeg.wasm). The deliverable.**
+**Status:** ✅ MVP shipped · **Browser (ffmpeg.wasm). The deliverable.**
+
+> **Shipped:** the timeline walk + ffmpeg graph is the pure, unit-tested
+> `src/lib/export/assemble.ts` (`buildSlices` → `planAssembly` → `buildFfmpegCommand`,
+> 15 cases incl. the worked example below); the wasm core lazy-loads single-threaded
+> via `src/lib/export/ffmpeg.ts` — the **ESM** core (the module worker needs a
+> `default` export), bundled locally from the `@ffmpeg/core` npm package via Vite
+> `?url` (no CDN; the 32 MB wasm is a hashed asset fetched only on first assemble),
+> no COOP/COEP needed; `src/components/Studio/AssembleBar.tsx` drives it
+> (progress bar, errors, inline `<video>` + download link) and is wired into the Build
+> view's Export step (`src/pages/Studio.tsx`). **Assemble is not gated on "built"** —
+> that's the producer's own done-tracker; the panel lets them stitch the scenes
+> together and preview the cut anytime (un-voiced runs render silent, flagged).
+> Trailing dead space is **honored** (kept silent), matching the grid.
+> Loudnorm/crossfades remain the tracked follow-up.
+>
+> **Save (persist the cut).** The assembled MP4 isn't just downloadable — **Save to
+> my library** uploads it to the bucket via the presigned `export` flow and persists
+> only the serve URL in the Redux `studio` slice (`finalCutUrl`, url-only like every
+> other resource), so a hard reload brings the saved cut back to play/download.
+> Re-assembling makes a new unsaved blob; saving overwrites the URL. New BFFless
+> rules in the `studio` set (clone of the `source` pair, `export/` subDir, shared
+> schema `8afd205a`): **prepare** `2ec4f942`, **register** `7459fb60`, **serve**
+> `bea10a3d`. `UploadKind` gained `'export'`; `saveFinalCut`/`finalCutUrl` live in
+> `useScenePipeline` + the slice. Download stays a separate one-off (local file, not
+> saved state). Validators still off (story 07).
 
 ## Goal
 
@@ -82,12 +107,14 @@ wired from `src/pages/Studio.tsx`). The trailing footage now renders as normal
 **not** auto-trim it — the producer keeps manual control (an earlier auto-cut
 attempt was reverted; it hid the footage instead of letting them edit it).
 
-**Assemble-time default — still open for this story.** Whatever trailing dead
-space the producer *doesn't* clip is, per the three-state rule, kept silent video.
-Decide what assemble does with a tail the producer left uncut: keep it silent, or
-trim at the last segment. Lean toward **honoring the edit** (keep what's not cut)
-so export = what the grid shows — but it should at least be robust to a last scene
-whose `end` stops short of `duration` (see the `toScenes` note below).
+**Assemble-time default — ✅ RESOLVED: honor the edit.** `planAssembly` walks the
+full `[0, duration]` timeline regardless of where the scenes/segments stop, so any
+trailing tail the producer left uncut becomes a `dead` slice → **kept silent
+video**. Export = what the grid shows. This is robust to a last scene whose `end`
+stops short of `duration` for free (the walk owns the whole clip, not the scenes),
+so the defensive `toScenes` clamp below stayed unneeded for assemble — it would
+only matter for *editing* the unowned tail, which the full-duration grid (commit
+`f05d1cf`) already handles.
 
 > Defensive follow-up (not done): clamp the last scene's `end` up to `duration` in
 > `toScenes` so the **real** director can never leave trailing footage unowned by
@@ -137,12 +164,15 @@ debugging a fancy filter — get a playable MP4 out, then sprinkle quality on.
 
 - [x] Trailing footage is visible + hand-cuttable in the editor (full-duration grid,
       commit `f05d1cf`) — not auto-trimmed.
-- [ ] All scenes built → assemble produces a playable MP4: cuts removed, the three
-      states honored (cut/segment/dead), audio in sync, in scene order.
-- [ ] ffmpeg core is lazy-loaded; progress shows; errors surfaced.
-- [ ] The pure slice-walk + graph helper is unit-tested (cases above).
-- [ ] MVP ships **without** loudnorm/crossfades; those are a tracked follow-up.
-- [ ] build/lint/tests pass.
+- [x] All scenes built → assemble produces a playable MP4: cuts removed, the three
+      states honored (cut/segment/dead), audio in sync, in scene order. *(Pure plan
+      tested; end-to-end render runs in-browser via `AssembleBar` — not pixel-verified
+      here per the no-browser-prototyping convention.)*
+- [x] ffmpeg core is lazy-loaded; progress shows; errors surfaced.
+- [x] The pure slice-walk + graph helper is unit-tested (cases above).
+- [x] MVP ships **without** loudnorm/crossfades; those are a tracked follow-up.
+- [x] build/lint/tests pass *(my files lint clean; 2 pre-existing lint errors live in
+      unrelated `ChatPopup/ChatPanel.tsx`).*
 
 ## Out of scope
 

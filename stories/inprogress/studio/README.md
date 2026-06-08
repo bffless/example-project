@@ -50,10 +50,27 @@ persisted on `ContactSheet`), row-aligned to the grid (incl. segment spacers) so
 it scrolls in lockstep. **The diff grid now draws out to the full clip
 `duration`** (not just the last transcript word/cut), so trailing footage where the
 talk ends before the clip does (e.g. speech stops ~0:50 on a 0:53 clip) renders as
-**editable** rows the producer can hand-cut — it was previously invisible. **Next
-up: manual cut editing (03d phase) — let the user add/remove cuts directly in the
-diff viewer.** Then the wps knob, per-scene scope, and Story 05 — ffmpeg assemble
-(plan written up incl. the cut/segment/dead-space timeline model).
+**editable** rows the producer can hand-cut — it was previously invisible. **Story
+05 shipped the ffmpeg assemble MVP**: the export step is now a single **walk of the
+original timeline** — pure, unit-tested `src/lib/export/assemble.ts` (`buildSlices`
+→ `planAssembly` → `buildFfmpegCommand`) tags every slice **cut** (drop) /
+**segment** (keep + that clip's audio) / **dead** (keep + silence), **cut wins on
+overlap**, and emits the `filter_complex` that trims+concats the kept footage
+against the resampled narration clips + generated silence (one common 48 kHz mono
+format; no loudnorm/crossfades yet). `src/lib/export/ffmpeg.ts` lazy-loads the
+**single-threaded** ESM wasm core on first assemble (bundled locally from the
+`@ffmpeg/core` npm package via Vite `?url` — no CDN; the 32 MB wasm is a hashed
+asset fetched only on first assemble — no COOP/COEP needed), and `AssembleBar` drives it
+from the Build view's **Export** step once every scene is built: progress bar,
+errors surfaced, inline `<video>` preview + **Download MP4**. Trailing dead space
+is **honored** (kept silent) so export = what the grid shows. The cut also **saves
+like every other resource**: **Save to my library** uploads the MP4 via a new
+presigned `export` flow (rules `2ec4f942`/`7459fb60`/`bea10a3d`) and persists only
+the serve URL (`finalCutUrl`), so a refresh brings the saved cut back to
+play/download — re-assemble + save overwrites it. **Next up: manual cut
+editing (03d phase) — let the user add/remove cuts directly in the diff viewer** —
+then the wps knob, per-scene scope, and the story 05 polish follow-up (loudnorm +
+crossfades).
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
@@ -64,7 +81,8 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 04 voice step (clone enabled / preset + live TTS preview)
              🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
                  ↳ ✅ 03e sprite filmstrip · ▶ next: manual cut editing · then wps knob · per-scene scope
-             ·  05 ffmpeg assemble · 06 · 07           (queued)
+             ✅ 05 ffmpeg assemble (timeline walk → MP4; loudnorm/crossfade follow-up)
+             ·  06 · 07                                (queued)
 ```
 
 ## Order & status
@@ -81,7 +99,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
 | 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
 | 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
-| 05 | `05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) | ⏳ queued |
+| 05 | `05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) | ✅ MVP done |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 

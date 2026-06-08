@@ -44,6 +44,7 @@ import {
   addSavedVoice,
   removeSavedVoice,
   setSelected,
+  setFinalCutUrl,
   resetStudio,
   type TranscriptWord,
 } from '../../store/studioSlice'
@@ -147,6 +148,7 @@ export function useScenePipeline() {
   const voice = useAppSelector((s) => s.studio.voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
+  const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
 
   const [transcribeReq] = useTranscribeMutation()
   const [scenesReq] = useScenesMutation()
@@ -159,6 +161,10 @@ export function useScenePipeline() {
   // Transient UI state — not persisted.
   const [voicingId, setVoicingId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  // The export step (story 05): true while the assembled MP4 is uploading to the
+  // bucket. The finished blob lives transiently in the AssembleBar (which also
+  // owns the save error); only the saved serve URL (finalCutUrl) is persisted.
+  const [savingFinalCut, setSavingFinalCut] = useState(false)
   // Per-scene refiner (story 03c) busy flags + last error. Transient: the scene
   // being captured-for, the scene being refined, and any error from either.
   const [sheetingId, setSheetingId] = useState<string | null>(null)
@@ -730,7 +736,53 @@ export function useScenePipeline() {
     [scenes, dispatch],
   )
 
+  // Flip a scene's built flag both ways — the producer's own "this one's good to
+  // go" tracker. Marking built auto-advances to the next pending scene (so you
+  // walk the queue); un-marking just sets it back to pending, no jump. Independent
+  // of voicing or assembling — purely a status the export readiness reads.
+  const toggleBuilt = useCallback(
+    (id: string) => {
+      const scene = scenes.find((s) => s.id === id)
+      if (!scene) return
+      if (scene.status === 'built') {
+        patchScene(id, { status: 'pending' })
+      } else {
+        markBuilt(id)
+      }
+    },
+    [scenes, patchScene, markBuilt],
+  )
+
   const select = useCallback((id: string | null) => dispatch(setSelected(id)), [dispatch])
+
+  // ---- Export: save the assembled cut (story 05) ----------------------------
+
+  // Persist the assembled MP4 the same way every other resource is saved: upload
+  // the blob to the bucket via the presigned `export` flow, then keep only the
+  // returned serve URL in Redux (persisted to localStorage) so a hard reload
+  // brings the cut back. Re-saving a freshly re-assembled blob OVERWRITES the URL
+  // — the producer can refine, re-assemble, and save again. The heavy blob never
+  // touches Redux; "Download" stays separate (a local file, not a saved artifact).
+  const saveFinalCut = useCallback(
+    async (blob: Blob): Promise<string> => {
+      setSavingFinalCut(true)
+      try {
+        const file = new File([blob], 'studio-final-cut.mp4', { type: blob.type || 'video/mp4' })
+        const { url } = await uploadReq({ file, kind: 'export' }).unwrap()
+        dispatch(setFinalCutUrl(url))
+        return url
+      } finally {
+        setSavingFinalCut(false)
+      }
+    },
+    [uploadReq, dispatch],
+  )
+
+  // Drop the saved-cut reference (e.g. before a fresh re-save) without touching
+  // anything else.
+  const clearFinalCut = useCallback(() => {
+    dispatch(setFinalCutUrl(null))
+  }, [dispatch])
 
   const allBuilt = useMemo(
     () => scenes.length > 0 && scenes.every((s) => s.status === 'built'),
@@ -750,6 +802,8 @@ export function useScenePipeline() {
     voice,
     savedVoices,
     selectedId,
+    finalCutUrl,
+    savingFinalCut,
     voicingId,
     running,
     cloning,
@@ -765,6 +819,8 @@ export function useScenePipeline() {
     next,
     reset,
     select,
+    saveFinalCut,
+    clearFinalCut,
     generateSceneSheets,
     refineScene,
     editSceneCut,
@@ -782,5 +838,6 @@ export function useScenePipeline() {
     updateDraft,
     generateVoice,
     markBuilt,
+    toggleBuilt,
   }
 }

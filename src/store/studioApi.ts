@@ -17,7 +17,7 @@ import type { TranscriptWord } from './studioSlice'
 import type { DirectorRequest, DirectorScene } from '../lib/director'
 import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
 
-export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice'
+export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
 /** The master director's response: a logline + the raw scene breakdown. */
 type ScenesResponse = { synopsis?: string; scenes?: DirectorScene[] }

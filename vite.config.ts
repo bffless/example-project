@@ -15,6 +15,11 @@ const upstreamAgent = new https.Agent({ keepAlive: false })
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Keep ffmpeg.wasm out of esbuild's dep pre-bundling: `@ffmpeg/ffmpeg` ships a
+  // module worker it locates via `new URL('./worker.js', import.meta.url)` (which
+  // optimization breaks), and `@ffmpeg/core` is the ~32 MB wasm we want emitted as
+  // a plain `?url` asset, not chewed through esbuild. Lazy-loaded on first assemble.
+  optimizeDeps: { exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/core'] },
   server: {
     proxy: {
       '/api': { target: 'https://j5s.dev', changeOrigin: true, secure: true, agent: upstreamAgent },

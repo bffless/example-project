@@ -21,6 +21,7 @@ import { StudioStepper } from '../components/Studio/StudioStepper'
 import { AudioArtifact } from '../components/Studio/AudioArtifact'
 import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
+import { AssembleBar } from '../components/Studio/AssembleBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { studioPhase, type StudioPhase } from '../lib/pipeline'
 
@@ -463,7 +464,13 @@ export function Studio() {
                       onLoaded={onLoaded}
                     />
                   </div>
-                  {selected && <SceneMeta scene={selected} className="lg:flex-[2]" />}
+                  {selected && (
+                    <SceneMeta
+                      scene={selected}
+                      className="lg:flex-[2]"
+                      onToggleBuilt={pipe.toggleBuilt}
+                    />
+                  )}
                 </div>
                 {selected && (
                   <SceneRefinePanel
@@ -493,6 +500,20 @@ export function Studio() {
                     duration={duration}
                   />
                 )}
+                {/* Export (story 05): assemble + preview the whole cut anytime —
+                    NOT gated on "built" (that's just the producer's done-tracker).
+                    Lets them stitch the scenes together and watch them run before
+                    committing. Un-voiced runs come out silent (AssembleBar flags
+                    it). Marking the last scene built flips the stepper to Export. */}
+                <AssembleBar
+                  scenes={pipe.scenes}
+                  duration={duration}
+                  file={file}
+                  sourceUrl={pipe.sourceUrl}
+                  finalCutUrl={pipe.finalCutUrl}
+                  saving={pipe.savingFinalCut}
+                  onSave={pipe.saveFinalCut}
+                />
               </div>
             )}
           </div>
