@@ -2,7 +2,10 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ✅ MVP shipped · **Browser (ffmpeg.wasm). The deliverable.**
+**Status:** ✅ done · **Browser (ffmpeg.wasm). The deliverable.**
+**Open follow-ups (not blockers):** speed (smart-cut / `-c copy` — a browser-verified
+spike), encode-quality toggle, the defensive `toScenes` clamp. Multithreading parked
+(see Optimizations). Audio polish ✅ done.
 
 > **Shipped:** the timeline walk + ffmpeg graph is the pure, unit-tested
 > `src/lib/export/assemble.ts` (`buildSlices` → `planAssembly` → `buildFfmpegCommand`,

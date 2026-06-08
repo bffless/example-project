@@ -778,12 +778,6 @@ export function useScenePipeline() {
     [uploadReq, dispatch],
   )
 
-  // Drop the saved-cut reference (e.g. before a fresh re-save) without touching
-  // anything else.
-  const clearFinalCut = useCallback(() => {
-    dispatch(setFinalCutUrl(null))
-  }, [dispatch])
-
   const allBuilt = useMemo(
     () => scenes.length > 0 && scenes.every((s) => s.status === 'built'),
     [scenes],
@@ -820,7 +814,6 @@ export function useScenePipeline() {
     reset,
     select,
     saveFinalCut,
-    clearFinalCut,
     generateSceneSheets,
     refineScene,
     editSceneCut,
@@ -837,7 +830,6 @@ export function useScenePipeline() {
     generateSample,
     updateDraft,
     generateVoice,
-    markBuilt,
     toggleBuilt,
   }
 }

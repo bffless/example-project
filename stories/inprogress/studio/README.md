@@ -79,6 +79,7 @@ per-scene scope.
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
+             ✅ 05 ffmpeg assemble (timeline walk → MP4 + save + loudnorm/fades)
 inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 02-wire-transcription (WhisperX; needs Replicate token)
              ✅ 02b-transcript-editor (time-grid diff view + dev mocks)
@@ -86,7 +87,6 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 04 voice step (clone enabled / preset + live TTS preview)
              🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
                  ↳ ✅ 03e sprite filmstrip · ▶ next: manual cut editing · then wps knob · per-scene scope
-             ✅ 05 ffmpeg assemble (timeline walk → MP4; loudnorm/crossfade follow-up)
              ·  06 · 07                                (queued)
 ```
 
@@ -104,13 +104,14 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
 | 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
 | 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
-| 05 | `05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) | ✅ MVP done |
+| 05 | `../../done/05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) + save + audio polish | ✅ done† |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 
 Legend: ✅ done · ▶ next up · 🔨 in progress · ⏳ queued. `*` = code done, needs
-the Replicate API token in BFFless Settings → AI to run. Finish a story → set it
-✅, move the file to `stories/done/`, promote the next to ▶.
+the Replicate API token in BFFless Settings → AI to run. `†` = shipped; open
+non-blocking follow-ups (speed/smart-cut spike, encode-quality toggle). Finish a
+story → set it ✅, move the file to `stories/done/`, promote the next to ▶.
 
 ## How to work it
 
