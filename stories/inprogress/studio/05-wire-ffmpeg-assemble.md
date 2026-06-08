@@ -183,34 +183,37 @@ debugging a fancy filter — get a playable MP4 out, then sprinkle quality on.
 - [x] build/lint/tests pass *(my files lint clean; 2 pre-existing lint errors live in
       unrelated `ChatPopup/ChatPanel.tsx`).*
 
-## Optimizations — slated next (NOT done yet)
+## Optimizations
 
-The MVP renders correctly; these are the layered-on improvements, in priority
-order. **None implemented yet** — listed here so the next pickup has the context.
+### Audio polish — ✅ DONE
+The `original` screen-rec audio and the mic/AI takes sit at different volumes, and
+back-to-back that was the most obvious artifact. `buildFfmpegCommand` now applies,
+per clip, in `src/lib/export/assemble.ts`:
+- **Loudness normalization** — single-pass EBU R128 `loudnorm=I=-16:TP=-1.5:LRA=11`
+  so every clip lands at one target loudness (single-pass, not two-pass — pragmatic
+  first cut; two-pass measure→apply is a possible later refinement).
+- **Short edge fades** — `afade` in (at 0) + out (anchored at the clip's own end via
+  the new `AudioPiece.audioSeconds`), ~10 ms, to kill the concat-join clicks.
+  **Deliberately NOT `acrossfade`**: a real crossfade overlaps and *shortens* the
+  audio, breaking the equal-length video/audio invariant the walk relies on; per-clip
+  edge fades preserve it (each piece still `apad`→`atrim`s to exactly `length`).
+- Toggle: `buildFfmpegCommand(plan, { audioPolish: false })` (unit-tested both ways).
+- Room-tone mismatch between `original` and `recorded` clips is **not** an ffmpeg fix
+  — it's a "re-record this run in your own voice" decision; noted in the AssembleBar
+  UI, not chased in the graph.
 
-### Audio polish (the most audible gap — do first)
-The `original` screen-rec audio and the mic/AI takes sit at **different volumes
-and room tones**, and back-to-back that's the most obvious artifact. Currently we
-only resample every clip to one common 48 kHz mono format and concat — no level
-work at all.
-- **Loudness normalization** (EBU R128 / ffmpeg `loudnorm`) **per segment** so every
-  clip lands at the same target loudness (e.g. −16 LUFS). Two-pass ideally
-  (measure → apply); single-pass is an acceptable first cut.
-- **Short crossfades** (`acrossfade`, ~10–20 ms) at segment joins to kill the clicks
-  where clips butt together / against silence.
-- Room-tone mismatch between `original` and `recorded` clips is **not** an ffmpeg
-  fix — it's a "re-record this run in your own voice" decision. Surface it in the
-  UI, don't chase it in the filter graph.
-
-### Speed
-- **Avoid re-encoding where possible (biggest win).** Today we re-encode the whole
-  timeline with libx264 (slow). The kept video pieces are all trims of the *same*
-  source, so a keyframe-aware **stream-copy** path (concat demuxer, `-c copy`) could
-  be orders of magnitude faster than any threading — at the cost of snapping cuts to
-  keyframes (or re-encoding only the boundary segments). This is the real prize.
-- **Encode-setting knobs.** Already `-preset ultrafast`; could expose a
-  preview-quality vs final-quality toggle (higher `-crf`, cap resolution/fps for a
-  fast preview).
+### Speed — open (the hard one; needs a browser-verified spike)
+- **Avoid re-encoding (the real prize, NOT done).** Today we re-encode the whole
+  timeline with libx264. The kept pieces are all trims of the *same* source, so a
+  `-c copy` concat-demuxer path could be orders of magnitude faster — BUT `-c copy`
+  only cuts on **keyframes**, and our cuts land at arbitrary times, so a naive copy
+  drops/keeps the wrong frames at every boundary (up to a GOP off) or corrupts the
+  stream. Doing it right = **smart-cut** (re-encode only the boundary GOPs, copy the
+  middle): complex, and **must be verified in a real browser** (can't be unit-tested,
+  and a wrong cut ships a corrupt MP4). Left as a deliberate spike, not shipped blind.
+- **Encode knobs (minor).** Already `-preset ultrafast`. A preview-vs-final quality
+  toggle (`-crf` / resolution cap) is a small lever — a feature more than a perf win;
+  not done.
 
 ### Multithreaded ffmpeg.wasm — INVESTIGATED, PARKED (don't retry blindly)
 Tried `@ffmpeg/core-mt` (threaded libx264 via `SharedArrayBuffer` + pthreads) with

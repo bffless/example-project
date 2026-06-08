@@ -67,7 +67,15 @@ export type VideoPiece = { start: number; end: number }
 
 /** A piece of the audio track: a segment's clip (padded to `length`) or silence. */
 export type AudioPiece =
-  | { kind: 'clip'; segmentIndex: number; length: number }
+  | {
+      kind: 'clip'
+      segmentIndex: number
+      /** Output length of this piece (the kept-video length it covers). */
+      length: number
+      /** The real clip duration, so the graph can fade out at the audio's own end
+       *  (before the trailing silence padding) — not at the padded `length`. */
+      audioSeconds: number
+    }
   | { kind: 'silence'; length: number }
 
 export type AssemblePlan = {
@@ -177,7 +185,14 @@ export function planAssembly(input: AssembleInput): AssemblePlan {
     }
     const seg = input.segments[idx]
     const voiced = !!seg?.audioUrl
-    audio.push(voiced ? { kind: 'clip', segmentIndex: idx, length } : { kind: 'silence', length })
+    if (voiced) {
+      // Fade-out anchors on the clip's own end; if its real length is unknown or
+      // longer than the slot, clamp to the slot so we never fade into nothing.
+      const audioSeconds = Math.min(seg.audioSeconds && seg.audioSeconds > 0 ? seg.audioSeconds : length, length)
+      audio.push({ kind: 'clip', segmentIndex: idx, length, audioSeconds })
+    } else {
+      audio.push({ kind: 'silence', length })
+    }
   }
 
   const duration = video.reduce((n, v) => n + (v.end - v.start), 0)
@@ -201,22 +216,37 @@ export type FfmpegCommand = {
 
 /** Common output audio format — every clip is resampled to this before concat. */
 const SAMPLE_RATE = 48000
+/** EBU R128 loudness target each clip is normalized to (LUFS / dBTP / LU). */
+const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11'
+/** Fade length (seconds) ramped on each clip's edges to kill concat-join clicks. */
+const FADE = 0.01
 
 /**
  * Build the ffmpeg invocation from a plan. The video track trims + concats the
- * kept footage; the audio track resamples each clip to a common format, pads it
- * to its piece length (silence fills any tail where the kept video runs longer
- * than the narration), and concats those with generated silence for dead space.
+ * kept footage; the audio track, per clip: normalizes loudness, resamples to a
+ * common format, fades its edges, pads to its piece length (silence fills any tail
+ * where the kept video runs longer than the narration), then concats those with
+ * generated silence for dead space.
  *
- * Single-threaded-friendly (libx264 `ultrafast`); no loudnorm/crossfades yet —
- * those are the tracked follow-up.
+ * **Audio polish (story 05 follow-up).** Single-pass `loudnorm` levels every clip
+ * to one target so the `original` screen-rec audio and the mic/AI takes don't jump
+ * in volume back-to-back (the most audible artifact). Short `afade` in/out on each
+ * clip kills the clicks at concat joins. We deliberately do NOT use `acrossfade`:
+ * a real crossfade overlaps (and shortens) the audio, which would break the
+ * equal-length video/audio invariant the whole walk relies on; per-clip edge fades
+ * preserve it. All three (loudnorm, both fades) keep the piece's length exactly
+ * `length` via the trailing `apad`→`atrim`, so the tracks stay in sync. Toggle off
+ * with `opts.audioPolish = false`.
+ *
+ * Single-threaded-friendly (libx264 `ultrafast`).
  */
 export function buildFfmpegCommand(
   plan: AssemblePlan,
-  opts: { source?: string; output?: string } = {},
+  opts: { source?: string; output?: string; audioPolish?: boolean } = {},
 ): FfmpegCommand {
   const source = opts.source ?? 'source.mp4'
   const output = opts.output ?? 'out.mp4'
+  const polish = opts.audioPolish !== false
   const parts: string[] = []
 
   plan.video.forEach((v, i) => {
@@ -233,9 +263,15 @@ export function buildFfmpegCommand(
     } else {
       const j = inputIdx++
       audioInputs.push(a.segmentIndex)
+      // loudnorm first (on the raw clip), then to the common format, then fades:
+      // in at the start, out anchored at the clip's own end (clamped so a fade
+      // never starts before 0), then pad+trim to the exact slot length.
+      const fadeOut = Math.max(0, a.audioSeconds - FADE)
+      const norm = polish ? `${LOUDNORM},` : ''
+      const fade = polish ? `afade=t=in:st=0:d=${secs(FADE)},afade=t=out:st=${secs(fadeOut)}:d=${secs(FADE)},` : ''
       parts.push(
-        `[${j}:a]aresample=${SAMPLE_RATE},aformat=sample_fmts=s16:channel_layouts=mono,` +
-          `apad,atrim=0:${secs(a.length)},asetpts=PTS-STARTPTS[a${i}]`,
+        `[${j}:a]${norm}aresample=${SAMPLE_RATE},aformat=sample_fmts=s16:channel_layouts=mono,` +
+          `${fade}apad,atrim=0:${secs(a.length)},asetpts=PTS-STARTPTS[a${i}]`,
       )
     }
   })

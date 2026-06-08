@@ -75,17 +75,18 @@ describe('planAssembly — video + audio pieces', () => {
       { start: 0, end: 5 },
       { start: 8, end: 10 },
     ])
-    // One clip for segment 0, length = kept video = 5 + 2 = 7.
-    expect(plan.audio).toEqual([{ kind: 'clip', segmentIndex: 0, length: 7 }])
+    // One clip for segment 0, length = kept video = 5 + 2 = 7. audioSeconds is
+    // clamped to the slot (the 10s clip can't exceed its 7s of kept video).
+    expect(plan.audio).toEqual([{ kind: 'clip', segmentIndex: 0, length: 7, audioSeconds: 7 }])
     expect(plan.duration).toBe(7)
   })
 
   it('dead space → a silence piece of its own length', () => {
     const plan = planAssembly({ segments: [seg(0, 4), seg(6, 10)], cuts: [], duration: 10 })
     expect(plan.audio).toEqual([
-      { kind: 'clip', segmentIndex: 0, length: 4 },
+      { kind: 'clip', segmentIndex: 0, length: 4, audioSeconds: 4 },
       { kind: 'silence', length: 2 },
-      { kind: 'clip', segmentIndex: 1, length: 4 },
+      { kind: 'clip', segmentIndex: 1, length: 4, audioSeconds: 4 },
     ])
     // Video keeps everything (nothing cut), so duration == source duration.
     expect(plan.duration).toBe(10)
@@ -94,7 +95,7 @@ describe('planAssembly — video + audio pieces', () => {
   it('trailing dead space becomes trailing silence (kept video, no audio)', () => {
     const plan = planAssembly({ segments: [seg(0, 8)], cuts: [], duration: 10 })
     expect(plan.audio).toEqual([
-      { kind: 'clip', segmentIndex: 0, length: 8 },
+      { kind: 'clip', segmentIndex: 0, length: 8, audioSeconds: 8 },
       { kind: 'silence', length: 2 },
     ])
   })
@@ -172,14 +173,25 @@ describe('buildFfmpegCommand', () => {
     // Two voiced segments → two extra inputs (a0.wav, a1.wav) after the source.
     expect(cmd.audioInputs).toEqual([0, 1])
     expect(cmd.args.slice(0, 6)).toEqual(['-i', 'source.mp4', '-i', 'a0.wav', '-i', 'a1.wav'])
-    // The silence piece is generated, clips reference inputs 1 and 2.
+    // The silence piece is generated, clips reference inputs 1 and 2 and are
+    // polished (loudnorm + fades) by default.
     expect(cmd.filterComplex).toContain('anullsrc=r=48000:cl=mono,atrim=0:2')
-    expect(cmd.filterComplex).toContain('[1:a]aresample=48000')
-    expect(cmd.filterComplex).toContain('[2:a]aresample=48000')
+    expect(cmd.filterComplex).toContain('[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000')
+    expect(cmd.filterComplex).toContain('[2:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000')
+    expect(cmd.filterComplex).toContain('afade=t=in:st=0:d=0.01')
+    expect(cmd.filterComplex).toContain('afade=t=out:st=')
     // Concats both tracks and maps them out.
     expect(cmd.filterComplex).toContain('concat=n=3:v=1:a=0[vout]')
     expect(cmd.filterComplex).toContain('concat=n=3:v=0:a=1[aout]')
     expect(cmd.args).toEqual(expect.arrayContaining(['-map', '[vout]', '-map', '[aout]']))
+  })
+
+  it('audioPolish:false drops loudnorm + fades (raw concat)', () => {
+    const plan = planAssembly({ segments: [seg(0, 4), seg(6, 10)], cuts: [], duration: 10 })
+    const cmd = buildFfmpegCommand(plan, { audioPolish: false })
+    expect(cmd.filterComplex).toContain('[1:a]aresample=48000')
+    expect(cmd.filterComplex).not.toContain('loudnorm')
+    expect(cmd.filterComplex).not.toContain('afade')
   })
 
   it('emits no extra audio inputs when nothing is voiced', () => {

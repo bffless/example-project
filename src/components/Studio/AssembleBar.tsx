@@ -266,9 +266,10 @@ export function AssembleBar({ scenes, duration, file, sourceUrl, finalCutUrl, sa
       )}
 
       <p className="mt-3 text-[12px] leading-relaxed text-ink-mute">
-        MVP render — no loudness matching or crossfades yet, so the original and
-        re-recorded clips may sit at different volumes back-to-back. That polish is
-        a tracked follow-up.
+        Audio is loudness-matched per clip (EBU R128) with short fades at the joins,
+        so clips don’t jump in volume or click. Room-tone differences between the
+        original and re-recorded takes remain — that’s a re-record decision, not an
+        ffmpeg fix.
       </p>
     </div>
   )
