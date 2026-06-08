@@ -93,6 +93,13 @@ export type ContactSheet = {
   height: number
   cols: number
   rows: number
+  /** One cell's drawn pixel size and the gap between cells — the geometry a CSS
+   *  sprite needs to crop a single frame out of the sheet (the 03e build-step
+   *  filmstrip). Derivable from `width/height/cols/rows`, but persisted so the
+   *  sprite math is self-contained and survives any change to the gap/layout. */
+  cellWidth: number
+  cellHeight: number
+  gap: number
   /** Frames actually drawn (≤ `times.length` if some captures failed). */
   count: number
   /** The original-video timestamps of this sheet's frames. */
@@ -171,6 +178,9 @@ export async function composeContactSheet(
     height: 0,
     cols,
     rows,
+    cellWidth: 0,
+    cellHeight: 0,
+    gap: 0,
     count: 0,
     times: times.slice(0, n),
     interval: 0,
@@ -229,7 +239,17 @@ export async function composeContactSheet(
   })
 
   const { dataUrl, bytes } = encodeUnderBudget(canvas, MAX_SHEET_BYTES)
-  return { ...base, dataUrl, width, height, count: drawn.length, bytes }
+  return {
+    ...base,
+    dataUrl,
+    width,
+    height,
+    cellWidth: cellW,
+    cellHeight,
+    gap,
+    count: drawn.length,
+    bytes,
+  }
 }
 
 /**

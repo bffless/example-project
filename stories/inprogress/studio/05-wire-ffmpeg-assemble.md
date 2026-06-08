@@ -6,46 +6,131 @@
 
 ## Goal
 
-Turn the built scenes into a downloadable MP4: for each scene, take the footage
-span (`start`–`end` of the source) and lay the **re-voiced narration** (from 04)
-under it, **fitting the footage to the narration length**, then concatenate the
-scenes in order. Chapters/timestamps come from the scene list.
+Turn the built scenes into a downloadable MP4: apply the producer's cuts to the
+source footage and lay the re-voiced narration over it, in sync, then download.
 
-## Open design question (decide here)
+## The model (this is the whole thing — keep it this simple)
 
-The narration is shorter than the footage span. Pick how to fit (and log the
-choice in the UI so nothing is silently dropped):
+There is **one source video** and, per scene's `refined` layer, **two lists**:
+`cuts[]` (footage spans to drop) and `segments[]` (the new audio clips, each
+anchored to original-video seconds with a real measured `audioSeconds`).
 
-- **Speed up the footage** to the narration length (simple `setpts`), or
-- **Trim** the span to a representative sub-clip of the narration length, or
-- have **the AI return a tighter sub-span** back in story 03 and just use it.
+Every slice of the original timeline is in exactly **one of three states**, and
+that state decides what the slice contributes to the export:
 
-A per-scene control (time-stretch / trim handles) is the natural follow-up to
-the current text-edit-and-regenerate alignment tool.
+| state | the slice is… | video | audio |
+|-------|---------------|-------|-------|
+| **cut** | inside a `cuts[]` span | **dropped** | — |
+| **segment** | inside a `segments[]` span (and not cut) | **kept** | that clip's audio |
+| **dead space** | neither cut nor segment | **kept** | **silence** |
+
+**Cut wins on overlap.** Where a segment and a cut overlap, the cut removes that
+footage — so the segment's *kept* video is its span minus any cuts inside it. This
+is what keeps each segment's kept video ≈ its `audioSeconds` (see worked example).
+
+**Assemble = walk the original timeline in order**, and for each slice: drop it,
+keep-it-with-its-audio, or keep-it-silent. Because video and audio are built from
+the same walk, they come out the **same length and in sync automatically** — no
+fitting, no stretching, no per-clip alignment math.
+
+### Why there's no fit step
+
+The narration is shorter than the raw footage, but the **edit UI already absorbs
+that**: the producer can't cut *more* time than the audio occupies, so for any
+kept span `audio ≤ video`. The earlier "speed up / trim to fit the narration"
+question is therefore **moot** — the producer settles length by painting cuts,
+and assemble just renders what the three states say. Do **not** add a footage-fit
+stage.
+
+### Worked example (real state, source = 53s)
+
+`segments`: `[2.3–5.8 original 3.5s] [9–13 recorded 3.9s] [24–43 recorded 12.96s]`
+`cuts`: `[0–2.3] [5.8–8.6] [13.5–23.75] [37.1–50]`
+
+| original time | state | video | audio |
+|---|---|---|---|
+| 0–2.3 | cut | drop | — |
+| 2.3–5.8 | seg 0 | keep | original clip (3.5s) |
+| 5.8–8.6 | cut | drop | — |
+| 8.6–9 | dead | keep | silence (0.4s) |
+| 9–13 | seg 1 | keep | recorded clip (3.9s) |
+| 13–13.5 | dead | keep | silence (0.5s) |
+| 13.5–23.75 | cut | drop | — |
+| 23.75–24 | dead | keep | silence (0.25s) |
+| 24–37.1 | seg 2 (cut wins past 37.1) | keep | recorded clip (12.96s) |
+| 37.1–50 | cut | drop | — |
+| 50–53 | dead | keep | silence (3s) ⚠️ **bug, see below** |
+
+Adds up: ~20.6s segment video + 4.15s dead space + 28.25s cut = **53s exactly**.
+Note seg 2 spans 24–43 but cut 3 starts at 37.1; **cut wins**, so its kept video
+is 24–37.1 = 13.1s ≈ its 12.96s of audio. Each segment's kept video ≈ its audio.
+
+## 🐞 Tackle this first — trailing dead space
+
+In the example the last cut ends at **50** but the source is **53s**, so 50–53 is
+neither cut nor segment → 3s of **silent video tacked onto the end of the export**.
+The UI paints red to the bottom so it *looks* fully cut, but the **state** stops
+cutting at 50. **This is a bug and the first thing to fix**, before/at the start
+of the assemble work:
+
+- Trailing footage after the last segment must not survive. Simplest fix: when
+  assembling, **trim the export at the end of the last segment** (drop any dead
+  space after it). Equivalently, treat "dead space after the final segment" as an
+  implicit cut.
+- Decide whether to also fix it at the source (extend the last cut / clamp on
+  edit) so the state itself is clean, or only at assemble. Assemble must be robust
+  to it regardless.
+
+## MVP first, enhancements second
+
+Ship the basic, correct render **before** any audio polish. Don't get blocked
+debugging a fancy filter — get a playable MP4 out, then sprinkle quality on.
+
+**MVP (this story):**
+1. Fix the trailing-dead-space bug (above).
+2. Walk the timeline → drop / keep+audio / keep+silence; concat the kept video and
+   the audio (segment clips + silence) so they're equal length and in sync.
+3. Minimal audio handling required just to concat at all: **resample every clip to
+   one common format** (e.g. 48 kHz mono) — the `original` slice and the mic
+   recordings won't share a format, and you can't concat mismatched audio. Insert
+   silence for dead-space spans. No loudness work, no crossfades yet.
+4. Download link for the result Blob; progress + errors surfaced.
+
+**Enhancements (later, layered on — only after MVP plays correctly):**
+- **Loudness normalization** (EBU R128 / `loudnorm`) per segment — the screen-rec
+  `original` audio and the mic takes sit at different volumes; back-to-back that's
+  the most audible problem. Two-pass ideally.
+- **Short crossfades** at segment joins to kill clicks.
+- Room-tone mismatch between `original` and `recorded` clips is a *re-record in
+  your own voice* decision, not an ffmpeg fix — note it in the UI, don't chase it.
 
 ## Tasks
 
-1. Add `@ffmpeg/ffmpeg` + `@ffmpeg/util`; lazy-load the core on first assemble
+1. Add `@ffmpeg/ffmpeg` + `@ffmpeg/util`; **lazy-load** the core on first assemble
    (keep the ~25–30 MB wasm out of the initial bundle — build already warns on
-   chunk size). Single-threaded first (no COOP/COEP needed); note where the
-   multithreaded core slots in.
-2. `src/lib/export/assemble.ts` — per scene: trim/speed the source span to the
-   narration duration, replace audio with the scene's narration track; then
-   concat all scenes. Build the `filter_complex` in a **pure** helper with unit
-   tests (1 scene, N scenes, narration-shorter, narration-longer).
+   chunk size). **Single-threaded first** (no COOP/COEP needed); note where the
+   multithreaded core slots in (needs cross-origin-isolation headers on `/studio`).
+2. `src/lib/export/assemble.ts` — a **pure** helper that turns
+   `{ segments, cuts, duration }` into the ordered list of timeline slices
+   (cut / segment / dead) and the ffmpeg graph (the `filter_complex`). **Unit-test
+   the slice walk**: cut-wins overlap, trailing dead space trimmed, dead space →
+   silence, single segment, N segments, segment butting a cut. Keep ffmpeg.wasm as
+   a dumb executor of this pure plan.
 3. `src/components/Studio/AssembleBar.tsx` (or extend `FinalCut`) — progress bar
    wired to ffmpeg `on('progress')`, download link for the result Blob, errors
    surfaced inline, disabled while running.
 
 ## Acceptance criteria
 
-- [ ] All scenes built → assemble produces a playable MP4 whose audio is the
-      cloned-voice narration, in scene order, footage fit to narration, in sync.
+- [ ] Trailing dead space no longer produces silent video at the end of the export.
+- [ ] All scenes built → assemble produces a playable MP4: cuts removed, the three
+      states honored (cut/segment/dead), audio in sync, in scene order.
 - [ ] ffmpeg core is lazy-loaded; progress shows; errors surfaced.
-- [ ] The fit strategy is implemented and **labeled** in the UI; pure graph
-      helper is unit-tested.
+- [ ] The pure slice-walk + graph helper is unit-tested (cases above).
+- [ ] MVP ships **without** loudnorm/crossfades; those are a tracked follow-up.
 - [ ] build/lint/tests pass.
 
 ## Out of scope
 
-Thumbnail (06), billing (07), multithreaded ffmpeg + COOP/COEP (follow-up).
+Loudness/crossfade audio polish (follow-up), thumbnail (06), billing (07),
+multithreaded ffmpeg + COOP/COEP (follow-up).

@@ -11,6 +11,7 @@ import {
   type GridLine,
 } from '../../lib/transcriptGrid'
 import { SegmentVoiceControl, type SegmentControl } from './SegmentVoiceControl'
+import { frameForRow, spriteStyle, type FilmFrame } from '../../lib/filmstrip'
 
 type Props = {
   /** The transcript from `/api/transcribe` — shown on the left ("original"). */
@@ -43,6 +44,14 @@ type Props = {
   onAdoptOriginal?: (origStart: number, origEnd: number, dropStart: number) => void
   /** Delete a New-pane run (reopens its gap to make room). */
   onDeleteSegment?: (sceneId: string, index: number) => void
+  /** Contact-sheet frames (story 03e) for the time-aligned filmstrip gutter down
+   *  the left of the viewer. Empty ⇒ no gutter (e.g. before thumbnails exist). */
+  frames?: FilmFrame[]
+  /** The source clip's real length, in seconds. The grid is floored to this so
+   *  trailing footage with no speech (e.g. the talk ends at 0:50 on a 0:53 clip)
+   *  still renders editable rows — otherwise the grid stops at the last word and
+   *  that footage can't be seen or cut. */
+  duration?: number
 }
 
 /** An in-progress cut drag: the cell it began on, the cell under the pointer
@@ -127,9 +136,15 @@ export function TranscriptDiff({
   dropTargets = [],
   onAdoptOriginal,
   onDeleteSegment,
+  frames = [],
+  duration = 0,
 }: Props) {
   const [secondsPerLine, setSecondsPerLine] = useState(DEFAULT_SECONDS_PER_LINE)
   const [segmentSeconds, setSegmentSeconds] = useState(DEFAULT_SEGMENT_SECONDS)
+  // Tall-rows mode: grow EVERY row to a full frame's height so the filmstrip
+  // shows whole frames (not just the centred band) while staying aligned to the
+  // words. Default on; toggle off for compact rows + hover-to-peek.
+  const [tallRows, setTallRows] = useState(true)
   const right = editedWords ?? words
 
   // Resizable panes: drag the divider to give the New pane more room. `leftPct`
@@ -305,12 +320,13 @@ export function TranscriptDiff({
       ? { mode: 'cut', onCellDown, onCellEnter, preview: cutPending, previewKind: drag?.op ?? null, glow: [] }
       : null
 
-  // Pin both panes to the same span: the latest of either transcript or any cut,
-  // so they're equal height and a trailing cut with no words still shows.
+  // Pin both panes to the same span: the latest of either transcript, any cut, or
+  // the clip's real `duration`, so they're equal height and trailing footage with
+  // no words/cuts (the talk ends before the clip does) still renders editable rows.
   const span = useMemo(() => {
     const cutEnd = cuts.reduce((m, c) => Math.max(m, c.end), 0)
-    return Math.max(lastSecond(words), lastSecond(right), cutEnd)
-  }, [words, right, cuts])
+    return Math.max(lastSecond(words), lastSecond(right), cutEnd, duration)
+  }, [words, right, cuts, duration])
 
   const controls: Controls | null = onGenerateAI && onRecord
     ? {
@@ -321,6 +337,16 @@ export function TranscriptDiff({
         onDelete: onDeleteSegment ?? (() => {}),
       }
     : null
+
+  // A full frame's display height at the gutter width (its real aspect, so it's
+  // not letterboxed). The tall-rows toggle grows every row to this; otherwise
+  // rows stay at the compact band height.
+  const fullRowHeight = useMemo(() => {
+    const f = frames[0]
+    if (!f?.sheet.cellWidth) return FILMSTRIP_ROW
+    return Math.round(f.sheet.cellHeight * (FILMSTRIP_WIDTH / f.sheet.cellWidth))
+  }, [frames])
+  const rowHeight = tallRows ? fullRowHeight : FILMSTRIP_ROW
 
   return (
     <div className="border rule bg-paper">
@@ -349,6 +375,19 @@ export function TranscriptDiff({
             segment
             <Select value={segmentSeconds} onChange={setSegmentSeconds} options={SEGMENT_OPTIONS} />
           </label>
+          {frames.length > 0 && (
+            <button
+              type="button"
+              aria-pressed={tallRows}
+              onClick={() => setTallRows((v) => !v)}
+              className={[
+                'border rule px-2 py-1 text-ink transition-colors',
+                tallRows ? 'bg-ink text-paper' : 'bg-paper hover:bg-paper-deep/40',
+              ].join(' ')}
+            >
+              {tallRows ? 'compact rows' : 'tall frames'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -369,12 +408,30 @@ export function TranscriptDiff({
         </div>
       )}
 
-      <div
-        ref={containerRef}
-        className={['flex flex-col lg:flex-row', resizing ? 'select-none' : ''].join(' ')}
-        style={{ '--lw': `${leftPct}%` } as CSSProperties}
-      >
-        <div className="min-w-0 border-b rule lg:basis-[var(--lw)] lg:shrink-0 lg:grow-0 lg:border-b-0">
+      <div className="flex flex-col lg:flex-row">
+        {/* story 03e: a time-aligned frame gutter, left of the Original pane. It
+            mirrors the Original pane's row structure (same grid + segment
+            spacers) so it stays in lockstep at any zoom. Only meaningful in the
+            lg side-by-side layout. */}
+        {frames.length > 0 && (
+          <div className="hidden shrink-0 border-r rule lg:block" style={{ width: FILMSTRIP_WIDTH }}>
+            <Filmstrip
+              words={words}
+              secondsPerLine={secondsPerLine}
+              segmentSeconds={segmentSeconds}
+              minSeconds={span}
+              segments={segments}
+              frames={frames}
+              rowHeight={rowHeight}
+            />
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          className={['flex min-w-0 flex-1 flex-col lg:flex-row', resizing ? 'select-none' : ''].join(' ')}
+          style={{ '--lw': `${leftPct}%` } as CSSProperties}
+        >
+          <div className="min-w-0 border-b rule lg:basis-[var(--lw)] lg:shrink-0 lg:grow-0 lg:border-b-0">
           <Pane
             label="Original"
             sublabel="from transcription"
@@ -386,6 +443,7 @@ export function TranscriptDiff({
             segments={segments}
             controls={null}
             edit={leftEdit}
+            rowHeight={rowHeight}
           />
         </div>
         {/* drag handle — only meaningful in the lg side-by-side layout */}
@@ -410,12 +468,21 @@ export function TranscriptDiff({
             segments={segments}
             controls={controls}
             edit={rightEdit}
+            rowHeight={rowHeight}
           />
+        </div>
         </div>
       </div>
     </div>
   )
 }
+
+/** Gutter width (px) for the 03e filmstrip — wide enough that a flat row crop is
+ *  still legible; only shown in the lg side-by-side layout. */
+const FILMSTRIP_WIDTH = 150
+/** Gutter row height (px) — matches the grid Row's `min-h-[2rem]` so the frames
+ *  stay aligned to the timestamps row-for-row. */
+const FILMSTRIP_ROW = 32
 
 const LINE_OPTIONS = [2, 3, 5, 10]
 const SEGMENT_OPTIONS = [
@@ -481,6 +548,88 @@ type PaneProps = {
   segments: SegmentControl[]
   controls: Controls | null
   edit: CellEdit | null
+  /** Minimum height (px) for each grid row — the tall-rows toggle drives this so
+   *  the panes grow in lockstep with the filmstrip's full-frame cells. */
+  rowHeight: number
+}
+
+/**
+ * The 03e filmstrip gutter — a frame for each grid row, down the left of the
+ * viewer. It runs the SAME `buildTranscriptGrid` + segment-row mapping as the
+ * Original pane (and emits the same per-segment spacer), so it stays aligned to
+ * the timestamps row-for-row at any zoom — no time→pixel ruler that would drift
+ * past the voice-control spacers. Each row shows the contact-sheet frame nearest
+ * its start second, sprite-cropped from its sheet (no new image generation).
+ */
+function Filmstrip({
+  words,
+  secondsPerLine,
+  segmentSeconds,
+  minSeconds,
+  segments,
+  frames,
+  rowHeight,
+}: {
+  words: TWord[]
+  secondsPerLine: number
+  segmentSeconds: number
+  minSeconds: number
+  segments: SegmentControl[]
+  frames: FilmFrame[]
+  rowHeight: number
+}) {
+  const lines = useMemo(
+    () => buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
+    [words, secondsPerLine, segmentSeconds, minSeconds],
+  )
+  // Same row→segment mapping as a Pane, so the spacers land on the same rows.
+  const segRows = useMemo(() => {
+    const rows = new Set<number>()
+    for (const s of segments) rows.add(Math.floor(Math.max(0, s.start) / secondsPerLine))
+    return rows
+  }, [segments, secondsPerLine])
+
+  return (
+    <div className="bg-paper">
+      {/* header height matches a Pane header so row 0 aligns across the columns */}
+      <div className="flex items-baseline gap-2 px-4 py-2.5">
+        <span className="font-serif text-[15px] text-ink">Frames</span>
+        <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint">video</span>
+      </div>
+      <div className="pb-2">
+        {lines.map((line) => {
+          const frame = frameForRow(frames, line.startSec)
+          return (
+            <div key={line.index}>
+              {segRows.has(line.index) && (
+                <div className="h-9 border-t border-paper-line/60 bg-paper-deep/20" />
+              )}
+              {/* Divider on the wrapper (outside the sized box) mirrors the Pane
+                  Row's border placement, so the gutter and the panes stay exactly
+                  row-aligned (no 1px-per-row drift). Compact rows clip the taller
+                  frame to its centred band so it fills the cell, and hover pops
+                  the WHOLE frame — the cut-off top and bottom — over its
+                  neighbours, with a slight border. In tall-rows mode the cell is
+                  already the full frame height, so the whole frame just shows. */}
+              <div className="border-t border-paper-line/60">
+                <div
+                  className="group relative overflow-hidden bg-paper-deep hover:z-10 hover:overflow-visible"
+                  style={{ width: FILMSTRIP_WIDTH, height: rowHeight }}
+                >
+                  {frame && frame.sheet.width > 0 ? (
+                    <div
+                      className="absolute left-0 top-1/2 -translate-y-1/2 bg-paper-deep ring-ink-faint transition-shadow group-hover:ring-1 group-hover:shadow-lg group-hover:shadow-ink/30"
+                      style={spriteStyle(frame, FILMSTRIP_WIDTH)}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 function Pane({
@@ -494,6 +643,7 @@ function Pane({
   segments,
   controls,
   edit,
+  rowHeight,
 }: PaneProps) {
   const lines = useMemo(
     () => buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
@@ -566,6 +716,7 @@ function Pane({
                   cuts={cuts}
                   voiced={voiced}
                   edit={edit}
+                  rowHeight={rowHeight}
                 />
               </div>
             )
@@ -584,6 +735,7 @@ function Row({
   cuts,
   voiced,
   edit,
+  rowHeight,
 }: {
   line: GridLine
   template: string
@@ -592,6 +744,7 @@ function Row({
   cuts: CutSpan[]
   voiced: CutSpan[]
   edit: CellEdit | null
+  rowHeight: number
 }) {
   const cutCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, cuts)
   const voicedCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, voiced)
@@ -614,7 +767,12 @@ function Row({
   }
 
   return (
-    <div className="grid border-t border-paper-line/60" style={{ gridTemplateColumns: template }}>
+    <div
+      className="grid border-t border-paper-line/60"
+      // The row track grows to `rowHeight` (tall-rows mode) and the cells stretch
+      // to it; their `items-center` keeps the single line of text centred.
+      style={{ gridTemplateColumns: template, gridAutoRows: `minmax(${rowHeight}px, auto)` }}
+    >
       {/* line "number" = the row's start timestamp */}
       <div className="flex select-none items-center justify-end border-r border-paper-line/60 px-2 text-[11px] text-ink-faint">
         {formatClock(line.startSec)}

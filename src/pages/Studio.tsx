@@ -9,6 +9,7 @@ import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
 import { effectiveCuts, effectiveSegments, segmentsToTimedWords, gaps } from '../lib/refiner'
 import { sceneAtTime } from '../lib/scenes'
+import { buildFilmstrip } from '../lib/filmstrip'
 import type { CutSpan } from '../lib/transcriptGrid'
 import { SceneList } from '../components/Studio/SceneList'
 import { SceneTabs } from '../components/Studio/SceneTabs'
@@ -152,6 +153,15 @@ export function Studio() {
   const editedWords = useMemo(
     () => pipe.scenes.flatMap((s) => segmentsToTimedWords(effectiveSegments(s))),
     [pipe.scenes],
+  )
+
+  // Time-aligned frames for the diff viewer's filmstrip gutter (story 03e),
+  // reusing the already-captured contact sheets as sprites. The per-scene refiner
+  // sheets come first (denser, so they win on overlap), then the whole-clip prep
+  // sheets fill everywhere else.
+  const filmstrip = useMemo(
+    () => buildFilmstrip([...pipe.scenes.flatMap((s) => s.sheets ?? []), ...pipe.contactSheets]),
+    [pipe.scenes, pipe.contactSheets],
   )
 
   // Dropped footage spans across all scenes (refiner's cuts, else director's),
@@ -479,6 +489,8 @@ export function Studio() {
                     dropTargets={gapSpans}
                     onAdoptOriginal={onAdoptOriginal}
                     onDeleteSegment={pipe.deleteSegment}
+                    frames={filmstrip}
+                    duration={duration}
                   />
                 )}
               </div>

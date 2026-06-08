@@ -77,7 +77,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
 | 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
 | 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
-| 05 | `05-wire-ffmpeg-assemble.md` | assemble (fit footage to voice) | ⏳ queued |
+| 05 | `05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) | ⏳ queued |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 
@@ -93,9 +93,15 @@ the Replicate API token in BFFless Settings → AI to run. Finish a story → se
    `src/components/Studio/useScenePipeline.ts` for the real call.
 3. One stage per PR — keep stories small and context cheap.
 
-## Open design question (for story 05)
+## Story 05 model (resolved — see `05-wire-ffmpeg-assemble.md`)
 
-The AI-shortened narration is **shorter than the original footage span**, so the
-footage must be fit to the narration on assemble. Decide: speed up the span,
-trim it to the most relevant sub-clip, or have the AI return a tighter sub-span.
-Not blocking earlier stories.
+Assemble is a **walk of the original timeline** with three states per slice:
+**cut** (drop video), **segment** (keep video + play that clip's audio), **dead
+space** (keep video, silence). **Cut wins on overlap.** Video and audio build from
+the same walk, so they're the same length and in sync — **no footage-fit step**
+(the edit UI already prevents cutting more time than the audio occupies). The old
+"speed up / trim to fit the narration" question is therefore moot.
+
+**MVP first** (cut/keep/silence + plain concat + resample-to-common-format), then
+sprinkle on loudness-normalization + crossfades. **First bug to fix:** trailing
+dead space after the last segment leaks silent video onto the end of the export.
