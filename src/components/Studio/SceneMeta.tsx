@@ -1,13 +1,14 @@
 import { type ReactNode } from 'react'
 import { formatTime } from '../../lib/edl'
 import {
-  alignment,
+  ALIGN_TOLERANCE,
   narrationSeconds,
   sceneVideoSeconds,
   wordCount,
   type Alignment,
   type Scene,
 } from '../../lib/scenes'
+import { effectiveCuts, effectiveSegments, normalizeCuts } from '../../lib/refiner'
 
 type Props = {
   scene: Scene
@@ -24,16 +25,34 @@ type Props = {
  */
 export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
   const span = sceneVideoSeconds(scene)
-  const cuts = scene.cuts ?? []
+  // Read the EFFECTIVE layer (refined edits over the director's first pass) so these
+  // numbers match the assembled final clip exactly — not the stale baseline. Cuts
+  // are normalized first so overlaps aren't double-counted.
+  const cuts = normalizeCuts(effectiveCuts(scene))
   const dropped = cuts.reduce((sum, c) => sum + Math.max(0, c.end - c.start), 0)
-  const net = Math.max(0, span - dropped)
+  const finalLen = Math.max(0, span - dropped)
+  const segments = effectiveSegments(scene)
+  const clipCount = segments.filter((s) => s.audioUrl).length
+  const silentRuns = segments.filter((s) => !s.audioUrl).length
 
   const origWords = wordCount(scene.transcript)
   const draftWords = wordCount(scene.draftText)
   const reduction = origWords > 0 ? Math.round((1 - draftWords / origWords) * 100) : 0
 
   const estNarration = narrationSeconds(scene.draftText)
-  const align = alignment(scene)
+  // Compare the voiced narration to the FINAL clip length (footage minus cuts), not
+  // the raw footage span — that's the length it actually plays over in the export.
+  const align: Alignment | null =
+    scene.narrationSeconds == null
+      ? null
+      : (() => {
+          const delta = scene.narrationSeconds - finalLen
+          return {
+            deltaSeconds: delta,
+            status:
+              Math.abs(delta) <= ALIGN_TOLERANCE ? 'aligned' : delta < 0 ? 'short' : 'long',
+          }
+        })()
   const done = scene.status === 'built'
 
   return (
@@ -77,11 +96,25 @@ export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
             </span>
           )}
         </Stat>
-        {cuts.length > 0 && (
-          <Stat label="Net runtime">
-            <span className="font-mono">{formatTime(net)}</span>
-          </Stat>
-        )}
+        {/* The assembled final clip's length for this scene: footage minus the
+            effective cuts (dead space is kept). Matches the export. */}
+        <Stat label="Final clip">
+          <span className="font-mono">
+            {formatTime(span)} → {formatTime(finalLen)}
+          </span>
+        </Stat>
+        <Stat label="Narration clips">
+          {clipCount === 0 && silentRuns === 0 ? (
+            <span className="text-ink-mute">none</span>
+          ) : (
+            <span className="font-mono">
+              {clipCount}
+              {silentRuns > 0 && (
+                <span className="text-terracotta-ink"> · {silentRuns} silent</span>
+              )}
+            </span>
+          )}
+        </Stat>
         <Stat label="Script">
           <span className="font-mono">
             {origWords.toLocaleString()} → {draftWords.toLocaleString()} words
