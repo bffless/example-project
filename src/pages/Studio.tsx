@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
@@ -53,6 +53,20 @@ export function Studio() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
+
+  // The Build scene tabs are sticky under the global header (`h-14` = 3.5rem).
+  // The diff's "placing" bar is also sticky and must clear them, so measure the
+  // tab strip's (stable, single-line) height and hand it down as a CSS variable
+  // the diff reads for its own sticky `top`. A callback ref wires up a
+  // ResizeObserver when the strip mounts (Build phase) and tears it down on
+  // unmount — keeping the height correct across responsive font/zoom changes.
+  const [tabsHeight, setTabsHeight] = useState(0)
+  const tabsRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setTabsHeight(el.offsetHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const url = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
   useEffect(() => {
@@ -465,12 +479,23 @@ export function Studio() {
                  video over the full-width transcript time-grid diff. The diff is
                  the main editing area — where we'll work the shortened script
                  against the original — so it gets the whole page width. */
-              <div className="flex flex-col gap-6">
+              <div
+                className="flex flex-col gap-6"
+                // The diff's sticky "placing" bar reads this to clear the sticky
+                // scene tabs above it: header (3.5rem) + measured tab strip.
+                style={{ '--diff-sticky-top': `calc(3.5rem + ${tabsHeight}px)` } as CSSProperties}
+              >
                 {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                {/* Only the tab strip sticks under the global header (its
+                    "Scenes · chapters" label scrolls away). `tabsRef` measures
+                    JUST the strip so the diff's placing bar parks flush beneath
+                    it. Frosted like the header; z below it (z-40) so it wins. */}
                 <SceneTabs
                   scenes={pipe.scenes}
                   selectedId={pipe.selectedId}
                   onSelect={pipe.select}
+                  tablistRef={tabsRef}
+                  tablistClassName="sticky top-14 z-30 bg-paper/85 backdrop-blur"
                 />
                 {/* Video capped on the left; the space to its right carries the
                     selected scene's metadata. The diff below still gets the full
@@ -525,6 +550,7 @@ export function Studio() {
                     duration={duration}
                     windowStart={selected.start}
                     windowEnd={selected.end}
+                    originalAudioUrl={pipe.audioUrl ?? undefined}
                   />
                 )}
                 {/* Assemble the SELECTED scene off its own cut clip (story 03g

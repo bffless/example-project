@@ -1,9 +1,15 @@
+import type { Ref } from 'react'
 import type { Scene } from '../../lib/scenes'
 
 type Props = {
   scenes: Scene[]
   selectedId: string | null
   onSelect: (id: string) => void
+  /** Ref + classes applied to the tab strip ROW only (the page makes it sticky
+   *  and measures it). The "Scenes · chapters" label above stays in normal flow
+   *  so it scrolls away — only the tabs pin under the header. */
+  tablistRef?: Ref<HTMLDivElement>
+  tablistClassName?: string
 }
 
 /**
@@ -11,19 +17,30 @@ type Props = {
  * area below (video + transcript diff) can run the full width of the page. Built
  * scenes are checked off; the active tab carries the terracotta underline. The
  * strip scrolls horizontally when the scenes outrun the page width.
+ *
+ * The "Scenes · chapters" label and the tab strip are emitted as siblings (no
+ * wrapping box) so the page can make ONLY the strip `sticky` — a sticky child is
+ * bounded by its parent, so the strip must sit directly in the tall Build column
+ * to pin across the whole scroll while the label scrolls away above it.
  */
-export function SceneTabs({ scenes, selectedId, onSelect }: Props) {
+export function SceneTabs({ scenes, selectedId, onSelect, tablistRef, tablistClassName }: Props) {
   const built = scenes.filter((s) => s.status === 'built').length
 
   return (
-    <div>
-      <div className="mb-2 flex items-baseline justify-between">
+    <>
+      {/* -mb-4 trims the Build column's gap-6 back to the original ~8px so the
+          label still reads as attached to the tabs below it. */}
+      <div className="-mb-4 flex items-baseline justify-between">
         <p className="meta-label">Scenes · chapters</p>
         <p className="font-mono text-[12px] text-ink-mute">
           {built}/{scenes.length} built
         </p>
       </div>
-      <div role="tablist" className="flex gap-1 overflow-x-auto border-b rule">
+      <div
+        ref={tablistRef}
+        role="tablist"
+        className={['flex gap-1 overflow-x-auto border-b rule', tablistClassName].filter(Boolean).join(' ')}
+      >
         {scenes.map((scene) => {
           const active = scene.id === selectedId
           const done = scene.status === 'built'
@@ -58,6 +75,6 @@ export function SceneTabs({ scenes, selectedId, onSelect }: Props) {
           )
         })}
       </div>
-    </div>
+    </>
   )
 }

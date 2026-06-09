@@ -61,6 +61,11 @@ type Props = {
    *  show the whole talk. */
   windowStart?: number
   windowEnd?: number
+  /** The whole-source extracted audio (16 kHz WAV). When set, each Original-pane
+   *  timestamp becomes a play button: click it to play the original audio from
+   *  that second through the scene's `windowEnd`, with the playing row lit up and
+   *  tracking the playhead. Omit (prep previews) to keep the gutter read-only. */
+  originalAudioUrl?: string
 }
 
 /** An in-progress cut drag: the cell it began on, the cell under the pointer
@@ -149,6 +154,7 @@ export function TranscriptDiff({
   duration = 0,
   windowStart = 0,
   windowEnd = Infinity,
+  originalAudioUrl,
 }: Props) {
   const [secondsPerLine, setSecondsPerLine] = useState(DEFAULT_SECONDS_PER_LINE)
   const [segmentSeconds, setSegmentSeconds] = useState(DEFAULT_SEGMENT_SECONDS)
@@ -331,6 +337,73 @@ export function TranscriptDiff({
       ? { mode: 'cut', onCellDown, onCellEnter, preview: cutPending, previewKind: drag?.op ?? null, glow: [] }
       : null
 
+  // Play the ORIGINAL scene audio from a clicked timestamp. The Original pane's
+  // gutter timestamps are play buttons; clicking one seeks the whole-source WAV
+  // to that absolute second and plays through the scene's `windowEnd`.
+  // `playheadSec` lights the row the playhead is in and tracks it as it advances;
+  // clicking the row that's currently playing pauses it.
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playheadSec, setPlayheadSec] = useState<number | null>(null)
+
+  const playFrom = useCallback(
+    (startSec: number) => {
+      const el = audioRef.current
+      if (!el) return
+      // toggle: clicking the row the playhead is already in pauses it
+      if (!el.paused && playheadSec != null && playheadSec >= startSec && playheadSec < startSec + secondsPerLine) {
+        el.pause()
+        return
+      }
+      if (currentAudio && currentAudio !== el) currentAudio.pause()
+      currentAudio = el
+      setPlayheadSec(startSec) // light the row immediately, before the first timeupdate
+      const start = () => {
+        el.currentTime = startSec
+        void el.play().catch(() => {})
+      }
+      // `preload="metadata"` may not be ready on the first click — seek once the
+      // element knows its duration, else `currentTime` is dropped and it plays
+      // from 0 (lighting the wrong row).
+      if (el.readyState >= 1) start()
+      else el.addEventListener('loadedmetadata', start, { once: true })
+    },
+    [playheadSec, secondsPerLine],
+  )
+
+  const stop = useCallback(() => audioRef.current?.pause(), [])
+
+  // Track the playhead → lit row; stop at the scene's end so it doesn't bleed
+  // into the next scene's audio. Clearing the lit row is driven by the element's
+  // own pause/ended events (not setState-in-effect), so a scene switch that just
+  // pauses the audio also clears the highlight.
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    const onTime = () => {
+      if (Number.isFinite(windowEnd) && el.currentTime >= windowEnd) {
+        el.pause()
+        return
+      }
+      setPlayheadSec(el.currentTime)
+    }
+    const clear = () => setPlayheadSec(null)
+    el.addEventListener('timeupdate', onTime)
+    el.addEventListener('pause', clear)
+    el.addEventListener('ended', clear)
+    return () => {
+      el.removeEventListener('timeupdate', onTime)
+      el.removeEventListener('pause', clear)
+      el.removeEventListener('ended', clear)
+    }
+  }, [windowEnd])
+
+  // Switching scenes (or swapping the source) stops playback — the resulting
+  // `pause` event clears the lit row — so audio never carries over from the
+  // scene you just left.
+  useEffect(() => {
+    audioRef.current?.pause()
+  }, [windowStart, windowEnd, originalAudioUrl])
+
   // Pin both panes to the same span: the latest of either transcript, any cut, or
   // the clip's real `duration`, so they're equal height and trailing footage with
   // no words/cuts (the talk ends before the clip does) still renders editable rows.
@@ -364,6 +437,9 @@ export function TranscriptDiff({
 
   return (
     <div className="border rule bg-paper">
+      {originalAudioUrl && (
+        <audio ref={audioRef} src={originalAudioUrl} preload="metadata" className="hidden" />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b rule px-5 py-3">
         <div>
           <p className="meta-label">Transcript · time grid</p>
@@ -406,7 +482,11 @@ export function TranscriptDiff({
       </div>
 
       {pendingClip && (
-        <div className="flex flex-wrap items-center gap-3 border-b rule bg-voice/10 px-5 py-2 text-[12.5px] text-ink-soft">
+        // Sticky so the "what am I placing" cue stays put as the long grid below
+        // scrolls. `--diff-sticky-top` (set by the page) parks it just under the
+        // sticky scene tabs; falls back to the header height alone. Frosted +
+        // z-20 so grid rows scroll cleanly beneath it (under the tabs at z-30).
+        <div className="sticky top-[var(--diff-sticky-top,3.5rem)] z-20 flex flex-wrap items-center gap-3 border-b rule bg-voice/20 px-5 py-2 text-[12.5px] text-ink-soft backdrop-blur">
           <span>
             Placing <span className="font-mono text-voice-ink">{clipDuration.toFixed(1)}s</span> of
             original audio — click a <span className="text-voice-ink">green</span> gap on the New
@@ -418,6 +498,27 @@ export function TranscriptDiff({
             onClick={() => setPendingClip(null)}
           >
             Cancel (Esc)
+          </button>
+        </div>
+      )}
+
+      {/* "Now playing" cue — sticky (parked under the scene tabs like the placing
+          bar) so the Stop control is reachable no matter how far the scene has
+          scrolled. Tracks the playhead second; Stop pauses (which clears the lit
+          row via the element's pause event). */}
+      {playheadSec != null && (
+        <div className="sticky top-[var(--diff-sticky-top,3.5rem)] z-20 flex items-center gap-3 border-b rule bg-terracotta/15 px-5 py-2 text-[12.5px] text-ink-soft backdrop-blur">
+          <span className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-terracotta" />
+            Playing original audio ·{' '}
+            <span className="font-mono text-terracotta-ink">{formatClock(playheadSec)}</span>
+          </span>
+          <button
+            type="button"
+            className="ml-auto bg-transparent px-1 py-0.5 text-[11px] text-ink-soft transition-colors hover:text-terracotta"
+            onClick={stop}
+          >
+            ■ Stop
           </button>
         </div>
       )}
@@ -462,6 +563,8 @@ export function TranscriptDiff({
             controls={null}
             edit={leftEdit}
             rowHeight={rowHeight}
+            onPlayFrom={originalAudioUrl ? playFrom : undefined}
+            playheadSec={playheadSec}
           />
         </div>
         {/* drag handle — only meaningful in the lg side-by-side layout */}
@@ -575,6 +678,12 @@ type PaneProps = {
   /** Minimum height (px) for each grid row — the tall-rows toggle drives this so
    *  the panes grow in lockstep with the filmstrip's full-frame cells. */
   rowHeight: number
+  /** When set, each row's timestamp becomes a play button (start that second).
+   *  Original pane only — omit to keep the gutter read-only. */
+  onPlayFrom?: (startSec: number) => void
+  /** The audio playhead, in absolute seconds — the row containing it lights up.
+   *  null when nothing is playing. */
+  playheadSec?: number | null
 }
 
 /**
@@ -680,6 +789,8 @@ function Pane({
   controls,
   edit,
   rowHeight,
+  onPlayFrom,
+  playheadSec,
 }: PaneProps) {
   const lines = useMemo(
     () =>
@@ -759,6 +870,12 @@ function Pane({
                   voiced={voiced}
                   edit={edit}
                   rowHeight={rowHeight}
+                  onPlay={onPlayFrom ? () => onPlayFrom(line.startSec) : undefined}
+                  playing={
+                    playheadSec != null &&
+                    playheadSec >= line.startSec &&
+                    playheadSec < line.startSec + secondsPerLine
+                  }
                 />
               </div>
             )
@@ -778,6 +895,8 @@ function Row({
   voiced,
   edit,
   rowHeight,
+  onPlay,
+  playing = false,
 }: {
   line: GridLine
   template: string
@@ -787,6 +906,10 @@ function Row({
   voiced: CutSpan[]
   edit: CellEdit | null
   rowHeight: number
+  /** Play the original audio from this row's start second (Original pane only). */
+  onPlay?: () => void
+  /** This row holds the audio playhead — lit up + the timestamp shown active. */
+  playing?: boolean
 }) {
   const cutCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, cuts)
   const voicedCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, voiced)
@@ -810,15 +933,41 @@ function Row({
 
   return (
     <div
-      className="grid border-t border-paper-line/60"
+      className={[
+        'grid border-t border-paper-line/60',
+        // the row the audio playhead is in lights up as it plays
+        playing ? 'bg-terracotta/15' : '',
+      ].join(' ')}
       // The row track grows to `rowHeight` (tall-rows mode) and the cells stretch
       // to it; their `items-center` keeps the single line of text centred.
       style={{ gridTemplateColumns: template, gridAutoRows: `minmax(${rowHeight}px, auto)` }}
     >
-      {/* line "number" = the row's start timestamp */}
-      <div className="flex select-none items-center justify-end border-r border-paper-line/60 px-2 text-[11px] text-ink-faint">
-        {formatClock(line.startSec)}
-      </div>
+      {/* line "number" = the row's start timestamp. With `onPlay` it's a button:
+          click to play the original audio from this second. Styled to read as the
+          plain timestamp it was — the cursor + hover tint are the only "button"
+          tells — so the gutter stays quiet. */}
+      {onPlay ? (
+        <button
+          type="button"
+          onClick={onPlay}
+          title={`Play original from ${formatClock(line.startSec)}`}
+          aria-label={`Play original audio from ${formatClock(line.startSec)}`}
+          className={[
+            // appearance-none strips the native button chrome, but then WebKit
+            // falls back to a black UA border on every side — border-0 kills it,
+            // and we re-add only the faint right divider to match the plain
+            // timestamp it replaced. outline-none drops the click focus box.
+            'flex h-full w-full cursor-pointer select-none appearance-none items-center justify-end border-0 border-r border-paper-line/60 bg-transparent px-2 text-[11px] outline-none transition-colors',
+            playing ? 'font-semibold text-terracotta' : 'text-ink-faint hover:text-terracotta',
+          ].join(' ')}
+        >
+          {formatClock(line.startSec)}
+        </button>
+      ) : (
+        <div className="flex select-none items-center justify-end border-r border-paper-line/60 px-2 text-[11px] text-ink-faint">
+          {formatClock(line.startSec)}
+        </div>
+      )}
 
       {line.cells.map((cell, col) => {
         const time = line.startSec + col * segmentSeconds
