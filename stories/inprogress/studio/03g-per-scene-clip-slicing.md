@@ -171,8 +171,20 @@ the encode across CPU cores and speeds up the slice **and** the eventual assembl
   the studio media keeps working).
   - **Production (preview.j5s.dev)**: the `/studio` document needs these headers via
     a **Response Header Rule** (BFFless Settings → Response Headers; NOT exposed by
-    the MCP, so set in the UI). Until set, the deployed page is single-threaded (the
-    loader falls back cleanly).
+    the MCP, so set in the UI; ✅ now set — `**` pattern, `COOP: same-origin` +
+    `COEP: credentialless`). Hashed asset responses cached by the CDN *before* the
+    rule existed serve stale (no COEP) until purged — purge once after adding it.
+- **⚠️ Browser support — Firefox only, for now.** Full MT (slice **and** the
+  audio-mixing assemble, with normal `-c:a aac`) runs correctly in **Firefox**.
+  **Chromium and Safari hang** the moment core-mt has to *encode audio* — a known,
+  unfixed cluster of core-mt pthread-runtime deadlocks: ffmpeg.wasm
+  [#772](https://github.com/ffmpegwasm/ffmpeg.wasm/issues/772) (audio-encode hang,
+  works in Firefox) and [#883](https://github.com/ffmpegwasm/ffmpeg.wasm/issues/883)
+  (core-mt encode deadlock). We deliberately **keep full audio re-encode** (no
+  `-c:a copy` workaround) and treat MT as **use-Firefox-until-upstream-fixes-it**,
+  rather than degrade the audio path. Revisit when #772/#883 close or core-mt moves
+  to FFmpeg 6.x (#930/#743). The loader still falls back to ST when not isolated, so
+  non-isolated contexts are unaffected.
 
 ## Non-goals
 - Per-scene **assemble** off `clipUrl` and the **master-concat** at Export
