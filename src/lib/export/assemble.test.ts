@@ -3,6 +3,8 @@ import {
   buildSlices,
   planAssembly,
   buildFfmpegCommand,
+  planScene,
+  buildConcatCommand,
   type AssembleInput,
   type AssembleSegment,
 } from './assemble'
@@ -199,5 +201,58 @@ describe('buildFfmpegCommand', () => {
     const cmd = buildFfmpegCommand(plan)
     expect(cmd.audioInputs).toEqual([])
     expect(cmd.args.filter((a) => a === '-i')).toHaveLength(1) // just the source
+  })
+})
+
+describe('planScene (per-scene clip, story 03g phase 2)', () => {
+  it('rebases the scene to clip-local time and walks [0, end-start]', () => {
+    // Scene spans original 100..160 (a 60s clip). A segment at 110..140 and a cut
+    // at 150..155 — both in ORIGINAL seconds — should shift to clip-local.
+    const plan = planScene({
+      segments: [{ start: 110, end: 140, audioUrl: 'a.wav', audioSeconds: 30 }],
+      cuts: [{ start: 150, end: 155 }],
+      start: 100,
+      end: 160,
+    })
+    // The segment slice now sits at clip-local 10..40, the cut at 50..55.
+    const segSlice = plan.slices.find((s) => s.kind === 'segment')
+    expect(segSlice).toMatchObject({ start: 10, end: 40 })
+    expect(plan.slices.some((s) => s.kind === 'cut' && s.start === 50 && s.end === 55)).toBe(true)
+    // Output keeps everything except the 5s cut: 60 - 5 = 55.
+    expect(plan.duration).toBeCloseTo(55, 5)
+    // Video pieces trim the CLIP (start at 0), never original-video offsets.
+    expect(plan.video[0].start).toBe(0)
+    expect(Math.max(...plan.video.map((v) => v.end))).toBeLessThanOrEqual(60)
+  })
+
+  it('clamps segments/cuts that spill past the scene bounds', () => {
+    const plan = planScene({
+      segments: [{ start: 95, end: 130, audioUrl: 'a.wav', audioSeconds: 35 }], // starts before the scene
+      cuts: [],
+      start: 100,
+      end: 120,
+    })
+    const seg = plan.slices.find((s) => s.kind === 'segment')!
+    expect(seg.start).toBe(0) // clamped to clip start
+    expect(seg.end).toBe(20) // clamped to clip end (120-100)
+  })
+})
+
+describe('buildConcatCommand (story 03g phase 2)', () => {
+  it('writes a concat list of the parts and joins them with -c copy', () => {
+    const cmd = buildConcatCommand(['scene-0.mp4', 'scene-1.mp4', 'scene-2.mp4'])
+    expect(cmd.listContent).toBe("file 'scene-0.mp4'\nfile 'scene-1.mp4'\nfile 'scene-2.mp4'\n")
+    expect(cmd.args).toEqual(
+      expect.arrayContaining(['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy']),
+    )
+    // Stream-copy join: no encoder in the argv.
+    expect(cmd.args).not.toContain('libx264')
+    expect(cmd.output).toBe('final.mp4')
+  })
+
+  it('honors a custom output name', () => {
+    const cmd = buildConcatCommand(['a.mp4'], 'out.mp4')
+    expect(cmd.output).toBe('out.mp4')
+    expect(cmd.args[cmd.args.length - 1]).toBe('out.mp4')
   })
 })

@@ -58,10 +58,19 @@ Build preview swap in `Studio.tsx` (clip player uses a no-op `onLoaded` so it
 never clobbers the full-source `duration` the grid is keyed to); the 3 live rules
 above. Persisted via the existing generic `patchScene` reducer (no new reducer).
 
-**Phase 2 (next, same branch):** refactor assemble to be genuinely per-scene off
-`clipUrl` (clip-local rebasing of cuts/segments) and add the **master-concat** at
-Export (stream-copy join of the finished per-scene MP4s — the piece that doesn't
-exist yet). Out of scope here.
+**Phase 2 (✅ done, same branch):** assemble is now **per-scene, tab by tab**, off
+each scene's `clipUrl`, with a separate **master concat** for the whole video —
+fixing the whole-film OOM (only one short clip is in wasm memory at a time).
+- `planScene()` (pure, `assemble.ts`) rebases a scene's effective cuts/segments to
+  its clip-local timeline (`− scene.start`) and reuses `planAssembly`.
+- `SceneAssembleBar` (keyed by selected scene) renders **just the selected tab's
+  scene** off its clip → preview → **save** (`scene.assembledUrl`, via `saveSceneCut`,
+  reusing the `export` upload). You do each scene as you build it.
+- `FinalCutBar` is the **master assemble**: `buildConcatCommand` + `concat()`
+  stream-copy join every scene's saved `assembledUrl` → `finalCutUrl`. Enabled once
+  all scenes are assembled. No re-encode, near-instant, no OOM.
+- The old whole-film `AssembleBar` (one pass over the raw across the full timeline —
+  the OOM source) is **removed**.
 
 ## Phase 1 — the pieces
 

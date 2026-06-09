@@ -185,6 +185,9 @@ export function useScenePipeline() {
   // bucket. The finished blob lives transiently in the AssembleBar (which also
   // owns the save error); only the saved serve URL (finalCutUrl) is persisted.
   const [savingFinalCut, setSavingFinalCut] = useState(false)
+  // The scene whose assembled cut is currently uploading to the bucket (story 03g
+  // phase 2 — per-scene assemble & save). Transient.
+  const [savingSceneCutId, setSavingSceneCutId] = useState<string | null>(null)
   // Per-scene refiner (story 03c) busy flags + last error. Transient: the scene
   // being captured-for, the scene being refined, and any error from either.
   const [sheetingId, setSheetingId] = useState<string | null>(null)
@@ -958,6 +961,25 @@ export function useScenePipeline() {
     [uploadReq, dispatch],
   )
 
+  // Save one scene's assembled cut (story 03g phase 2). Uploads the rendered scene
+  // MP4 (reusing the `export` presigned flow) and persists its serve path on the
+  // scene as `assembledUrl`, so a reload keeps it and the final master concat can
+  // stitch every scene's saved cut. Re-assembling + saving overwrites it.
+  const saveSceneCut = useCallback(
+    async (sceneId: string, blob: Blob): Promise<string> => {
+      setSavingSceneCutId(sceneId)
+      try {
+        const file = new File([blob], `scene-${sceneId}.mp4`, { type: blob.type || 'video/mp4' })
+        const { url } = await uploadReq({ file, kind: 'export' }).unwrap()
+        patchScene(sceneId, { assembledUrl: url })
+        return url
+      } finally {
+        setSavingSceneCutId(null)
+      }
+    },
+    [uploadReq, patchScene],
+  )
+
   const allBuilt = useMemo(
     () => scenes.length > 0 && scenes.every((s) => s.status === 'built'),
     [scenes],
@@ -978,6 +1000,7 @@ export function useScenePipeline() {
     selectedId,
     finalCutUrl,
     savingFinalCut,
+    savingSceneCutId,
     voicingId,
     running,
     cloning,
@@ -995,6 +1018,7 @@ export function useScenePipeline() {
     reset,
     select,
     saveFinalCut,
+    saveSceneCut,
     generateSceneSheets,
     refineScene,
     editSceneCut,

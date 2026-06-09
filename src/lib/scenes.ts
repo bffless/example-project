@@ -84,8 +84,13 @@ export type Scene = {
    *  cut frame-accurately and uploaded on its own (story 03g, the "Cut this
    *  scene" build step). Absent until that step runs. Once set, the Build preview
    *  plays this small clip instead of the whole source, and the per-scene assemble
-   *  (phase 2) reads it. Re-cutting overwrites it. */
+   *  reads it. Re-cutting overwrites it. */
   clipUrl?: string
+  /** Serve path of this scene's **assembled** cut — its clip with cuts dropped and
+   *  narration laid over it, rendered + saved one scene at a time (story 03g phase
+   *  2). Absent until you assemble & save this scene. The final master cut is the
+   *  stream-copy concat of every scene's `assembledUrl`. Re-assembling overwrites it. */
+  assembledUrl?: string
   /** In-flight `/api/refine-scene` job id (story 03f Part 0). Set while the async
    *  refine job is running so a hard reload resumes polling instead of stranding
    *  it; cleared (null) on terminal status. */

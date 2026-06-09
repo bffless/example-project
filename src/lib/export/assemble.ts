@@ -303,3 +303,69 @@ export function buildFfmpegCommand(
   ]
   return { filterComplex, args, audioInputs }
 }
+
+/**
+ * Plan one scene's assemble against **its own clip** (story 03g phase 2).
+ *
+ * The producer cuts each scene into a standalone clip whose timeline is
+ * `[0, end − start]` (`scene.clipUrl`). The scene's segments and cuts, however, are
+ * still in **original-video** seconds. This rebases them to clip-local time by
+ * subtracting `start` (clamped into the clip), then runs the same `planAssembly`
+ * walk over `[0, end − start]`. The returned plan's video pieces therefore `trim`
+ * the small clip — not the whole film — so assembling a scene only ever holds one
+ * short clip in wasm memory (the fix for the whole-film OOM).
+ */
+export function planScene(input: {
+  segments: AssembleSegment[]
+  cuts: Cut[]
+  /** Scene bounds in original-video seconds. */
+  start: number
+  end: number
+}): AssemblePlan {
+  const dur = Math.max(0, input.end - input.start)
+  const shift = (v: number) => clamp(v - input.start, 0, dur)
+  const segments = input.segments.map((s) => ({ ...s, start: shift(s.start), end: shift(s.end) }))
+  const cuts = input.cuts.map((c) => ({ start: shift(c.start), end: shift(c.end) }))
+  return planAssembly({ segments, cuts, duration: dur })
+}
+
+export type ConcatCommand = {
+  /** The full ffmpeg argv for the concat-demuxer join. */
+  args: string[]
+  /** Virtual-FS name of the concat list file the executor must write. */
+  listName: string
+  /** Contents of that list file (one `file '<part>'` line per part, in order). */
+  listContent: string
+  /** Output filename the finished cut is read back from. */
+  output: string
+}
+
+/**
+ * Build the final **stream-copy concat** of the per-scene MP4s (story 03g phase 2).
+ *
+ * Every scene clip is encoded with the same profile (`libx264`/`yuv420p`/aac, same
+ * resolution — they're slices of one source), so the concat demuxer can join them
+ * with `-c copy`: no re-encode, near-instant, and almost no memory (it just rewrites
+ * the container). `-fflags +genpts` regenerates presentation timestamps so the
+ * boundary between scenes is clean.
+ */
+export function buildConcatCommand(parts: string[], output = 'final.mp4'): ConcatCommand {
+  const listName = 'concat.txt'
+  const listContent = parts.map((p) => `file '${p}'`).join('\n') + '\n'
+  const args = [
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-fflags',
+    '+genpts',
+    '-i',
+    listName,
+    '-c',
+    'copy',
+    '-movflags',
+    '+faststart',
+    output,
+  ]
+  return { args, listName, listContent, output }
+}

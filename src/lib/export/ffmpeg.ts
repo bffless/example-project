@@ -208,3 +208,50 @@ export async function slice({ source, command, onProgress, onLog }: SliceAssets)
     for (const name of written) await ff.deleteFile(name).catch(() => {})
   }
 }
+
+export type ConcatAssets = {
+  /** Each per-scene MP4 to join, in order: the FS name + its bytes. */
+  parts: { name: string; bytes: Uint8Array }[]
+  command: import('./assemble').ConcatCommand
+  onLog?: (line: string) => void
+}
+
+/**
+ * Stream-copy concat of the per-scene MP4s into the final cut (story 03g phase 2).
+ * Writes each scene MP4 + the concat list file into the wasm FS, runs the `-c copy`
+ * join (no re-encode → fast, minimal memory), reads back the result, cleans up.
+ */
+export async function concat({ parts, command, onLog }: ConcatAssets): Promise<Blob> {
+  const ff = await getFFmpeg()
+
+  const tail: string[] = []
+  const onLogEvent = ({ message }: { message: string }) => {
+    tail.push(message)
+    if (tail.length > 40) tail.shift()
+    onLog?.(message)
+  }
+  ff.on('log', onLogEvent)
+
+  const written: string[] = []
+  try {
+    for (const part of parts) {
+      await ff.writeFile(part.name, part.bytes)
+      written.push(part.name)
+    }
+    await ff.writeFile(command.listName, command.listContent)
+    written.push(command.listName)
+
+    const code = await ff.exec(command.args)
+    if (code !== 0) {
+      throw new Error(`ffmpeg exited ${code}\n${tail.slice(-12).join('\n')}`)
+    }
+
+    const data = await ff.readFile(command.output)
+    written.push(command.output)
+    if (typeof data === 'string') throw new Error('ffmpeg returned text, expected binary output')
+    return new Blob([data.slice()], { type: 'video/mp4' })
+  } finally {
+    ff.off('log', onLogEvent)
+    for (const name of written) await ff.deleteFile(name).catch(() => {})
+  }
+}

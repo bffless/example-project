@@ -21,7 +21,8 @@ import { StudioStepper } from '../components/Studio/StudioStepper'
 import { AudioArtifact } from '../components/Studio/AudioArtifact'
 import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
-import { AssembleBar } from '../components/Studio/AssembleBar'
+import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
+import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { studioPhase, type StudioPhase } from '../lib/pipeline'
 
@@ -510,16 +511,22 @@ export function Studio() {
                     duration={duration}
                   />
                 )}
-                {/* Export (story 05): assemble + preview the whole cut anytime —
-                    NOT gated on "built" (that's just the producer's done-tracker).
-                    Lets them stitch the scenes together and watch them run before
-                    committing. Un-voiced runs come out silent (AssembleBar flags
-                    it). Marking the last scene built flips the stepper to Export. */}
-                <AssembleBar
+                {/* Assemble the SELECTED scene off its own cut clip (story 03g
+                    phase 2). Keyed by scene id so switching tabs resets its
+                    transient render/preview. Bounded memory — only this scene's
+                    short clip is in wasm at a time, never the whole film. */}
+                {selected && (
+                  <SceneAssembleBar
+                    key={selected.id}
+                    scene={selected}
+                    saving={pipe.savingSceneCutId === selected.id}
+                    onSave={(blob) => pipe.saveSceneCut(selected.id, blob)}
+                  />
+                )}
+                {/* Master assemble: stream-copy concat of every scene's saved
+                    assembled cut → the whole video. Enabled once all are assembled. */}
+                <FinalCutBar
                   scenes={pipe.scenes}
-                  duration={duration}
-                  file={file}
-                  sourceUrl={pipe.sourceUrl}
                   finalCutUrl={pipe.finalCutUrl}
                   saving={pipe.savingFinalCut}
                   onSave={pipe.saveFinalCut}
