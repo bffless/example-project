@@ -87,6 +87,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 04 voice step (clone enabled / preset + live TTS preview)
              🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
                  ↳ ✅ 03e sprite filmstrip · ▶ next: manual cut editing · then wps knob · per-scene scope
+             🔨 03f refiner context+gating · ✅ Part 0 async fire-and-poll (jobs DB + postSteps + poll, no more timeouts) · ▶ next: Parts A–D (handoff · synopsis · prompt · gate)
              ·  06 · 07                                (queued)
 ```
 
@@ -104,6 +105,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03 | `03-wire-shorten-segment.md` | ⑤⑥ master director (synopsis + scenes + script + cuts) | ✅ done |
 | 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
 | 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
+| 03f | `03f-refiner-context-and-gating.md` | **async fire-and-poll** for director/refiner (jobs DB + `postSteps` + poll, no more timeouts) · director→refiner story-context handoff · per-scene synopsis · custom refine prompt · gate diff viewer behind sheets+refine | 🔨 Part 0 ✅ (async poll); Parts A–D next |
 | 05 | `../../done/05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) + save + audio polish | ✅ done† |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |

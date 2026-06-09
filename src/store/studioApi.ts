@@ -19,10 +19,32 @@ import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
 
 export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
-/** The master director's response: a logline + the raw scene breakdown. */
-type ScenesResponse = { synopsis?: string; scenes?: DirectorScene[] }
-/** The per-scene refiner's response (story 03c): anchored segments + refined cuts. */
-type RefineSceneResponse = RefineSceneRaw
+/** The master director's result blob: a logline + the raw scene breakdown. */
+type ScenesResult = { synopsis?: string; scenes?: DirectorScene[] }
+/** The per-scene refiner's result blob (story 03c): anchored segments + refined cuts. */
+type RefineSceneResult = RefineSceneRaw
+
+/**
+ * Async fire-and-poll (story 03f Part 0). The director and refiner Replicate calls
+ * are slow and used to time out on the synchronous response path. Now the start
+ * endpoints (`/api/scenes`, `/api/refine-scene`) just ENQUEUE a job and return its
+ * id immediately; the heavy Replicate call runs in the pipeline's `postSteps`, and
+ * the front end polls `getStudioJob` until the row reaches a terminal status.
+ */
+export type StartJobResponse = { jobId: string; status: string }
+
+/**
+ * The poll endpoint's view of a job row. `result` is the model's already-COERCED
+ * output blob — the very same shape the synchronous endpoints used to return — so
+ * the client still runs it through `toScenes` / `toRefinement` (mock and real
+ * share the shape; swap-don't-rewrite holds).
+ */
+export type StudioJob = {
+  status: 'pending' | 'running' | 'done' | 'error'
+  kind: 'scenes' | 'refine'
+  result?: ScenesResult | RefineSceneResult | null
+  error?: string | null
+}
 /** Voice clone (story 04): the recorded sample's URL → a reusable `voiceId`
  *  (+ a preview mp3 of the cloned voice from MiniMax). */
 type VoiceCloneResponse = { voiceId: string; previewUrl?: string }
@@ -45,7 +67,10 @@ export const studioApi = createApi({
 
     // The master director (story 03): timestamped transcript + contact-sheet
     // images + the user's direction → synopsis + scenes (script, span, cuts).
-    scenes: builder.mutation<ScenesResponse, DirectorRequest>({
+    // Now ENQUEUE-ONLY (story 03f Part 0): returns a { jobId } to poll on; the
+    // Gemini call runs in the pipeline's postSteps. The director's result lands in
+    // the job row's `result` blob, read via `getStudioJob`.
+    scenes: builder.mutation<StartJobResponse, DirectorRequest>({
       query: (body) => ({
         url: 'api/scenes',
         method: 'POST',
@@ -55,13 +80,23 @@ export const studioApi = createApi({
 
     // The per-scene refiner (story 03c): the scene's transcript + the director's
     // first-pass script/cuts + the scene's dense contact sheets → anchored
-    // segments (where the new text lands) + refined cuts.
-    refineScene: builder.mutation<RefineSceneResponse, RefineSceneRequest>({
+    // segments (where the new text lands) + refined cuts. Also enqueue-only now
+    // (story 03f Part 0) — returns a { jobId } to poll on.
+    refineScene: builder.mutation<StartJobResponse, RefineSceneRequest>({
       query: (body) => ({
         url: 'api/refine-scene',
         method: 'POST',
         body,
       }),
+    }),
+
+    // Poll a job's status (story 03f Part 0). Shared by the director and refiner
+    // start endpoints (discriminated by `kind`). `keepUnusedDataFor: 0` so the
+    // poll never reads a stale cached `pending` — each poll hits the network and
+    // the result isn't retained after the loop unsubscribes.
+    getStudioJob: builder.query<StudioJob, string>({
+      query: (id) => `api/studio/job?id=${encodeURIComponent(id)}`,
+      keepUnusedDataFor: 0,
     }),
 
     // Scene narration (story 03c): speak a run of the refined script in the saved
@@ -121,6 +156,7 @@ export const {
   useTranscribeMutation,
   useScenesMutation,
   useRefineSceneMutation,
+  useLazyGetStudioJobQuery,
   useNarrateMutation,
   useUploadMutation,
   useVoiceCloneMutation,

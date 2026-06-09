@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
-import { timedTranscript, toScenes } from '../../lib/director'
+import { timedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import {
   toRefinement,
   effectiveSegments,
@@ -10,6 +10,7 @@ import {
   fitsGap,
   insertSegment,
   removeSegment,
+  type RefineSceneRaw,
 } from '../../lib/refiner'
 import { extractAudio, extractAudioWav, sliceAudioWav } from '../../lib/audio'
 import {
@@ -20,6 +21,7 @@ import {
 } from '../../lib/frames'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
+  studioApi,
   useTranscribeMutation,
   useScenesMutation,
   useRefineSceneMutation,
@@ -40,6 +42,7 @@ import {
   setContactSheets,
   setWords,
   setSynopsis,
+  setScenesJobId,
   setVoice,
   addSavedVoice,
   removeSavedVoice,
@@ -51,6 +54,19 @@ import {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`
+
+// Async fire-and-poll tuning (story 03f Part 0). The director/refiner jobs run
+// off the response path now, so we poll a status endpoint until the row is done.
+const POLL_INTERVAL_MS = 2000
+const POLL_TIMEOUT_MS = 5 * 60 * 1000 // give up on a wedged job rather than poll forever
+
+/**
+ * Job ids currently being polled, shared across hook instances (same rationale as
+ * `stepInFlight`). Both the live action AND the resume-on-mount effect can race to
+ * poll the same job — and React StrictMode double-invokes effects in dev — so this
+ * module-level guard ensures exactly one poll loop per job id.
+ */
+const pollsInFlight = new Set<string>()
 
 /**
  * Measure an audio clip's real length by loading just its metadata — the TTS
@@ -145,6 +161,8 @@ export function useScenePipeline() {
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
+  const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
+  const duration = useAppSelector((s) => s.studio.duration)
   const voice = useAppSelector((s) => s.studio.voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
@@ -210,6 +228,135 @@ export function useScenePipeline() {
     () => stages.find((s) => s.status !== 'done')?.id ?? null,
     [stages],
   )
+
+  // ---- Async fire-and-poll (story 03f Part 0) -------------------------------
+
+  /**
+   * Poll a studio job until it reaches a terminal status. The director/refiner
+   * Replicate calls run off the response path now (in the pipeline's postSteps),
+   * so the start endpoint just hands back a job id and we poll `getStudioJob`
+   * here: `done` → return the `result` blob; `error` → throw the job's message;
+   * otherwise sleep and re-poll, giving up after `POLL_TIMEOUT_MS` so a wedged
+   * job surfaces as an error instead of polling forever. Each poll uses
+   * `initiate(..., { forceRefetch: true, subscribe: false })` so it always hits
+   * the network (never a stale cached `pending`) and leaves no cache subscription.
+   */
+  const pollJob = useCallback(
+    async (jobId: string): Promise<{ kind: 'scenes' | 'refine'; result: unknown }> => {
+      const deadline = Date.now() + POLL_TIMEOUT_MS
+      for (;;) {
+        const job = await dispatch(
+          studioApi.endpoints.getStudioJob.initiate(jobId, { forceRefetch: true, subscribe: false }),
+        ).unwrap()
+        if (job.status === 'done') return { kind: job.kind, result: job.result ?? null }
+        if (job.status === 'error') throw new Error(job.error || 'The job failed.')
+        if (Date.now() > deadline) throw new Error('Timed out waiting for the job to finish.')
+        await delay(POLL_INTERVAL_MS)
+      }
+    },
+    [dispatch],
+  )
+
+  /**
+   * Drive a master-director job to completion, then commit it — shared by the
+   * live action (`runDirector`) and resume-on-reload. `videoSrc` is the in-memory
+   * object URL when we have it (live) or the persisted source serve URL (resume);
+   * the per-scene card thumbs are captured off it best-effort, so a cold reload
+   * with no seekable source still commits the scenes (just without card art).
+   * The `pollsInFlight` guard makes the live path and the resume effect idempotent.
+   */
+  const completeDirectorJob = useCallback(
+    async (jobId: string, videoSrc: string | null, clipDuration: number) => {
+      if (pollsInFlight.has(jobId)) return
+      pollsInFlight.add(jobId)
+      setRunning(true)
+      patch('director', { status: 'active' })
+      try {
+        const { result } = await pollJob(jobId)
+        const data = (result ?? {}) as { synopsis?: string; scenes?: DirectorScene[] }
+        const built = toScenes(data.scenes ?? [], clipDuration)
+        dispatch(setSynopsis(data.synopsis ?? null))
+
+        // Scene-card art: capture one midpoint frame per scene if we can seek the
+        // source; never let a failed/absent source fail the whole job.
+        let thumbs: string[] = []
+        if (videoSrc) {
+          try {
+            thumbs = await captureFramesAt(videoSrc, built.map((s) => (s.start + s.end) / 2), 64)
+          } catch {
+            thumbs = []
+          }
+        }
+        const withThumbs = built.map((s, i) => ({ ...s, thumb: thumbs[i] }))
+        dispatch(setScenes(withThumbs))
+        dispatch(setSelected(withThumbs[0]?.id ?? null))
+
+        const cutCount = withThumbs.reduce((n, s) => n + (s.cuts?.length ?? 0), 0)
+        patch('director', {
+          status: 'done',
+          detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · ${cutCount} cut${cutCount === 1 ? '' : 's'} · script tightened`,
+        })
+        dispatch(setScenesJobId(null))
+      } catch (e) {
+        // Terminal: drop the persisted job id (so we don't resume a dead job) and
+        // surface the failure on the director stage's existing error UI.
+        dispatch(setScenesJobId(null))
+        patch('director', { status: 'error', detail: stageError(e) })
+      } finally {
+        pollsInFlight.delete(jobId)
+        setRunning(false)
+      }
+    },
+    [pollJob, dispatch, patch],
+  )
+
+  /**
+   * Drive a per-scene refiner job to completion and write it into `scene.refined`
+   * (non-destructive). Shared by the live `refineScene` and resume-on-reload;
+   * `pollsInFlight` keeps the two from double-polling one job. Clears the scene's
+   * `refineJobId` on any terminal status.
+   */
+  const completeRefineJob = useCallback(
+    async (sceneId: string, jobId: string) => {
+      if (pollsInFlight.has(jobId)) return
+      pollsInFlight.add(jobId)
+      setRefiningId(sceneId)
+      setSceneError(null)
+      try {
+        const { result } = await pollJob(jobId)
+        const scene = scenes.find((s) => s.id === sceneId)
+        if (scene) {
+          patchScene(sceneId, { refined: toRefinement(result as RefineSceneRaw, scene), refineJobId: null })
+        } else {
+          patchScene(sceneId, { refineJobId: null })
+        }
+      } catch (e) {
+        setSceneError(stageError(e))
+        patchScene(sceneId, { refineJobId: null })
+      } finally {
+        pollsInFlight.delete(jobId)
+        setRefiningId(null)
+      }
+    },
+    [pollJob, scenes, patchScene],
+  )
+
+  // Resume any in-flight job after a hard reload (redux-persist brings back the
+  // persisted job ids). The `pollsInFlight` guard inside the `complete*` helpers
+  // makes this safe to re-run and safe to race with a live action — only one poll
+  // loop runs per job id. Cold reloads have no in-memory clip, so the director
+  // resume captures thumbs off the persisted source serve URL.
+  useEffect(() => {
+    // Kick the resume off in a microtask: the `complete*` helpers flip transient
+    // spinner state synchronously (fine in the live event-handler path), so we
+    // defer them out of the effect body to avoid a synchronous setState-in-effect.
+    queueMicrotask(() => {
+      if (scenesJobId) void completeDirectorJob(scenesJobId, sourceUrl, duration)
+      for (const scene of scenes) {
+        if (scene.refineJobId) void completeRefineJob(scene.id, scene.refineJobId)
+      }
+    })
+  }, [scenesJobId, sourceUrl, duration, scenes, completeDirectorJob, completeRefineJob])
 
   // ---- Individual steps -----------------------------------------------------
 
@@ -317,37 +464,23 @@ export function useScenePipeline() {
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(
-    async ({ src, duration, direction }: StepContext) => {
+    async ({ src, duration: clipDuration, direction }: StepContext) => {
       patch('director', { status: 'active' })
       const transcript = timedTranscript(words)
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
-      const data = await scenesReq({
+      // Enqueue-only: the start endpoint records a job and returns its id; the
+      // Gemini call runs in the pipeline's postSteps (story 03f Part 0). Persist
+      // the id so a hard reload resumes polling, then drive it to completion.
+      const { jobId } = await scenesReq({
         transcript,
         sheetUrls,
         direction: direction ?? '',
-        duration,
+        duration: clipDuration,
       }).unwrap()
-
-      const built = toScenes(data.scenes ?? [], duration)
-      dispatch(setSynopsis(data.synopsis ?? null))
-
-      // Grab one midpoint frame per scene for the scene-card art (real, browser).
-      const thumbs = await captureFramesAt(
-        src,
-        built.map((s) => (s.start + s.end) / 2),
-        64,
-      )
-      const withThumbs = built.map((s, i) => ({ ...s, thumb: thumbs[i] }))
-      dispatch(setScenes(withThumbs))
-      dispatch(setSelected(withThumbs[0]?.id ?? null))
-
-      const cutCount = withThumbs.reduce((n, s) => n + (s.cuts?.length ?? 0), 0)
-      patch('director', {
-        status: 'done',
-        detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · ${cutCount} cut${cutCount === 1 ? '' : 's'} · script tightened`,
-      })
+      dispatch(setScenesJobId(jobId))
+      await completeDirectorJob(jobId, src, clipDuration)
     },
-    [patch, dispatch, words, persistedSheets, scenesReq],
+    [patch, dispatch, words, persistedSheets, scenesReq, completeDirectorJob],
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
@@ -519,7 +652,10 @@ export function useScenePipeline() {
       try {
         const scoped = words.filter((w) => w.start >= scene.start && w.start < scene.end)
         const sheetUrls = (scene.sheets ?? []).map((s) => s.url).filter((u): u is string => !!u)
-        const data = await refineSceneReq({
+        // Enqueue-only (story 03f Part 0): returns a job id; the Gemini refine runs
+        // in the pipeline's postSteps. Persist the id on the scene so a reload
+        // resumes polling, then drive it to completion (writes `scene.refined`).
+        const { jobId } = await refineSceneReq({
           start: scene.start,
           end: scene.end,
           transcript: timedTranscript(scoped),
@@ -528,14 +664,14 @@ export function useScenePipeline() {
           sheetUrls,
           direction: '',
         }).unwrap()
-        patchScene(id, { refined: toRefinement(data, scene) })
+        patchScene(id, { refineJobId: jobId })
+        await completeRefineJob(id, jobId)
       } catch (e) {
         setSceneError(stageError(e))
-      } finally {
         setRefiningId(null)
       }
     },
-    [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene],
+    [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene, completeRefineJob],
   )
 
   // Hand-edit a scene's cuts directly on the diff grid (story 03d). `add` paints

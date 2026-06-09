@@ -80,6 +80,10 @@ export type Scene = {
   /** Second-pass refiner output (story 03c). Absent/null = fall back to the
    *  director baseline (`draftText` + `cuts`). */
   refined?: SceneRefinement | null
+  /** In-flight `/api/refine-scene` job id (story 03f Part 0). Set while the async
+   *  refine job is running so a hard reload resumes polling instead of stranding
+   *  it; cleared (null) on terminal status. */
+  refineJobId?: string | null
   thumb?: string
 }
 

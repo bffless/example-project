@@ -81,6 +81,14 @@ export type StudioState = {
   words: TranscriptWord[]
   /** One-line logline of the whole talk, from the master director (story 03). */
   synopsis: string | null
+  /**
+   * In-flight master-director job id (story 03f Part 0). The director call is now
+   * async fire-and-poll: `/api/scenes` enqueues a job and returns an id we poll on.
+   * Persisted so a hard reload resumes polling instead of stranding a running job;
+   * cleared (null) once the job reaches a terminal status. (Per-scene refine jobs
+   * track their own id on `Scene.refineJobId`.)
+   */
+  scenesJobId: string | null
   /** The narration voice (cloned, reused, or preset), set in the clone prep step. */
   voice: VoiceChoice | null
   /** Cloned voice ids the user has minted/saved, reusable without re-cloning. */
@@ -109,6 +117,7 @@ const initialState: StudioState = {
   contactSheets: [],
   words: [],
   synopsis: null,
+  scenesJobId: null,
   voice: null,
   savedVoices: [],
   selectedId: null,
@@ -163,6 +172,10 @@ const studioSlice = createSlice({
     setSynopsis(state, action: PayloadAction<string | null>) {
       state.synopsis = action.payload
     },
+    /** The in-flight director job id (story 03f). Null clears it on terminal status. */
+    setScenesJobId(state, action: PayloadAction<string | null>) {
+      state.scenesJobId = action.payload
+    },
     setVoice(state, action: PayloadAction<VoiceChoice | null>) {
       state.voice = action.payload
     },
@@ -215,6 +228,7 @@ export const {
   setContactSheets,
   setWords,
   setSynopsis,
+  setScenesJobId,
   setVoice,
   addSavedVoice,
   removeSavedVoice,

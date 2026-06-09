@@ -27,6 +27,22 @@ const MOCK_SERVE_MAX = 25_000_000
 const lastSegment = (url: string) =>
   decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() ?? '')
 
+/**
+ * Async fire-and-poll job store (story 03f Part 0). The director/refiner start
+ * endpoints now ENQUEUE a job and return a `jobId`; the FE polls `/api/studio/job`
+ * until it's `done`. We stash the deterministic result at enqueue time and spin
+ * `pending` → `running` → `done` across the first few polls so the FE poll loop
+ * actually iterates before resolving (exactly like the real pipeline's postSteps).
+ */
+type MockJob = { kind: 'scenes' | 'refine'; result: unknown; polls: number }
+const jobStore = new Map<string, MockJob>()
+let jobCounter = 0
+const enqueueJob = (kind: MockJob['kind'], result: unknown): string => {
+  const jobId = `mock-job-${++jobCounter}`
+  jobStore.set(jobId, { kind, result, polls: 0 })
+  return jobId
+}
+
 const studioHandlers = [
   // Presigned prepare (source + audio): hand back a fake bucket PUT URL (which we
   // also intercept) plus the storageKey/originalName the register step echoes.
@@ -75,21 +91,23 @@ const studioHandlers = [
   // word-level timestamps) so the editor has realistic data, free of charge.
   http.post('/api/transcribe', () => HttpResponse.json(TRANSCRIBE_FIXTURE)),
 
-  // Master director: canned synopsis + scenes (with tightened script + cut
-  // spans) so the scene workspace has realistic data without a paid Gemini call.
-  // Scenes are derived from the posted `duration` so they fit any clip. Mirrors
-  // the real `/api/scenes` shape: { synopsis, scenes: [{ title, start, end,
+  // Master director: enqueue a job and return its id (story 03f Part 0). The
+  // canned synopsis + scenes (tightened script + cut spans, derived from the
+  // posted `duration` so they fit any clip) are stashed as the job's `result` for
+  // the poll endpoint to hand back. Mirrors the real enqueue shape: { jobId,
+  // status }; the result blob mirrors { synopsis, scenes:[{ title, start, end,
   // transcript, draftText, cuts }] }.
   http.post('/api/scenes', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { duration?: number; direction?: string }
-    return HttpResponse.json(mockDirector(body.duration ?? 0, body.direction ?? ''))
+    const jobId = enqueueJob('scenes', mockDirector(body.duration ?? 0, body.direction ?? ''))
+    return HttpResponse.json({ jobId, status: 'pending' })
   }),
 
-  // Per-scene refiner (story 03c): canned anchored segments + refined cuts so the
-  // diff viewer has realistic placement without a paid Gemini call. Splits the
-  // posted first-pass `draftText` into two runs around the kept-pause/cut, each
-  // anchored to the scene's retained footage. Mirrors the real `/api/refine-scene`
-  // shape: { segments: [{ text, start, end }], cuts: [{ start, end }] }.
+  // Per-scene refiner (story 03c): enqueue a job (story 03f Part 0). The canned
+  // anchored segments + refined cuts — the first-pass `draftText` split into two
+  // runs around the kept pause/cut — are stashed as the job's `result`. Mirrors
+  // the enqueue shape { jobId, status }; the result blob mirrors { segments:
+  // [{ text, start, end }], cuts: [{ start, end }] }.
   http.post('/api/refine-scene', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as {
       start?: number
@@ -97,7 +115,24 @@ const studioHandlers = [
       draftText?: string
       cuts?: { start: number; end: number }[]
     }
-    return HttpResponse.json(mockRefiner(body))
+    const jobId = enqueueJob('refine', mockRefiner(body))
+    return HttpResponse.json({ jobId, status: 'pending' })
+  }),
+
+  // Poll a job (story 03f Part 0). Spins `pending` → `running` over the first two
+  // polls, then resolves `done` with the stashed deterministic result — so the FE
+  // poll loop iterates a couple of times before resolving, like the real pipeline.
+  // Unknown ids resolve `error` (terminal) so the loop never hangs offline.
+  http.get('/api/studio/job', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? ''
+    const job = jobStore.get(id)
+    if (!job) {
+      return HttpResponse.json({ status: 'error', kind: 'scenes', error: `Unknown job ${id}` })
+    }
+    job.polls += 1
+    if (job.polls === 1) return HttpResponse.json({ status: 'pending', kind: job.kind })
+    if (job.polls === 2) return HttpResponse.json({ status: 'running', kind: job.kind })
+    return HttpResponse.json({ status: 'done', kind: job.kind, result: job.result })
   }),
 
   // Scene narration (story 03c): a short tone stands in for the persisted mp3 so
