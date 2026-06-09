@@ -118,3 +118,55 @@ export async function assemble({
     for (const name of written) await ff.deleteFile(name).catch(() => {})
   }
 }
+
+export type SliceAssets = {
+  /** The source video bytes (written as the command's input). */
+  source: Uint8Array
+  command: import('./slice').SliceCommand
+  /** 0–1 encode progress from ffmpeg's `progress` event. */
+  onProgress?: (progress: number) => void
+  /** Raw ffmpeg log lines, for surfacing the real error on failure. */
+  onLog?: (line: string) => void
+}
+
+/**
+ * Cut one scene's clip out of the source (story 03g). Stage the source into the
+ * wasm FS, exec the trim argv `./slice.ts` produced, read back the clip, clean up.
+ * Returns the scene clip as a Blob. Throws with ffmpeg's last log lines on failure.
+ * A single short re-encode (per scene), not the whole-timeline assemble.
+ */
+export async function slice({ source, command, onProgress, onLog }: SliceAssets): Promise<Blob> {
+  const ff = await getFFmpeg()
+
+  const tail: string[] = []
+  const onLogEvent = ({ message }: { message: string }) => {
+    tail.push(message)
+    if (tail.length > 40) tail.shift()
+    onLog?.(message)
+  }
+  const onProgressEvent = ({ progress }: { progress: number }) => {
+    onProgress?.(Math.min(1, Math.max(0, progress)))
+  }
+  ff.on('log', onLogEvent)
+  ff.on('progress', onProgressEvent)
+
+  const written: string[] = []
+  try {
+    await ff.writeFile(command.source, source)
+    written.push(command.source)
+
+    const code = await ff.exec(command.args)
+    if (code !== 0) {
+      throw new Error(`ffmpeg exited ${code}\n${tail.slice(-12).join('\n')}`)
+    }
+
+    const data = await ff.readFile(command.output)
+    written.push(command.output)
+    if (typeof data === 'string') throw new Error('ffmpeg returned text, expected binary output')
+    return new Blob([data.slice()], { type: 'video/mp4' })
+  } finally {
+    ff.off('log', onLogEvent)
+    ff.off('progress', onProgressEvent)
+    for (const name of written) await ff.deleteFile(name).catch(() => {})
+  }
+}

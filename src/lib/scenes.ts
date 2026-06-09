@@ -80,6 +80,12 @@ export type Scene = {
   /** Second-pass refiner output (story 03c). Absent/null = fall back to the
    *  director baseline (`draftText` + `cuts`). */
   refined?: SceneRefinement | null
+  /** Serve path of this scene's own sliced clip — `[start, end]` of the source,
+   *  cut frame-accurately and uploaded on its own (story 03g, the "Cut this
+   *  scene" build step). Absent until that step runs. Once set, the Build preview
+   *  plays this small clip instead of the whole source, and the per-scene assemble
+   *  (phase 2) reads it. Re-cutting overwrites it. */
+  clipUrl?: string
   /** In-flight `/api/refine-scene` job id (story 03f Part 0). Set while the async
    *  refine job is running so a hard reload resumes polling instead of stranding
    *  it; cleared (null) on terminal status. */

@@ -13,6 +13,8 @@ import {
   type RefineSceneRaw,
 } from '../../lib/refiner'
 import { extractAudio, extractAudioWav, sliceAudioWav } from '../../lib/audio'
+import { buildSliceCommand } from '../../lib/export/slice'
+import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
 import {
   captureFramesAt,
   captureContactSheet,
@@ -189,6 +191,8 @@ export function useScenePipeline() {
   const [refiningId, setRefiningId] = useState<string | null>(null)
   // The scene currently slicing+uploading an original-audio clip (story 03d).
   const [adoptingId, setAdoptingId] = useState<string | null>(null)
+  // The scene currently being cut into its own video clip (story 03g). Transient.
+  const [slicingId, setSlicingId] = useState<string | null>(null)
   // Which segment is currently being voiced (AI or record-upload), as
   // `${sceneId}:${segmentIndex}` — so only that one row shows a spinner.
   const [voicingSegKey, setVoicingSegKey] = useState<string | null>(null)
@@ -749,6 +753,46 @@ export function useScenePipeline() {
     [adoptingId, scenes, audioUrl, words, uploadReq, patchScene],
   )
 
+  // Cut this scene into its own video clip (story 03g, build step 0). The raw
+  // source is the immutable source of truth — every scene re-reads it: prefer the
+  // in-memory `file` (no refetch), else pull the persisted source serve URL back.
+  // We trim `[start, end]` frame-accurately in ffmpeg.wasm, upload the small clip
+  // (kind `scene-clip`), and persist its serve path on the scene (`clipUrl`), so a
+  // reload resumes with the cut already done and the Build preview plays the clip,
+  // not the whole film. Re-cutting overwrites it.
+  const sliceScene = useCallback(
+    async (sceneId: string, file: File | null) => {
+      if (slicingId) return
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      setSlicingId(sceneId)
+      setSceneError(null)
+      try {
+        const source = file
+          ? new Uint8Array(await file.arrayBuffer())
+          : sourceUrl
+            ? new Uint8Array(await (await fetch(sourceUrl, { credentials: 'include' })).arrayBuffer())
+            : null
+        if (!source) throw new Error('No source clip available to cut from.')
+
+        const command = buildSliceCommand({
+          start: scene.start,
+          end: scene.end,
+          output: `scene-${scene.index}.mp4`,
+        })
+        const blob = await ffmpegSlice({ source, command })
+        const clip = new File([blob], `scene-${scene.index}.mp4`, { type: 'video/mp4' })
+        const { url } = await uploadReq({ file: clip, kind: 'scene-clip' }).unwrap()
+        patchScene(sceneId, { clipUrl: url })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setSlicingId(null)
+      }
+    },
+    [slicingId, scenes, sourceUrl, uploadReq, patchScene],
+  )
+
   // Delete one New-pane run, reopening its gap (story 03d) — e.g. to clear room
   // for an original-audio clip. Materializes `refined` from the baseline so it's
   // revertible, recomputes the scene's narration length, tags it `manual`.
@@ -941,6 +985,7 @@ export function useScenePipeline() {
     sheetingId,
     refiningId,
     adoptingId,
+    slicingId,
     voicingSegKey,
     sceneError,
     ready,
@@ -954,6 +999,7 @@ export function useScenePipeline() {
     refineScene,
     editSceneCut,
     adoptOriginalAudio,
+    sliceScene,
     deleteSegment,
     clearRefinement,
     generateSegmentNarration,

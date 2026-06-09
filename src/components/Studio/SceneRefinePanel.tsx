@@ -3,9 +3,11 @@ import { ContactSheetPreview } from './ContactSheetPreview'
 
 type Props = {
   scene: Scene
+  slicing: boolean
   sheeting: boolean
   refining: boolean
   error?: string | null
+  onSlice: () => void
   onGenerateSheets: () => void
   onRefine: () => void
   onClear: () => void
@@ -19,9 +21,11 @@ type Props = {
  */
 export function SceneRefinePanel({
   scene,
+  slicing,
   sheeting,
   refining,
   error,
+  onSlice,
   onGenerateSheets,
   onRefine,
   onClear,
@@ -29,18 +33,40 @@ export function SceneRefinePanel({
   const sheetCount = scene.sheets?.length ?? 0
   const hasSheets = sheetCount > 0
   const refined = scene.refined ?? null
-  const busy = sheeting || refining
+  const hasClip = !!scene.clipUrl
+  const busy = slicing || sheeting || refining
 
   return (
     <div className="border rule bg-paper p-5">
       <p className="meta-label">Refine this scene</p>
       <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">
-        A zoomed-in second pass: capture a dense contact sheet for just this scene,
-        then ask the AI to place the new script and tighten the cuts. Your original
-        draft is kept — refining never overwrites it.
+        First cut this scene out of the raw into its own short clip — then everything
+        below (and the preview above) works on that clip, not the whole film. After
+        that it's a zoomed-in second pass: capture a dense contact sheet for just
+        this scene, then ask the AI to place the new script and tighten the cuts.
+        Your original draft is kept — refining never overwrites it.
       </p>
 
       <div className="mt-4 flex flex-col gap-3">
+        {/* Step 0 — cut this scene out of the raw into its own clip (story 03g),
+            so everything downstream works on a short clip, not the whole film. */}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[13.5px] text-ink">
+            0 · Cut this scene
+            {hasClip && (
+              <span className="ml-2 font-mono text-[12px] text-ink-mute">clip ready</span>
+            )}
+          </span>
+          <button
+            type="button"
+            className="pill-ghost"
+            disabled={busy}
+            onClick={onSlice}
+          >
+            {slicing ? 'Cutting…' : hasClip ? 'Re-cut' : 'Cut scene'}
+          </button>
+        </div>
+
         {/* Step 1 — dense scene contact sheets */}
         <div className="flex items-center justify-between gap-4">
           <span className="text-[13.5px] text-ink">

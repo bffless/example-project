@@ -70,6 +70,11 @@ export function Studio() {
   const previewSrc = url ?? pipe.sourceUrl
 
   const onLoaded = useCallback((d: number) => dispatch(setDuration(d)), [dispatch])
+  // The Build preview plays the selected scene's own clip once it's cut (story
+  // 03g). That clip is ~1–2 min, but the diff grid/filmstrip are keyed to the
+  // FULL source `duration` — so the clip player must report nothing. A stable
+  // no-op keeps the global duration the full-source length.
+  const noLoaded = useCallback(() => {}, [])
 
   function selectFile(f: File) {
     // Re-attaching the same clip to a restored session resumes it untouched;
@@ -457,11 +462,14 @@ export function Studio() {
                     page width. */}
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
                   <div className="lg:max-w-2xl lg:flex-[3]">
+                    {/* Once this scene is cut (story 03g), play its own short clip
+                        instead of the whole film — and don't let it overwrite the
+                        full-source `duration` the grid relies on (see noLoaded). */}
                     <PreviewPlayer
-                      src={previewSrc}
+                      src={selected?.clipUrl ?? previewSrc}
                       videoRef={videoRef}
                       cuts={[]}
-                      onLoaded={onLoaded}
+                      onLoaded={selected?.clipUrl ? noLoaded : onLoaded}
                     />
                   </div>
                   {selected && (
@@ -475,9 +483,11 @@ export function Studio() {
                 {selected && (
                   <SceneRefinePanel
                     scene={selected}
+                    slicing={pipe.slicingId === selected.id}
                     sheeting={pipe.sheetingId === selected.id}
                     refining={pipe.refiningId === selected.id}
                     error={pipe.sceneError}
+                    onSlice={() => pipe.sliceScene(selected.id, file)}
                     onGenerateSheets={() => pipe.generateSceneSheets(selected.id)}
                     onRefine={() => pipe.refineScene(selected.id)}
                     onClear={() => pipe.clearRefinement(selected.id)}

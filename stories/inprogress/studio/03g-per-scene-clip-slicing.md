@@ -30,12 +30,16 @@ master-concat is the follow-on phase.
 - Slicing is **lazy and per-scene** — a build step you run when you start working
   a scene, not an eager batch after `/api/scenes`. It joins the existing per-scene
   steps (contact sheets, refine) as **step 0**, in front of them.
-- The cut is a **frame-accurate trim** of the raw to the scene's
-  `[start, end]` span (scene 1 = `0:00–1:44`, scene 2 = `1:44–3:48`), done in
-  ffmpeg.wasm. Frame-accurate (not stream-copy) so the clip's `t=0` is exactly
-  `scene.start` — clip-local rebasing downstream is just `−scene.start`, and the
-  clip is guaranteed clean + seekable. Cost is one short per-scene encode, run
-  only when you start that scene — never all at once.
+- The cut **re-encodes** the raw's `[start, end]` span (scene 1 = `0:00–1:44`,
+  scene 2 = `1:44–3:48`) in ffmpeg.wasm. We tried `-c copy` for speed and it
+  produced broken clips — stream-copy snaps to keyframes, writing an MP4 edit list
+  that makes the player start partway in and refuse to seek to 0, and the
+  packet-boundary cut leaves the audio ending before the video. Re-encoding
+  rebuilds clean timestamps from `t=0` and keeps A/V the same length, so clip-local
+  rebasing downstream is a plain `−scene.start`. It runs per scene on a short span
+  (never the whole timeline). **It is slow in single-threaded wasm** — the speed
+  fix is multithreaded ffmpeg.wasm (`core-mt` + COOP/COEP), tracked as a follow-up,
+  not a stream-copy hack.
 - The clip is **presign-uploaded to the bucket** and its serve URL persisted on
   the scene (`Scene.clipUrl`), like every other artifact — survives reload; a
   reload with `clipUrl` set means the cut's already done; re-cut overwrites it.
@@ -44,9 +48,15 @@ master-concat is the follow-on phase.
 
 ## Scope — two phases, ONE branch (`feat/studio-upload-bucket`, no PRs)
 
-**Phase 1 (this work):** the "Cut this scene" step → clip in bucket →
+**Phase 1 (this work — ✅ done):** the "Cut this scene" step → clip in bucket →
 `Scene.clipUrl`, plus swapping the Build preview to the clip. Self-contained and
 demonstrable: cut scene 1, the left-hand player becomes the 1:44 clip.
+Shipped: `Scene.clipUrl`; pure `buildSliceCommand` + tests (`src/lib/export/slice.ts`);
+`slice()` executor (`src/lib/export/ffmpeg.ts`); `'scene-clip'` upload kind;
+`slicingId` + `sliceScene` in `useScenePipeline`; step 0 in `SceneRefinePanel`;
+Build preview swap in `Studio.tsx` (clip player uses a no-op `onLoaded` so it
+never clobbers the full-source `duration` the grid is keyed to); the 3 live rules
+above. Persisted via the existing generic `patchScene` reducer (no new reducer).
 
 **Phase 2 (next, same branch):** refactor assemble to be genuinely per-scene off
 `clipUrl` (clip-local rebasing of cuts/segments) and add the **master-concat** at
@@ -113,14 +123,20 @@ clip. Two **gotchas** (call them out in code):
    just swap `src`, leave it a viewer.) Fall back to the full source when
    `clipUrl` is absent.
 
-### BFFless rule (`bffless-pipeline` skill)
-New presigned **scene-clip** upload, mirroring the `source` upload rules
-(prepare → browser PUT → register). Validators **off** until story 07 (see memory
-`project_studio_upload_auth_temp.md`). Same `kind` plumbing as `audio`/`thumbnails`.
+### BFFless rule (`bffless-pipeline` skill) — ✅ built
+New presigned **scene-clip** upload in the live `studio` rule set
+(`cf413ff6-4989-44a6-afc9-75c3545b5e8e`), mirroring the `source` rules exactly
+(video/\*, 2 GB, `dateBucket`, validators **off** until story 07). Reuses the
+studio upload schema `8afd205a-204d-4dcd-9e2f-7cd613ec961f` (scene clips are
+videos, same record shape as `source`). Rules:
+- `411715e9` — `POST /api/uploads/scene-clip/prepare` (presigned_upload)
+- `a2d0fd0e` — `POST /api/uploads/scene-clip/register` (register_upload)
+- `66e25e30` — `GET  /api/uploads/scene-clip/*` (file_serve_handler)
 
 ### Mock (`src/mocks/handlers.ts`)
-Add the `kind: 'scene-clip'` presigned upload to the `MOCK_STUDIO` handlers so
-local dev never hits the bucket; serve the object back like the other kinds.
+No new handler needed: the `MOCK_STUDIO` upload mocks already match
+`/api/uploads/:kind/(prepare|register)` and `GET /api/uploads/:kind/*`
+generically, so `kind: 'scene-clip'` rides them as-is.
 
 ## Non-goals
 - Per-scene **assemble** off `clipUrl` and the **master-concat** at Export
