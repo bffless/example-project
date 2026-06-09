@@ -260,8 +260,11 @@ Turn the transcript time-grid (`TranscriptDiff`) into the per-scene edit surface
 
 ## Acceptance criteria
 
-- [ ] Viewer shows only the selected scene; switching tabs re-scopes it. _(still
-      whole-talk: editedWords/cuts flatMap across all scenes)_
+- [x] Viewer shows only the selected scene; switching tabs re-scopes it.
+      _(Studio derives `sceneWords`/`editedWords`/`cutSpans`/`segmentControls`/
+      `gapSpans` from `selected` only and passes `windowStart`/`windowEnd`;
+      `TranscriptDiff` crops both panes + the filmstrip via the pure
+      `windowLines` helper. Timestamps stay absolute — scene 2 reads from 1:44.)_
 - [x] No playhead/`currentTime` code path remains. _(removed from TranscriptDiff,
       PreviewPlayer `onTime` now optional, Studio `currentTime` state dropped)_
 - [x] Cut spans render as red cells (`bg-terracotta/30`) on **both** panes via

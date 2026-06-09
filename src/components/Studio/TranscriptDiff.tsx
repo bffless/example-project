@@ -4,6 +4,7 @@ import {
   cutColumns,
   formatClock,
   segmentsPerLine,
+  windowLines,
   DEFAULT_SECONDS_PER_LINE,
   DEFAULT_SEGMENT_SECONDS,
   type TWord,
@@ -52,6 +53,14 @@ type Props = {
    *  still renders editable rows — otherwise the grid stops at the last word and
    *  that footage can't be seen or cut. */
   duration?: number
+  /** Restrict the viewer to one scene's window on the absolute timeline (story
+   *  03c "per-scene scope"): rows before `windowStart` (floored to the line) and
+   *  at/after `windowEnd` aren't rendered, so the diff shows only the selected
+   *  `SceneTabs` tab and switching tabs re-scopes it. Timestamps stay absolute —
+   *  scene 2 reads from 1:44, matching its footage span. Omit (0 / Infinity) to
+   *  show the whole talk. */
+  windowStart?: number
+  windowEnd?: number
 }
 
 /** An in-progress cut drag: the cell it began on, the cell under the pointer
@@ -138,6 +147,8 @@ export function TranscriptDiff({
   onDeleteSegment,
   frames = [],
   duration = 0,
+  windowStart = 0,
+  windowEnd = Infinity,
 }: Props) {
   const [secondsPerLine, setSecondsPerLine] = useState(DEFAULT_SECONDS_PER_LINE)
   const [segmentSeconds, setSegmentSeconds] = useState(DEFAULT_SEGMENT_SECONDS)
@@ -323,10 +334,13 @@ export function TranscriptDiff({
   // Pin both panes to the same span: the latest of either transcript, any cut, or
   // the clip's real `duration`, so they're equal height and trailing footage with
   // no words/cuts (the talk ends before the clip does) still renders editable rows.
+  // When scoped to a scene, the floor is the scene's `windowEnd` (its footage runs
+  // there even past the last word), not the whole-clip `duration`.
   const span = useMemo(() => {
     const cutEnd = cuts.reduce((m, c) => Math.max(m, c.end), 0)
-    return Math.max(lastSecond(words), lastSecond(right), cutEnd, duration)
-  }, [words, right, cuts, duration])
+    const words_ = Math.max(lastSecond(words), lastSecond(right), cutEnd)
+    return Number.isFinite(windowEnd) ? Math.max(words_, windowEnd) : Math.max(words_, duration)
+  }, [words, right, cuts, duration, windowEnd])
 
   const controls: Controls | null = onGenerateAI && onRecord
     ? {
@@ -420,6 +434,8 @@ export function TranscriptDiff({
               secondsPerLine={secondsPerLine}
               segmentSeconds={segmentSeconds}
               minSeconds={span}
+              windowStart={windowStart}
+              windowEnd={windowEnd}
               segments={segments}
               frames={frames}
               rowHeight={rowHeight}
@@ -440,6 +456,8 @@ export function TranscriptDiff({
             segmentSeconds={segmentSeconds}
             cuts={[]}
             minSeconds={span}
+            windowStart={windowStart}
+            windowEnd={windowEnd}
             segments={segments}
             controls={null}
             edit={leftEdit}
@@ -465,6 +483,8 @@ export function TranscriptDiff({
             segmentSeconds={segmentSeconds}
             cuts={cuts}
             minSeconds={span}
+            windowStart={windowStart}
+            windowEnd={windowEnd}
             segments={segments}
             controls={controls}
             edit={rightEdit}
@@ -545,6 +565,10 @@ type PaneProps = {
   segmentSeconds: number
   cuts: CutSpan[]
   minSeconds: number
+  /** Scene window on the absolute timeline — rows outside it are cropped so the
+   *  pane shows only the selected scene (story 03c). 0 / Infinity ⇒ whole talk. */
+  windowStart: number
+  windowEnd: number
   segments: SegmentControl[]
   controls: Controls | null
   edit: CellEdit | null
@@ -566,6 +590,8 @@ function Filmstrip({
   secondsPerLine,
   segmentSeconds,
   minSeconds,
+  windowStart,
+  windowEnd,
   segments,
   frames,
   rowHeight,
@@ -574,13 +600,21 @@ function Filmstrip({
   secondsPerLine: number
   segmentSeconds: number
   minSeconds: number
+  windowStart: number
+  windowEnd: number
   segments: SegmentControl[]
   frames: FilmFrame[]
   rowHeight: number
 }) {
   const lines = useMemo(
-    () => buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
-    [words, secondsPerLine, segmentSeconds, minSeconds],
+    () =>
+      windowLines(
+        buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
+        windowStart,
+        windowEnd,
+        secondsPerLine,
+      ),
+    [words, secondsPerLine, segmentSeconds, minSeconds, windowStart, windowEnd],
   )
   // Same row→segment mapping as a Pane, so the spacers land on the same rows.
   const segRows = useMemo(() => {
@@ -640,14 +674,22 @@ function Pane({
   segmentSeconds,
   cuts,
   minSeconds,
+  windowStart,
+  windowEnd,
   segments,
   controls,
   edit,
   rowHeight,
 }: PaneProps) {
   const lines = useMemo(
-    () => buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
-    [words, secondsPerLine, segmentSeconds, minSeconds],
+    () =>
+      windowLines(
+        buildTranscriptGrid(words, secondsPerLine, segmentSeconds, minSeconds),
+        windowStart,
+        windowEnd,
+        secondsPerLine,
+      ),
+    [words, secondsPerLine, segmentSeconds, minSeconds, windowStart, windowEnd],
   )
   const cols = segmentsPerLine(secondsPerLine, segmentSeconds)
   // cells per whole second — used to draw separators only on second boundaries

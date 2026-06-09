@@ -105,6 +105,28 @@ export function buildTranscriptGrid(
   return lines
 }
 
+/**
+ * Drop grid lines outside a scene window `[windowStart, windowEnd)` on the
+ * absolute timeline — so the diff viewer shows only the selected scene and
+ * switching `SceneTabs` re-scopes it (story 03c "per-scene scope"). Timestamps
+ * stay absolute: scene 2 reads from 1:44, matching the scene's footage span and
+ * the cut/segment model. `windowStart` floors to its line so the row holding the
+ * scene start is kept. The defaults (0 / Infinity) are a no-op — the whole grid.
+ *
+ * Apply it identically to both panes and the filmstrip (same `secondsPerLine`)
+ * so they stay row-aligned after cropping.
+ */
+export function windowLines(
+  lines: GridLine[],
+  windowStart = 0,
+  windowEnd = Infinity,
+  secondsPerLine: number = DEFAULT_SECONDS_PER_LINE,
+): GridLine[] {
+  const perLine = Math.max(1, secondsPerLine)
+  const firstLine = Math.floor(Math.max(0, windowStart) / perLine)
+  return lines.filter((l) => l.index >= firstLine && l.startSec < windowEnd)
+}
+
 /** `m:ss` clock label for a row's start second (line "numbers" are timestamps). */
 export function formatClock(seconds: number): string {
   const s = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0

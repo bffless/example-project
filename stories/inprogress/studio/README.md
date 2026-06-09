@@ -74,8 +74,9 @@ optimizations are slated next but NOT done**: audio polish (per-segment `loudnor
 multithreaded ffmpeg.wasm (`core-mt` is incompatible with `@ffmpeg/ffmpeg@0.12.15`'s
 module worker + classic pthread workers; reverted to single-threaded). See story 05's
 "Optimizations — slated next". **Next up overall: manual cut editing (03d phase) —
-let the user add/remove cuts directly in the diff viewer** — then the wps knob and
-per-scene scope.
+let the user add/remove cuts directly in the diff viewer** — then the wps knob.
+(Per-scene scope shipped: the Build diff is now windowed to the selected scene tab
+via `windowLines`, instead of rendering the whole talk.)
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
@@ -86,7 +87,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 03 master director (Gemini 3.1 Pro → synopsis + scenes + cuts)
              ✅ 04 voice step (clone enabled / preset + live TTS preview)
              🔨 03c refiner + diff-viewer (segments + cuts, per-segment voice, green/fit)
-                 ↳ ✅ 03e sprite filmstrip · ▶ next: manual cut editing · then wps knob · per-scene scope
+                 ↳ ✅ 03e sprite filmstrip · ✅ per-scene scope (diff windowed to the selected tab) · ▶ next: manual cut editing · then wps knob
              🔨 03f refiner context+gating · ✅ Part 0 async fire-and-poll (jobs DB + postSteps + poll, no more timeouts) · ▶ next: Parts A–D (handoff · synopsis · prompt · gate)
              ·  06 · 07                                (queued)
 ```

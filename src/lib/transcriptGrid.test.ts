@@ -5,12 +5,37 @@ import {
   formatClock,
   gridPosition,
   segmentsPerLine,
+  windowLines,
   DEFAULT_SECONDS_PER_LINE,
   DEFAULT_SEGMENT_SECONDS,
   type TWord,
 } from './transcriptGrid'
 
 const w = (text: string, start: number, end = start + 0.2): TWord => ({ text, start, end })
+
+describe('windowLines', () => {
+  // A 0–200s grid at 5s/line → rows at 0,5,…,195.
+  const grid = buildTranscriptGrid([], 5, 1, 200)
+
+  it('keeps only the rows inside a scene window, on the absolute timeline', () => {
+    // Scene 2 spans 1:44–3:00 → keep the row containing 104 (startSec 100) up to
+    // but not including 180.
+    const lines = windowLines(grid, 104, 180, 5)
+    expect(lines[0].startSec).toBe(100)
+    expect(lines[lines.length - 1].startSec).toBe(175)
+    // Rows from earlier scenes are gone — switching tabs re-scopes the viewer.
+    expect(lines.some((l) => l.startSec < 100)).toBe(false)
+  })
+
+  it('floors windowStart to its line so the row holding the scene start is kept', () => {
+    const lines = windowLines(grid, 12, 25, 5)
+    expect(lines[0].startSec).toBe(10) // the 10–15 row holds 0:12
+  })
+
+  it('defaults to the whole grid (no window)', () => {
+    expect(windowLines(grid)).toEqual(grid)
+  })
+})
 
 describe('buildTranscriptGrid minSeconds', () => {
   it('extends the grid past the last word to span minSeconds', () => {

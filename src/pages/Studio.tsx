@@ -153,13 +153,26 @@ export function Studio() {
 
   const selected = pipe.scenes.find((s) => s.id === pipe.selectedId) ?? null
 
+  // The diff viewer is scoped to the SELECTED scene only (story 03c "per-scene
+  // scope"): every input below is derived from `selected`, not flatMapped across
+  // the whole talk, and the grid is windowed to `[selected.start, selected.end]`.
+  // The Original pane's words are the slice of the full transcript that overlaps
+  // the scene's window (timestamps stay absolute, so scene 2 reads from 1:44).
+  const sceneWords = useMemo(
+    () =>
+      selected
+        ? pipe.words.filter((w) => w.start < selected.end && w.end > selected.start)
+        : [],
+    [pipe.words, selected],
+  )
+
   // The shortened script laid back on the timeline, for the diff's right pane.
   // Uses the refiner's anchored segments when a scene has been refined (words
   // flow at the speaking rate from each segment's start, leaving the kept pauses
   // empty); falls back to a single draftText segment for un-refined scenes.
   const editedWords = useMemo(
-    () => pipe.scenes.flatMap((s) => segmentsToTimedWords(effectiveSegments(s))),
-    [pipe.scenes],
+    () => (selected ? segmentsToTimedWords(effectiveSegments(selected)) : []),
+    [selected],
   )
 
   // Time-aligned frames for the diff viewer's filmstrip gutter (story 03e),
@@ -171,30 +184,30 @@ export function Studio() {
     [pipe.scenes, pipe.contactSheets],
   )
 
-  // Dropped footage spans across all scenes (refiner's cuts, else director's),
-  // drawn as red cells in the diff viewer.
+  // Dropped footage spans for the selected scene (refiner's cuts, else
+  // director's), drawn as red cells in the diff viewer.
   const cutSpans = useMemo(
-    () => pipe.scenes.flatMap((s) => effectiveCuts(s)),
-    [pipe.scenes],
+    () => (selected ? effectiveCuts(selected) : []),
+    [selected],
   )
 
-  // Per-segment voice controls across all scenes — each narration run gets an
+  // Per-segment voice controls for the selected scene — each narration run gets an
   // inline record/AI/play control in the diff viewer's New pane.
   const segmentControls = useMemo<SegmentControl[]>(
     () =>
-      pipe.scenes.flatMap((s) =>
-        effectiveSegments(s).map((seg, i) => ({
-          sceneId: s.id,
-          index: i,
-          start: seg.start,
-          text: seg.text,
-          audioUrl: seg.audioUrl,
-          audioSeconds: seg.audioSeconds,
-          audioSource: seg.audioSource,
-          busy: pipe.voicingSegKey === `${s.id}:${i}`,
-        })),
-      ),
-    [pipe.scenes, pipe.voicingSegKey],
+      selected
+        ? effectiveSegments(selected).map((seg, i) => ({
+            sceneId: selected.id,
+            index: i,
+            start: seg.start,
+            text: seg.text,
+            audioUrl: seg.audioUrl,
+            audioSeconds: seg.audioSeconds,
+            audioSource: seg.audioSource,
+            busy: pipe.voicingSegKey === `${selected.id}:${i}`,
+          }))
+        : [],
+    [selected, pipe.voicingSegKey],
   )
 
   // A cut hand-edit on the diff grid. The grid hands us a span on the whole-talk
@@ -209,10 +222,11 @@ export function Studio() {
     [pipe],
   )
 
-  // Empty gaps on the New timeline an original-audio clip can be dropped into.
+  // Empty gaps on the selected scene's New timeline an original-audio clip can be
+  // dropped into.
   const gapSpans = useMemo(
-    () => pipe.scenes.flatMap((s) => gaps(effectiveSegments(s), s)),
-    [pipe.scenes],
+    () => (selected ? gaps(effectiveSegments(selected), selected) : []),
+    [selected],
   )
 
   // Drop a grabbed original-audio clip — route to the scene owning the drop time.
@@ -494,9 +508,9 @@ export function Studio() {
                     onClear={() => pipe.clearRefinement(selected.id)}
                   />
                 )}
-                {pipe.words.length > 0 && (
+                {selected && pipe.words.length > 0 && (
                   <TranscriptDiff
-                    words={pipe.words}
+                    words={sceneWords}
                     editedWords={editedWords}
                     cuts={cutSpans}
                     segments={segmentControls}
@@ -509,6 +523,8 @@ export function Studio() {
                     onDeleteSegment={pipe.deleteSegment}
                     frames={filmstrip}
                     duration={duration}
+                    windowStart={selected.start}
+                    windowEnd={selected.end}
                   />
                 )}
                 {/* Assemble the SELECTED scene off its own cut clip (story 03g
