@@ -22,26 +22,64 @@
  */
 
 import type { FFmpeg } from '@ffmpeg/ffmpeg'
-// Resolved by Vite from the installed @ffmpeg/core package (its `exports` map
-// points `.`/`./wasm` at the ESM build). `?url` emits them as static assets and
-// hands back their served URLs — bundled locally, fetched on first load only.
+// Resolved by Vite from the installed @ffmpeg/core* packages (their `exports` maps
+// point `.`/`./wasm`/`./worker` at the ESM build). `?url` emits them as static
+// assets and hands back their served URLs — bundled locally, fetched on first
+// load only, and only the variant actually chosen below is ever fetched.
 import coreUrl from '@ffmpeg/core?url'
 import wasmUrl from '@ffmpeg/core/wasm?url'
+// Multithreaded core (story 03g follow-up). Parallelizes the encode across CPU
+// cores — the slice/assemble speed win — but needs SharedArrayBuffer, hence a
+// cross-origin-isolated page (COOP/COEP) and its extra pthread `worker.js`.
+import coreMtUrl from '@ffmpeg/core-mt?url'
+import wasmMtUrl from '@ffmpeg/core-mt/wasm?url'
+import workerMtUrl from '@ffmpeg/core-mt/worker?url'
 
 const abs = (u: string) => new URL(u, window.location.href).href
 
 // One core instance for the session — loading it is expensive, running is reusable.
 let instance: FFmpeg | null = null
 let loading: Promise<FFmpeg> | null = null
+/** Which core actually loaded, for diagnostics. */
+export let coreVariant: 'mt' | 'st' | null = null
 
+/**
+ * Load the ffmpeg core, preferring the **multithreaded** build when the page is
+ * cross-origin isolated (COOP/COEP set → `SharedArrayBuffer` available). The MT
+ * core parallelizes encoding across cores, which is the slice/assemble speedup.
+ *
+ * This is best-effort and **never fatal**: if the page isn't isolated, or the MT
+ * core fails to load for any reason (bundling quirk, missing headers, an old
+ * browser), we fall back to the single-threaded core — which needs no special
+ * headers and is exactly today's behavior. A fresh `FFmpeg` is used for the
+ * fallback because a failed `load()` leaves its worker in an unusable state.
+ */
 async function getFFmpeg(): Promise<FFmpeg> {
   if (instance?.loaded) return instance
   if (loading) return loading
   loading = (async () => {
     const { FFmpeg } = await import('@ffmpeg/ffmpeg')
+
+    if (globalThis.crossOriginIsolated) {
+      try {
+        const ff = new FFmpeg()
+        await ff.load({
+          coreURL: abs(coreMtUrl),
+          wasmURL: abs(wasmMtUrl),
+          workerURL: abs(workerMtUrl),
+        })
+        instance = ff
+        coreVariant = 'mt'
+        return ff
+      } catch {
+        // Fall through to the single-threaded core below.
+      }
+    }
+
     const ff = new FFmpeg()
     await ff.load({ coreURL: abs(coreUrl), wasmURL: abs(wasmUrl) })
     instance = ff
+    coreVariant = 'st'
     return ff
   })()
   try {

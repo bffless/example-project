@@ -138,6 +138,42 @@ No new handler needed: the `MOCK_STUDIO` upload mocks already match
 `/api/uploads/:kind/(prepare|register)` and `GET /api/uploads/:kind/*`
 generically, so `kind: 'scene-clip'` rides them as-is.
 
+## Speed: multithreaded ffmpeg.wasm
+
+The re-encode is the right tool for correctness but slow in **single-threaded**
+wasm. The fix is the **multithreaded** core (`@ffmpeg/core-mt`), which parallelizes
+the encode across CPU cores and speeds up the slice **and** the eventual assemble.
+
+- **Loader** (`src/lib/export/ffmpeg.ts`): prefers the MT core when the page is
+  cross-origin isolated (`globalThis.crossOriginIsolated`), else the single-threaded
+  core. Best-effort + **never fatal** — any MT load failure falls back to ST.
+  `coreVariant` exposes which loaded.
+- **The core-mt fix** (`scripts/patch-core-mt.mjs`, run on `postinstall`): core-mt's
+  ESM pthread worker is written for a **module** worker (loads the core via dynamic
+  `import()`), but emscripten's `allocateUnusedWorker` spawns it with `new Worker(url)`
+  — no `{type:"module"}` — so it loads as a **classic** worker and dies on `import`
+  ("Cannot use import statement outside a module"; ffmpeg.wasm issue #603). The patch
+  adds `{type:"module"}` to both `new Worker(...)` calls in the ESM core. Idempotent;
+  fails loudly if the target strings move (a core-mt version bump). This is **the**
+  long-standing "core-mt incompatible with @ffmpeg/ffmpeg@0.12.x" blocker.
+- **Bundling**: `@ffmpeg/core-mt` added; `vite.config.ts` `build.assetsInlineLimit`
+  forces `ffmpeg-core*` assets to emit as real files (Vite otherwise base64-inlines
+  the ~2 KB pthread worker as a `data:` URL emscripten can't spawn pthreads from).
+  `optimizeDeps` excludes core-mt too.
+- **Dev vs. build — important.** The patch only takes effect in the **built** asset.
+  Vite's **dev server** serves the core through its own transform, where the patched
+  worker still loads classic and fails. So COOP/COEP isolation is set **only on the
+  Vite `preview` config, NOT `server`**: `npm run dev` stays **single-threaded**
+  (not isolated → ST core, works), and MT is verified via `npm run preview` and in
+  production. Don't add `server.headers` — it re-breaks dev cutting.
+- **Isolation headers** = COOP `same-origin` + COEP `credentialless` (gentle mode —
+  cross-origin subresources load without credentials instead of being blocked, so
+  the studio media keeps working).
+  - **Production (preview.j5s.dev)**: the `/studio` document needs these headers via
+    a **Response Header Rule** (BFFless Settings → Response Headers; NOT exposed by
+    the MCP, so set in the UI). Until set, the deployed page is single-threaded (the
+    loader falls back cleanly).
+
 ## Non-goals
 - Per-scene **assemble** off `clipUrl` and the **master-concat** at Export
   (phase 2).
