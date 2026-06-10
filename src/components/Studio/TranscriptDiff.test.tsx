@@ -137,10 +137,20 @@ describe('TranscriptDiff original-pane selection', () => {
     expect(screen.queryByText('Frame · 0:00')).not.toBeInTheDocument()
   })
 
-  it('search: query → results → Grab → place calls onAdoptOriginal with the hit span', async () => {
+  it('search: selecting cells in a result set grabs their span, click places it', async () => {
     const onAdoptOriginal = vi.fn()
     const onSearch = vi.fn().mockResolvedValue([
-      { start: 2.0, end: 4.0, snippet: 'beta words', reason: 'literal match', sceneTitle: 'Scene 1' },
+      {
+        start: 2.0,
+        end: 4.0,
+        snippet: 'bike ride',
+        reason: 'literal match',
+        sceneTitle: 'Scene 1',
+        words: [
+          { text: 'bike', start: 2.0, end: 2.4 },
+          { text: 'ride', start: 2.5, end: 2.9 },
+        ],
+      },
     ])
     render(
       <TranscriptDiff words={words} duration={6} onAdoptOriginal={onAdoptOriginal} onSearch={onSearch} />,
@@ -149,12 +159,21 @@ describe('TranscriptDiff original-pane selection', () => {
     fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'bike ride' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     expect(onSearch).toHaveBeenCalledWith('bike ride')
-    expect(await screen.findByText(/beta words/)).toBeInTheDocument()
+    // The set renders the span's words on the SAME selectable grid as the
+    // Original pane — grab a cell, shift-click to extend, exactly as there.
+    const bike = await screen.findByText('bike')
     expect(screen.getByText('Scene 1')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Grab' }))
-    expect(placingBanner()).toContain('2.0s')
+    fireEvent.pointerDown(bike)
+    fireEvent.pointerUp(window)
+    expect(placingBanner()).toContain('0.1s') // single-cell grab at 2.0
+    fireEvent.pointerDown(screen.getByText('ride'), { shiftKey: true }) // extend → {2.0, 2.6}
+    expect(placingBanner()).toContain('0.6s')
     fireEvent.click(screen.getAllByText('beta')[1]) // the New pane is in place mode
-    expect(onAdoptOriginal).toHaveBeenCalledWith(2.0, 4.0, 2.0)
+    expect(onAdoptOriginal).toHaveBeenCalledTimes(1)
+    const [origStart, origEnd, dropStart] = onAdoptOriginal.mock.calls[0]
+    expect(origStart).toBe(2.0)
+    expect(origEnd).toBeCloseTo(2.6)
+    expect(dropStart).toBe(2.0)
   })
 
   it('search: empty results render a no-matches note', async () => {
@@ -166,8 +185,10 @@ describe('TranscriptDiff original-pane selection', () => {
     expect(await screen.findByText(/No matches/)).toBeInTheDocument()
   })
 
-  it('search: grabbing a hit cancels a pending snippet (one gesture at a time)', async () => {
-    const onSearch = vi.fn().mockResolvedValue([{ start: 0, end: 2, snippet: 'alpha', reason: '' }])
+  it('search: a set selection cancels a pending snippet (one gesture at a time)', async () => {
+    const onSearch = vi.fn().mockResolvedValue([
+      { start: 0, end: 2, snippet: 'pedal', reason: '', words: [{ text: 'pedal', start: 0, end: 0.4 }] },
+    ])
     render(
       <TranscriptDiff
         words={words}
@@ -178,14 +199,15 @@ describe('TranscriptDiff original-pane selection', () => {
       />,
     )
     fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
-    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'alpha' } })
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'pedal' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
-    await screen.findByRole('button', { name: 'Grab' })
+    const chip = await screen.findByText('pedal')
     fireEvent.click(screen.getByRole('button', { name: /add snippet/i }))
     fireEvent.change(screen.getByLabelText('Snippet text'), { target: { value: 'hello there' } })
     fireEvent.click(screen.getByRole('button', { name: 'Place' }))
     expect(placingBanner()).toContain('snippet')
-    fireEvent.click(screen.getByRole('button', { name: 'Grab' }))
+    fireEvent.pointerDown(chip)
+    fireEvent.pointerUp(window)
     expect(placingBanner()).toContain('of original audio')
   })
 

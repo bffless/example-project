@@ -17,10 +17,14 @@ one-line reason, owning scene). Per result:
 - **▶ Play** — preview the original audio for that span (existing hidden
   `<audio>` + `claimPlayback`; the hit's `end` is its own stop bound, not the
   scene window — hits are whole-talk).
-- **Grab** — load the span as the existing `pendingClip`, exactly as if you'd
-  drag-selected it on the Original pane: New pane enters place mode, click a
-  gap to drop, routed to the owning scene via `onAdoptOriginal`. Zero new
-  insert machinery.
+- **Word sets** (iteration 2) — each result renders as a full-width **set**
+  above both panes: the span's transcript words as selectable chips.
+  **Drag-select words in the set** (the Original-pane gesture) → on release
+  the words' span (`firstWord.start → lastWord.end`) is grabbed as the
+  existing `pendingClip`: New pane enters place mode, click a gap to drop,
+  routed to the owning scene via `onAdoptOriginal`. Zero new insert machinery;
+  no Grab button, no thumbnails. The page annotates hits with their `words`
+  (the viewer only holds the scene slice).
 
 ## Order of work (wire-studio-stage)
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   buildTranscriptGrid,
   cutColumns,
@@ -55,8 +55,10 @@ type Props = {
   /** Search the whole talk by meaning (story 08). The page runs the query
    *  through `/api/search-transcript` over the FULL transcript (this viewer
    *  only has the scene slice) and resolves hits annotated with the owning
-   *  scene's title. Omit to hide the search affordance. */
-  onSearch?: (query: string) => Promise<(SearchHit & { sceneTitle?: string })[]>
+   *  scene's title and the span's transcript `words` — each hit renders as a
+   *  full-width "set": the same selectable time grid as the Original pane,
+   *  windowed to the hit. Omit to hide the search affordance. */
+  onSearch?: (query: string) => Promise<(SearchHit & { sceneTitle?: string; words?: TWord[] })[]>
   /** Delete a New-pane run (reopens its gap to make room). */
   onDeleteSegment?: (sceneId: string, index: number) => void
   /** Move a New-pane run (story 03h): vertical pointer-drag on its voice-control
@@ -278,18 +280,15 @@ export function TranscriptDiff({
   const [hoverTime, setHoverTime] = useState<number | null>(null)
 
   // Transcript search (story 08): `searchOpen` shows the query bar; hits are
-  // transient — closing the bar clears them. Grab feeds the hit's span into
-  // the SAME pendingClip place mode as an Original-pane drag-select.
+  // transient — closing the bar clears them. Each hit renders as a full-width
+  // "set" Pane sharing the Original pane's select-mode handlers, so grabbing
+  // from a set IS the Original-pane gesture (drag cells → place).
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchBusy, setSearchBusy] = useState(false)
-  const [searchHits, setSearchHits] = useState<(SearchHit & { sceneTitle?: string })[] | null>(null)
-
-  const grabHit = useCallback((hit: SearchHit) => {
-    setPendingSnippet(null) // one placement gesture at a time
-    setHoverTime(null)
-    setPendingClip({ start: hit.start, end: hit.end })
-  }, [])
+  const [searchHits, setSearchHits] = useState<
+    (SearchHit & { sceneTitle?: string; words?: TWord[] })[] | null
+  >(null)
 
   // Pointer-down on the Original pane. While a clip is grabbed (`pendingClip`),
   // standard selection semantics apply: shift-click extends the grabbed span to
@@ -484,7 +483,7 @@ export function TranscriptDiff({
   const [stopAt, setStopAt] = useState<number | null>(null)
 
   const playFrom = useCallback(
-    (startSec: number) => {
+    (startSec: number, stopSec?: number) => {
       const el = audioRef.current
       if (!el) return
       // toggle: clicking the row the playhead is already in pauses it
@@ -492,7 +491,7 @@ export function TranscriptDiff({
         el.pause()
         return
       }
-      setStopAt(null)
+      setStopAt(stopSec ?? null)
       claimPlayback(el)
       setPlayheadSec(startSec) // light the row immediately, before the first timeupdate
       const start = () => {
@@ -755,48 +754,71 @@ export function TranscriptDiff({
             </button>
           </form>
           {searchHits && (
-            <ul className="max-h-64 overflow-y-auto border-t rule">
+            // Result SETS: each hit is the same selectable time grid as the
+            // Original pane (shared `leftEdit` select-mode handlers), windowed
+            // to the hit's span and spanning the full viewer width — drag its
+            // cells to grab, then click the New pane to place, exactly like
+            // the Original. Capped tall; the list scrolls.
+            <div className="max-h-[28rem] overflow-y-auto border-t rule">
               {searchHits.length === 0 && (
-                <li className="px-5 py-2 text-[12px] text-ink-mute">
+                <p className="px-5 py-2 text-[12px] text-ink-mute">
                   No matches — try different words.
-                </li>
+                </p>
               )}
-              {searchHits.map((hit, i) => (
-                <li
-                  key={`${hit.start}-${i}`}
-                  className="flex flex-wrap items-center gap-3 border-b rule px-5 py-2 last:border-b-0"
-                >
-                  <span className="font-mono text-[11px] text-ink-mute">
-                    {formatClock(hit.start)}–{formatClock(hit.end)}
-                  </span>
-                  {hit.sceneTitle && <span className="meta-label">{hit.sceneTitle}</span>}
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink" title={hit.snippet}>
+              {searchHits.map((hit, i) =>
+                hit.words?.length ? (
+                  <div key={`${hit.start}-${i}`} className="border-b rule last:border-b-0">
+                    <Pane
+                      label={`${formatClock(hit.start)}–${formatClock(hit.end)}`}
+                      sublabel={hit.sceneTitle ?? 'search result'}
+                      words={hit.words}
+                      secondsPerLine={secondsPerLine}
+                      segmentSeconds={segmentSeconds}
+                      cuts={[]}
+                      minSeconds={hit.end}
+                      windowStart={hit.start}
+                      windowEnd={hit.end}
+                      segments={[]}
+                      controls={null}
+                      edit={leftEdit}
+                      rowHeight={FILMSTRIP_ROW}
+                      onPlayFrom={
+                        originalAudioUrl ? (sec) => playFrom(sec, hit.end) : undefined
+                      }
+                      playheadSec={playheadSec}
+                      headerExtra={
+                        <>
+                          {hit.reason && (
+                            <span className="text-[11px] italic normal-case tracking-normal text-ink-mute">
+                              {hit.reason}
+                            </span>
+                          )}
+                          {originalAudioUrl && (
+                            <button
+                              type="button"
+                              className="rounded border border-paper-line px-2 py-0.5 font-mono text-[11px] text-ink hover:bg-paper-deep/40"
+                              onClick={() => playSpan(hit.start, hit.end)}
+                            >
+                              ▶ Play
+                            </button>
+                          )}
+                        </>
+                      }
+                    />
+                  </div>
+                ) : (
+                  <p
+                    key={`${hit.start}-${i}`}
+                    className="border-b rule px-5 py-2 text-[12.5px] text-ink last:border-b-0"
+                  >
+                    <span className="font-mono text-[11px] text-ink-mute">
+                      {formatClock(hit.start)}–{formatClock(hit.end)}
+                    </span>{' '}
                     “{hit.snippet}”
-                  </span>
-                  {hit.reason && (
-                    <span className="text-[11px] italic text-ink-mute">{hit.reason}</span>
-                  )}
-                  {originalAudioUrl && (
-                    <button
-                      type="button"
-                      className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper"
-                      onClick={() => playSpan(hit.start, hit.end)}
-                    >
-                      ▶ Play
-                    </button>
-                  )}
-                  {canAdopt && (
-                    <button
-                      type="button"
-                      className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper"
-                      onClick={() => grabHit(hit)}
-                    >
-                      Grab
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                  </p>
+                ),
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1052,6 +1074,8 @@ type PaneProps = {
   playheadSec?: number | null
   /** Fully hide this pane (a labelled rail stays behind to restore it). */
   onCollapse?: () => void
+  /** Extra header content, right-aligned (search sets: the hit's reason + Play). */
+  headerExtra?: ReactNode
 }
 
 /**
@@ -1207,6 +1231,7 @@ function Pane({
   onPlayFrom,
   playheadSec,
   onCollapse,
+  headerExtra,
 }: PaneProps) {
   const lines = useMemo(
     () =>
@@ -1252,6 +1277,7 @@ function Pane({
           {sublabel}
         </span>
         <span className="ml-auto flex items-center gap-3">
+          {headerExtra}
           {overlaps.length > 0 && (
             <span className="font-mono text-[11px] text-amber-700">
               ⚠ {overlaps.length} overlap{overlaps.length === 1 ? '' : 's'} to resolve — drag a run off

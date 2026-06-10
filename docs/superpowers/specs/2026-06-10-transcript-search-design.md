@@ -115,9 +115,28 @@ built.
   Grab → New-pane click fires `onAdoptOriginal` with the hit's span; Esc
   cancels; grab cancels a pending snippet.
 
+## Iteration 2 — result sets (same day, after first take)
+
+The one-line result rows weren't visual enough. Each hit is now a **set**: a
+full-width block above both panes (spanning the combined width — the panes are
+out of room) showing the hit's `start`–`end` stamp, scene title, reason, ▶ Play,
+and the **actual transcript words for the span** laid out as selectable word
+chips. The producer **drag-selects words inside the set** — the same gesture as
+the Original pane — and on release the selected words' span is grabbed into the
+existing `pendingClip` place mode (snapped to word boundaries:
+`firstWord.start → lastWord.end`). The Grab button is gone; the selection *is*
+the grab. No thumbnails in sets.
+
+Wiring: the page annotates each hit with its `words` (the slice of the full
+transcript overlapping the hit), since the diff viewer only holds the scene
+slice. Selection starting in a set cancels a pending snippet (one placement
+gesture at a time), and a plain selection while a clip is already grabbed
+starts over — mirroring the Original pane's semantics.
+
 ## Out of scope
 
 - Persisting search history/results.
 - Client-side fuzzy text matching (possible later additive fast path).
 - Searching the visuals (contact sheets) or the New-pane narration.
 - Auth/rate-limiting on the new rule (story 07).
+- Shift-click extension of a set selection (drag covers it; revisit if missed).

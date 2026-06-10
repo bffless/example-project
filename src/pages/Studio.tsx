@@ -285,7 +285,8 @@ export function Studio() {
 
   // Transcript search (story 08): whole-talk, so it uses pipe.words (the FULL
   // transcript), not the scene slice the diff renders. Hits come back through
-  // the shared coercion and get the owning scene's title for the results list.
+  // the shared coercion, annotated with the owning scene's title and the
+  // span's words — each hit renders as a selectable time-grid "set".
   const [searchTranscript] = useSearchTranscriptMutation()
   const onSearch = useCallback(
     async (query: string) => {
@@ -293,6 +294,7 @@ export function Studio() {
       return toSearchHits(raw, duration).map((h) => ({
         ...h,
         sceneTitle: sceneAtTime(pipe.scenes, h.start)?.title,
+        words: pipe.words.filter((w) => w.start < h.end && w.end > h.start),
       }))
     },
     [searchTranscript, pipe.words, pipe.scenes, duration],
