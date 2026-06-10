@@ -2,7 +2,7 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** 📝 designed (brainstormed 2026-06-10) ·
+**Status:** ✅ implemented (build/lint/tests green; pending PR review) ·
 **Frontend-only — no new `/api/*`, no Redux/persistence changes. The ffmpeg
 assembler (`src/lib/export/assemble.ts`) and the MP4 path are untouched; this is
 the cheap path beside them.**
