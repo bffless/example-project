@@ -16,6 +16,9 @@ test-results
 screenshots
 *.local
 
+# Local Studio test scratch clip (not a fixture)
+.studio-test.mp4
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -26,4 +29,4 @@ screenshots
 *.njsproj
 *.sln
 *.sw?
-.claude/settings*
+.claude/settings.local.json

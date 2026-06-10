@@ -1,0 +1,99 @@
+import { describe, it, expect } from 'vitest'
+import {
+  timedTranscript,
+  toScenes,
+  scenesToTimedWords,
+  type DirectorScene,
+} from './director'
+
+describe('timedTranscript', () => {
+  it('groups words into wall-clock windows', () => {
+    const words = [
+      { text: 'hello', start: 0.2, end: 0.5 },
+      { text: 'there', start: 1.0, end: 1.4 },
+      { text: 'friend', start: 9.0, end: 9.5 }, // next 8s window
+    ]
+    const out = timedTranscript(words, 8)
+    expect(out).toBe('[0:00] hello there\n[0:08] friend')
+  })
+
+  it('keeps null-timestamp words on the current line', () => {
+    const words = [
+      { text: 'a', start: 0.1, end: 0.3 },
+      { text: 'b', start: null as unknown as number, end: null as unknown as number },
+    ]
+    expect(timedTranscript(words, 8)).toBe('[0:00] a b')
+  })
+
+  it('returns empty for no words', () => {
+    expect(timedTranscript([], 8)).toBe('')
+  })
+})
+
+describe('toScenes', () => {
+  const raw: DirectorScene[] = [
+    { title: 'Intro', start: 0, end: 60, draftText: 'Welcome to the talk', cuts: [{ start: 10, end: 20 }] },
+    { title: 'Demo', start: 60, end: 130, draftText: 'Here is the demo', cuts: [] },
+  ]
+
+  it('coerces to the Scene shape with ids, index, and defaults', () => {
+    const scenes = toScenes(raw, 130)
+    expect(scenes).toHaveLength(2)
+    expect(scenes[0]).toMatchObject({
+      id: 'scene-1',
+      index: 0,
+      title: 'Intro',
+      start: 0,
+      end: 60,
+      status: 'pending',
+      narrationSeconds: null,
+      draftText: 'Welcome to the talk',
+    })
+    expect(scenes[0].cuts).toEqual([{ start: 10, end: 20 }])
+  })
+
+  it('clamps spans into [0, duration] and forces them ascending + non-overlapping', () => {
+    const messy: DirectorScene[] = [
+      { start: -5, end: 40, draftText: 'one' },
+      { start: 30, end: 200, draftText: 'two' }, // overlaps prev, runs past clip
+    ]
+    const scenes = toScenes(messy, 120)
+    expect(scenes[0].start).toBe(0)
+    expect(scenes[1].start).toBe(40) // snapped to prev end
+    expect(scenes[1].end).toBe(120) // clamped to duration
+  })
+
+  it('drops cuts outside their scene span and clamps the rest', () => {
+    const s: DirectorScene[] = [
+      { start: 0, end: 100, draftText: 'x', cuts: [{ start: 50, end: 200 }, { start: 5, end: 5 }] },
+    ]
+    const [scene] = toScenes(s, 100)
+    // 50–200 clamped to 50–100; the 5–5 zero-length cut dropped
+    expect(scene.cuts).toEqual([{ start: 50, end: 100 }])
+  })
+
+  it('falls back to a title derived from the script', () => {
+    const [scene] = toScenes([{ start: 0, end: 10, draftText: 'the quick brown fox jumps over' }], 10)
+    expect(scene.title).toBe('the quick brown fox jumps…')
+  })
+
+  it('returns [] for non-array input', () => {
+    expect(toScenes(undefined as unknown as DirectorScene[], 10)).toEqual([])
+  })
+})
+
+describe('scenesToTimedWords', () => {
+  it('spreads each scene script across its span', () => {
+    const scenes = toScenes([{ start: 0, end: 4, draftText: 'a b c d' }], 4)
+    const words = scenesToTimedWords(scenes)
+    expect(words).toHaveLength(4)
+    expect(words[0]).toMatchObject({ text: 'a', start: 0 })
+    expect(words[1].start).toBeCloseTo(1, 5)
+    expect(words[3].start).toBeCloseTo(3, 5)
+  })
+
+  it('skips scenes with no script', () => {
+    const scenes = toScenes([{ start: 0, end: 4, draftText: '' }], 4)
+    expect(scenesToTimedWords(scenes)).toEqual([])
+  })
+})

@@ -8,6 +8,7 @@ const NAV = [
   { to: '/comments', label: 'Comments' },
   { to: '/chat', label: 'Chat' },
   { to: '/auth', label: 'Auth' },
+  { to: '/studio', label: 'Studio' },
 ]
 
 export function Header() {
