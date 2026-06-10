@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { planScene, type AssemblePlan } from './assemble'
-import { audioEvents, sourceTimeAt, scheduleFrom, type AudioEvent, type PreviewSegment } from './preview'
+import { planScene, type AssemblePlan, type AssembleSegment } from './assemble'
+import { audioEvents, sourceTimeAt, scheduleFrom, type AudioEvent } from './preview'
 
 /** A voiced segment (has an audio clip) over `[start, end]`, original-video seconds. */
 function seg(start: number, end: number, audioSeconds = end - start) {
@@ -36,9 +36,9 @@ describe('audioEvents — clip offsets on the output timeline', () => {
   })
 
   it('unvoiced segments produce no event (planAssembly already made them silence)', () => {
-    const segments = [{ start: 0, end: 4 }, seg(6, 10)]
+    const segments: AssembleSegment[] = [{ start: 0, end: 4 }, seg(6, 10)]
     const plan = planScene({ segments, cuts: [], start: 0, end: 10 })
-    expect(audioEvents(plan, segments as PreviewSegment[])).toEqual([
+    expect(audioEvents(plan, segments)).toEqual([
       { segmentIndex: 1, audioUrl: 'clip-6-10.wav', offset: 6, duration: 4 },
     ])
   })
@@ -54,8 +54,8 @@ describe('audioEvents — clip offsets on the output timeline', () => {
       ],
       duration: 10,
     }
-    const segments = [{ start: 0, end: 4 }, seg(4, 10)]
-    expect(audioEvents(plan, segments as PreviewSegment[])).toEqual([
+    const segments: AssembleSegment[] = [{ start: 0, end: 4 }, seg(4, 10)]
+    expect(audioEvents(plan, segments)).toEqual([
       { segmentIndex: 1, audioUrl: 'clip-4-10.wav', offset: 4, duration: 6 },
     ])
   })
