@@ -137,6 +137,58 @@ describe('TranscriptDiff original-pane selection', () => {
     expect(screen.queryByText('Frame · 0:00')).not.toBeInTheDocument()
   })
 
+  it('search: query → results → Grab → place calls onAdoptOriginal with the hit span', async () => {
+    const onAdoptOriginal = vi.fn()
+    const onSearch = vi.fn().mockResolvedValue([
+      { start: 2.0, end: 4.0, snippet: 'beta words', reason: 'literal match', sceneTitle: 'Scene 1' },
+    ])
+    render(
+      <TranscriptDiff words={words} duration={6} onAdoptOriginal={onAdoptOriginal} onSearch={onSearch} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'bike ride' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    expect(onSearch).toHaveBeenCalledWith('bike ride')
+    expect(await screen.findByText(/beta words/)).toBeInTheDocument()
+    expect(screen.getByText('Scene 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Grab' }))
+    expect(placingBanner()).toContain('2.0s')
+    fireEvent.click(screen.getAllByText('beta')[1]) // the New pane is in place mode
+    expect(onAdoptOriginal).toHaveBeenCalledWith(2.0, 4.0, 2.0)
+  })
+
+  it('search: empty results render a no-matches note', async () => {
+    const onSearch = vi.fn().mockResolvedValue([])
+    render(<TranscriptDiff words={words} duration={6} onSearch={onSearch} />)
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'zzz' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    expect(await screen.findByText(/No matches/)).toBeInTheDocument()
+  })
+
+  it('search: grabbing a hit cancels a pending snippet (one gesture at a time)', async () => {
+    const onSearch = vi.fn().mockResolvedValue([{ start: 0, end: 2, snippet: 'alpha', reason: '' }])
+    render(
+      <TranscriptDiff
+        words={words}
+        duration={6}
+        onAdoptOriginal={vi.fn()}
+        onAddSnippet={vi.fn()}
+        onSearch={onSearch}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'alpha' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await screen.findByRole('button', { name: 'Grab' })
+    fireEvent.click(screen.getByRole('button', { name: /add snippet/i }))
+    fireEvent.change(screen.getByLabelText('Snippet text'), { target: { value: 'hello there' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Place' }))
+    expect(placingBanner()).toContain('snippet')
+    fireEvent.click(screen.getByRole('button', { name: 'Grab' }))
+    expect(placingBanner()).toContain('of original audio')
+  })
+
   it('the extended span is what gets dropped on the New pane', () => {
     const onAdoptOriginal = renderDiff()
     grab('alpha')
