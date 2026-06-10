@@ -1,7 +1,7 @@
 /**
  * Lay a word-level transcript out on a time grid, the way the transcript editor
  * renders it. Each row ("line") spans `secondsPerLine` seconds; within a row,
- * time is sliced into `segmentSeconds`-wide cells (columns) — quarter-seconds by
+ * time is sliced into `segmentSeconds`-wide cells (columns) — tenth-seconds by
  * default, since people speak 2–3 words a second and one-second cells pile them
  * up. A word is dropped into the cell for the slice its `start` falls in, so
  * reading left→right then top→bottom walks the audio forward in time.
@@ -27,10 +27,10 @@ export type GridLine = {
   cells: GridCell[]
 }
 
-/** Lines default to 5 seconds; the editor lets you change it. */
+/** Lines default to 2 seconds; the editor lets you change it. */
 export const DEFAULT_SECONDS_PER_LINE = 2
 
-/** Cells default to a quarter-second slice; the editor lets you change it. */
+/** Cells default to a tenth-second slice; the editor lets you change it. */
 export const DEFAULT_SEGMENT_SECONDS = 0.1
 
 const emptyCells = (n: number): GridCell[] => Array.from({ length: n }, () => [])

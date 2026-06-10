@@ -76,37 +76,40 @@ describe('segmentsPerLine', () => {
     expect(segmentsPerLine(10, 0.5)).toBe(20)
     expect(segmentsPerLine(3, 0.25)).toBe(12)
   })
-  it('defaults to 5s / 0.25s = 20 cells and guards bad input', () => {
+  it('defaults to 2s / 0.1s = 20 cells and guards bad input', () => {
     expect(segmentsPerLine()).toBe(20)
-    expect(segmentsPerLine(5, 0)).toBe(20) // falls back to default segment
+    expect(segmentsPerLine(5, 0)).toBe(50) // falls back to the default 0.1s segment
   })
 })
 
-describe('buildTranscriptGrid — quarter-second cells (default)', () => {
-  it('places each word in its quarter-second slice', () => {
-    // row is 5s -> 20 cells of 0.25s. 0.1->col0, 0.3->col1, 1.6->col6, 4.9->col19
-    const grid = buildTranscriptGrid([w('a', 0.1), w('b', 0.3), w('c', 1.6), w('d', 4.9)])
-    expect(grid).toHaveLength(1)
+describe('buildTranscriptGrid — tenth-second cells (default)', () => {
+  it('places each word in its tenth-second slice', () => {
+    // rows are 2s -> 20 cells of 0.1s. Cell-midpoint starts dodge float-boundary
+    // flooring (0.3/0.1 floors to 2): 0.1->col1, 0.35->col3, 1.65->col16; 4.95
+    // lands in row 2 (4..6s) col 9, with the empty row 1 keeping the grid
+    // continuous.
+    const grid = buildTranscriptGrid([w('a', 0.1), w('b', 0.35), w('c', 1.65), w('d', 4.95)])
+    expect(grid).toHaveLength(3)
     const { cells } = grid[0]
     expect(cells).toHaveLength(20)
-    expect(cells[0].map((x) => x.text)).toEqual(['a'])
-    expect(cells[1].map((x) => x.text)).toEqual(['b'])
-    expect(cells[6].map((x) => x.text)).toEqual(['c'])
-    expect(cells[19].map((x) => x.text)).toEqual(['d'])
+    expect(cells[1].map((x) => x.text)).toEqual(['a'])
+    expect(cells[3].map((x) => x.text)).toEqual(['b'])
+    expect(cells[16].map((x) => x.text)).toEqual(['c'])
+    expect(grid[2].cells[9].map((x) => x.text)).toEqual(['d'])
   })
 
-  it('separates words that share a second but not a quarter', () => {
-    // at 1s cells these would pile in one cell; at 0.25s they spread out
+  it('separates words that share a second but not a tenth', () => {
+    // at 1s cells these would pile in one cell; at 0.1s they spread out
     const grid = buildTranscriptGrid([w('two', 6.0), w('words', 6.4), w('here', 6.9)])
-    // second 6 is row 1 (5..10), within=1.0/1.4/1.9 -> cols 4, 5, 7
-    expect(grid[1].cells[4].map((x) => x.text)).toEqual(['two'])
-    expect(grid[1].cells[5].map((x) => x.text)).toEqual(['words'])
-    expect(grid[1].cells[7].map((x) => x.text)).toEqual(['here'])
+    // second 6 is row 3 (6..8), within=0.0/0.4/0.9 -> cols 0, 4, 9
+    expect(grid[3].cells[0].map((x) => x.text)).toEqual(['two'])
+    expect(grid[3].cells[4].map((x) => x.text)).toEqual(['words'])
+    expect(grid[3].cells[9].map((x) => x.text)).toEqual(['here'])
   })
 
   it('exposes the defaults', () => {
-    expect(DEFAULT_SECONDS_PER_LINE).toBe(5)
-    expect(DEFAULT_SEGMENT_SECONDS).toBe(0.25)
+    expect(DEFAULT_SECONDS_PER_LINE).toBe(2)
+    expect(DEFAULT_SEGMENT_SECONDS).toBe(0.1)
   })
 })
 
@@ -163,9 +166,9 @@ describe('formatClock', () => {
 })
 
 describe('gridPosition', () => {
-  it('maps a time to its row + quarter-second column', () => {
+  it('maps a time to its row + tenth-second column', () => {
     expect(gridPosition(0)).toEqual({ line: 0, col: 0 })
-    expect(gridPosition(6.6)).toEqual({ line: 1, col: 6 }) // within=1.6 -> col 6
+    expect(gridPosition(6.65)).toEqual({ line: 3, col: 6 }) // within=0.65 -> col 6
     expect(gridPosition(0.6, 5, 1)).toEqual({ line: 0, col: 0 })
     expect(gridPosition(6.6, 5, 1)).toEqual({ line: 1, col: 1 })
   })
