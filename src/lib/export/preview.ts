@@ -65,3 +65,34 @@ export function sourceTimeAt(plan: AssemblePlan, t: number, sceneStart: number):
   }
   return sceneStart + last.end
 }
+
+/** An event ready for `AudioBufferSourceNode.start(base + when, bufferOffset, duration)`. */
+export type ScheduledEvent = {
+  event: AudioEvent
+  /** Seconds from "now" until this clip starts (0 = immediately). */
+  when: number
+  /** Seconds into the clip's buffer to start from (mid-flight seek). */
+  bufferOffset: number
+  /** Seconds of the buffer to play. */
+  duration: number
+}
+
+/**
+ * The seek math: given playback starting at output-second `offset`, future
+ * events keep their relative delay, an event already underway starts now but
+ * partway into its buffer, and an event that already finished is dropped.
+ */
+export function scheduleFrom(events: AudioEvent[], offset: number): ScheduledEvent[] {
+  const out: ScheduledEvent[] = []
+  for (const event of events) {
+    if (event.offset >= offset) {
+      out.push({ event, when: event.offset - offset, bufferOffset: 0, duration: event.duration })
+    } else {
+      const into = offset - event.offset
+      if (into < event.duration) {
+        out.push({ event, when: 0, bufferOffset: into, duration: event.duration - into })
+      }
+    }
+  }
+  return out
+}

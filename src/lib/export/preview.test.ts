@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { planScene, type AssemblePlan } from './assemble'
-import { audioEvents, sourceTimeAt } from './preview'
+import { audioEvents, sourceTimeAt, scheduleFrom, type AudioEvent } from './preview'
 
 /** A voiced segment (has an audio clip) over `[start, end]`, original-video seconds. */
 function seg(start: number, end: number, audioSeconds = end - start) {
@@ -94,5 +94,38 @@ describe('sourceTimeAt — output clock → original-video seconds for the flipb
   it('an empty plan returns the scene start', () => {
     const plan = planScene({ segments: [], cuts: [{ start: 0, end: 10 }], start: 0, end: 10 })
     expect(sourceTimeAt(plan, 0, 100)).toBe(100)
+  })
+})
+
+describe('scheduleFrom — which clips play (and from where) when starting at an offset', () => {
+  const events: AudioEvent[] = [
+    { segmentIndex: 0, audioUrl: 'a.wav', offset: 2, duration: 4 }, // plays [2,6]
+    { segmentIndex: 1, audioUrl: 'b.wav', offset: 8, duration: 3 }, // plays [8,11]
+  ]
+
+  it('offset 0: everything is in the future, untouched', () => {
+    expect(scheduleFrom(events, 0)).toEqual([
+      { event: events[0], when: 2, bufferOffset: 0, duration: 4 },
+      { event: events[1], when: 8, bufferOffset: 0, duration: 3 },
+    ])
+  })
+
+  it('mid-flight: a clip already playing starts now, partway into its buffer', () => {
+    expect(scheduleFrom(events, 4)).toEqual([
+      { event: events[0], when: 0, bufferOffset: 2, duration: 2 },
+      { event: events[1], when: 4, bufferOffset: 0, duration: 3 },
+    ])
+  })
+
+  it('finished clips are dropped (including exactly-at-end)', () => {
+    expect(scheduleFrom(events, 6)).toEqual([
+      { event: events[1], when: 2, bufferOffset: 0, duration: 3 },
+    ])
+  })
+
+  it('a clip starting exactly at the offset plays immediately from its top', () => {
+    expect(scheduleFrom(events, 8)).toEqual([
+      { event: events[1], when: 0, bufferOffset: 0, duration: 3 },
+    ])
   })
 })
