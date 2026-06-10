@@ -57,6 +57,9 @@ export type PreviewTransport = {
  * Schedules `events` (from `audioEvents`) on the shared AudioContext and owns
  * the transport clock. The context clock runs even with zero nodes scheduled,
  * so an all-silent scene previews fine. All state is transient.
+ *
+ * `events` must be referentially stable across renders (memoize in the caller):
+ * an identity change is treated as a timeline edit and stops playback.
  */
 export function usePreviewTransport(events: AudioEvent[], duration: number): PreviewTransport {
   const [playing, setPlaying] = useState(false)
