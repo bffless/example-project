@@ -2,7 +2,7 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ✅ implemented (build/lint/tests green; pending PR review) ·
+**Status:** ✅ done (merged to main in PR #13 alongside story 03i, 2026-06-10) ·
 **Frontend-only — no new `/api/*`. Pure model + diff-viewer interactions. The
 ffmpeg assembler (`src/lib/export/assemble.ts`) is unchanged.**
 
