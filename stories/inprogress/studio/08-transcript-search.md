@@ -42,8 +42,10 @@ one-line reason, owning scene). Per result:
    handler, `google/gemini-3.1-pro`, **text-only** (no sheets), strict-JSON
    system prompt, server-side clamp mirroring `toSearchHits`. **Sync** — no
    03f jobs flow unless live testing shows timeouts. No validators (story 07).
-   Quote string-literal Replicate inputs (they're expressions). Record the
-   rule id here: `____`.
+   Quote string-literal Replicate inputs (they're expressions). Rule id:
+   **`504a39bd`** (debug on). Verified live 2026-06-10: literal query → the
+   right span; "where I sound excited" → the 'so pumped … amazing' span with a
+   sensible reason; nonsense query → `{ "results": [] }`.
 
 ## Acceptance
 

@@ -110,7 +110,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03h | `../../done/03h-free-segment-editing.md` | free segment editing — drop original audio **anywhere** (overlap flagged amber, not blocked) · drag a run's ⠿ handle to re-time it · assemble gated on overlaps | ✅ done |
 | 03i | `../../done/03i-scene-preview-player.md` | scene preview player — flipbook of filmstrip frames + narration stitched via Web Audio scheduling, simulating `planScene()` with **no ffmpeg**; modal `<dialog>` opened from the sticky tabs + Assemble bar | ✅ done |
 | 05 | `../../done/05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) + save + audio polish | ✅ done† |
-| 08 | `08-transcript-search.md` | transcript search (`/api/search-transcript`, Gemini text-only) — find-by-meaning over the whole talk · Play preview · Grab → existing place mode | ▶ next |
+| 08 | `08-transcript-search.md` | transcript search (`/api/search-transcript`, rule `504a39bd`, Gemini text-only, sync) — find-by-meaning over the whole talk · Play preview · Grab → existing place mode | ✅ done |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 
