@@ -137,6 +137,80 @@ describe('TranscriptDiff original-pane selection', () => {
     expect(screen.queryByText('Frame · 0:00')).not.toBeInTheDocument()
   })
 
+  it('search: selecting cells in a result set grabs their span, click places it', async () => {
+    const onAdoptOriginal = vi.fn()
+    const onSearch = vi.fn().mockResolvedValue([
+      {
+        start: 2.0,
+        end: 4.0,
+        snippet: 'bike ride',
+        reason: 'literal match',
+        sceneTitle: 'Scene 1',
+        words: [
+          { text: 'bike', start: 2.0, end: 2.4 },
+          { text: 'ride', start: 2.5, end: 2.9 },
+        ],
+      },
+    ])
+    render(
+      <TranscriptDiff words={words} duration={6} onAdoptOriginal={onAdoptOriginal} onSearch={onSearch} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'bike ride' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    expect(onSearch).toHaveBeenCalledWith('bike ride')
+    // The set renders the span's words on the SAME selectable grid as the
+    // Original pane — grab a cell, shift-click to extend, exactly as there.
+    const bike = await screen.findByText('bike')
+    expect(screen.getByText('Scene 1')).toBeInTheDocument()
+    fireEvent.pointerDown(bike)
+    fireEvent.pointerUp(window)
+    expect(placingBanner()).toContain('0.1s') // single-cell grab at 2.0
+    fireEvent.pointerDown(screen.getByText('ride'), { shiftKey: true }) // extend → {2.0, 2.6}
+    expect(placingBanner()).toContain('0.6s')
+    fireEvent.click(screen.getAllByText('beta')[1]) // the New pane is in place mode
+    expect(onAdoptOriginal).toHaveBeenCalledTimes(1)
+    const [origStart, origEnd, dropStart] = onAdoptOriginal.mock.calls[0]
+    expect(origStart).toBe(2.0)
+    expect(origEnd).toBeCloseTo(2.6)
+    expect(dropStart).toBe(2.0)
+  })
+
+  it('search: empty results render a no-matches note', async () => {
+    const onSearch = vi.fn().mockResolvedValue([])
+    render(<TranscriptDiff words={words} duration={6} onSearch={onSearch} />)
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'zzz' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    expect(await screen.findByText(/No matches/)).toBeInTheDocument()
+  })
+
+  it('search: a set selection cancels a pending snippet (one gesture at a time)', async () => {
+    const onSearch = vi.fn().mockResolvedValue([
+      { start: 0, end: 2, snippet: 'pedal', reason: '', words: [{ text: 'pedal', start: 0, end: 0.4 }] },
+    ])
+    render(
+      <TranscriptDiff
+        words={words}
+        duration={6}
+        onAdoptOriginal={vi.fn()}
+        onAddSnippet={vi.fn()}
+        onSearch={onSearch}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /⌕ search/i }))
+    fireEvent.change(screen.getByLabelText('Search query'), { target: { value: 'pedal' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    const chip = await screen.findByText('pedal')
+    fireEvent.click(screen.getByRole('button', { name: /add snippet/i }))
+    fireEvent.change(screen.getByLabelText('Snippet text'), { target: { value: 'hello there' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Place' }))
+    expect(placingBanner()).toContain('snippet')
+    fireEvent.pointerDown(chip)
+    fireEvent.pointerUp(window)
+    expect(placingBanner()).toContain('of original audio')
+  })
+
   it('the extended span is what gets dropped on the New pane', () => {
     const onAdoptOriginal = renderDiff()
     grab('alpha')

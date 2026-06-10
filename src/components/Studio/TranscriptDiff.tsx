@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   buildTranscriptGrid,
   cutColumns,
@@ -15,6 +15,7 @@ import { SegmentVoiceControl, type SegmentControl } from './SegmentVoiceControl'
 import { claimPlayback, toggleClip } from './clipPlayer'
 import { narrationSeconds } from '../../lib/scenes'
 import { frameForRow, spriteStyle, type FilmFrame } from '../../lib/filmstrip'
+import type { SearchHit } from '../../lib/search'
 
 type Props = {
   /** The transcript from `/api/transcribe` — shown on the left ("original"). */
@@ -51,6 +52,13 @@ type Props = {
    *  the toolbar bar, then click the New pane to drop it — an unvoiced run sized
    *  by the word-count estimate, voiced later via its Record / AI controls. */
   onAddSnippet?: (text: string, dropStart: number) => void
+  /** Search the whole talk by meaning (story 08). The page runs the query
+   *  through `/api/search-transcript` over the FULL transcript (this viewer
+   *  only has the scene slice) and resolves hits annotated with the owning
+   *  scene's title and the span's transcript `words` — each hit renders as a
+   *  full-width "set": the same selectable time grid as the Original pane,
+   *  windowed to the hit. Omit to hide the search affordance. */
+  onSearch?: (query: string) => Promise<(SearchHit & { sceneTitle?: string; words?: TWord[] })[]>
   /** Delete a New-pane run (reopens its gap to make room). */
   onDeleteSegment?: (sceneId: string, index: number) => void
   /** Move a New-pane run (story 03h): vertical pointer-drag on its voice-control
@@ -162,6 +170,7 @@ export function TranscriptDiff({
   onDeleteSegment,
   onMoveRun,
   onAddSnippet,
+  onSearch,
   overlaps = [],
   frames = [],
   duration = 0,
@@ -269,6 +278,17 @@ export function TranscriptDiff({
   // The New-pane cell the cursor is over while placing — anchors the footprint
   // preview so it shows exactly where (and how many cells) the clip will land.
   const [hoverTime, setHoverTime] = useState<number | null>(null)
+
+  // Transcript search (story 08): `searchOpen` shows the query bar; hits are
+  // transient — closing the bar clears them. Each hit renders as a full-width
+  // "set" Pane sharing the Original pane's select-mode handlers, so grabbing
+  // from a set IS the Original-pane gesture (drag cells → place).
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchBusy, setSearchBusy] = useState(false)
+  const [searchHits, setSearchHits] = useState<
+    (SearchHit & { sceneTitle?: string; words?: TWord[] })[] | null
+  >(null)
 
   // Pointer-down on the Original pane. While a clip is grabbed (`pendingClip`),
   // standard selection semantics apply: shift-click extends the grabbed span to
@@ -457,9 +477,13 @@ export function TranscriptDiff({
   // clicking the row that's currently playing pauses it.
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playheadSec, setPlayheadSec] = useState<number | null>(null)
+  // Stop-bound override (story 08): search-hit playback ends at the HIT's end,
+  // not the scene window — search is whole-talk, a hit may live in another
+  // scene. Null = the default window bound.
+  const [stopAt, setStopAt] = useState<number | null>(null)
 
   const playFrom = useCallback(
-    (startSec: number) => {
+    (startSec: number, stopSec?: number) => {
       const el = audioRef.current
       if (!el) return
       // toggle: clicking the row the playhead is already in pauses it
@@ -467,6 +491,7 @@ export function TranscriptDiff({
         el.pause()
         return
       }
+      setStopAt(stopSec ?? null)
       claimPlayback(el)
       setPlayheadSec(startSec) // light the row immediately, before the first timeupdate
       const start = () => {
@@ -482,6 +507,29 @@ export function TranscriptDiff({
     [playheadSec, secondsPerLine],
   )
 
+  // Play exactly one hit's span (story 08) — same element + claim as playFrom,
+  // but with its own stop bound.
+  const playSpan = useCallback(
+    (startSec: number, endSec: number) => {
+      const el = audioRef.current
+      if (!el) return
+      if (!el.paused && playheadSec != null && playheadSec >= startSec && playheadSec < endSec) {
+        el.pause() // toggle: already playing this hit
+        return
+      }
+      claimPlayback(el)
+      setStopAt(endSec)
+      setPlayheadSec(startSec)
+      const start = () => {
+        el.currentTime = startSec
+        void el.play().catch(() => {})
+      }
+      if (el.readyState >= 1) start()
+      else el.addEventListener('loadedmetadata', start, { once: true })
+    },
+    [playheadSec],
+  )
+
   const stop = useCallback(() => audioRef.current?.pause(), [])
 
   // Track the playhead → lit row; stop at the scene's end so it doesn't bleed
@@ -492,7 +540,8 @@ export function TranscriptDiff({
     const el = audioRef.current
     if (!el) return
     const onTime = () => {
-      if (Number.isFinite(windowEnd) && el.currentTime >= windowEnd) {
+      const limit = stopAt ?? windowEnd
+      if (Number.isFinite(limit) && el.currentTime >= limit) {
         el.pause()
         return
       }
@@ -507,7 +556,7 @@ export function TranscriptDiff({
       el.removeEventListener('pause', clear)
       el.removeEventListener('ended', clear)
     }
-  }, [windowEnd])
+  }, [windowEnd, stopAt])
 
   // Switching scenes (or swapping the source) stops playback — the resulting
   // `pause` event clears the lit row — so audio never carries over from the
@@ -573,6 +622,15 @@ export function TranscriptDiff({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 font-mono text-[12px] text-ink-mute">
+          {onSearch && !searchOpen && (
+            <button
+              type="button"
+              className="border rule bg-paper px-2 py-1 text-ink transition-colors hover:bg-paper-deep/40"
+              onClick={() => setSearchOpen(true)}
+            >
+              ⌕ Search
+            </button>
+          )}
           {onAddSnippet && snippetText == null && !pendingSnippet && (
             <button
               type="button"
@@ -650,6 +708,119 @@ export function TranscriptDiff({
             Cancel
           </button>
         </form>
+      )}
+
+      {searchOpen && (
+        // Transcript search (story 08): query bar + results. Hits are whole-talk;
+        // Play previews the span's original audio, Grab enters place mode.
+        <div className="border-b rule bg-paper-deep/40">
+          <form
+            className="flex flex-wrap items-center gap-3 px-5 py-2 text-[12.5px] text-ink-soft"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const q = searchQuery.trim()
+              if (!q || !onSearch || searchBusy) return
+              setSearchBusy(true)
+              onSearch(q)
+                .then(setSearchHits)
+                .catch(() => setSearchHits([]))
+                .finally(() => setSearchBusy(false))
+            }}
+          >
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search the talk — “where I sound excited”, “the bike ride”…"
+              aria-label="Search query"
+              className="min-w-48 flex-1 border rule bg-paper px-2 py-1 text-[13px] text-ink outline-none placeholder:text-ink-faint"
+            />
+            <button
+              type="submit"
+              disabled={!searchQuery.trim() || searchBusy}
+              className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper disabled:opacity-50"
+            >
+              {searchBusy ? 'Searching…' : 'Search'}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper"
+              onClick={() => {
+                setSearchOpen(false)
+                setSearchHits(null)
+              }}
+            >
+              Close
+            </button>
+          </form>
+          {searchHits && (
+            // Result SETS: each hit is the same selectable time grid as the
+            // Original pane (shared `leftEdit` select-mode handlers), windowed
+            // to the hit's span and spanning the full viewer width — drag its
+            // cells to grab, then click the New pane to place, exactly like
+            // the Original. Capped tall; the list scrolls.
+            <div className="max-h-[28rem] overflow-y-auto border-t rule">
+              {searchHits.length === 0 && (
+                <p className="px-5 py-2 text-[12px] text-ink-mute">
+                  No matches — try different words.
+                </p>
+              )}
+              {searchHits.map((hit, i) =>
+                hit.words?.length ? (
+                  <div key={`${hit.start}-${i}`} className="border-b rule last:border-b-0">
+                    <Pane
+                      label={`${formatClock(hit.start)}–${formatClock(hit.end)}`}
+                      sublabel={hit.sceneTitle ?? 'search result'}
+                      words={hit.words}
+                      secondsPerLine={secondsPerLine}
+                      segmentSeconds={segmentSeconds}
+                      cuts={[]}
+                      minSeconds={hit.end}
+                      windowStart={hit.start}
+                      windowEnd={hit.end}
+                      segments={[]}
+                      controls={null}
+                      edit={leftEdit}
+                      rowHeight={FILMSTRIP_ROW}
+                      onPlayFrom={
+                        originalAudioUrl ? (sec) => playFrom(sec, hit.end) : undefined
+                      }
+                      playheadSec={playheadSec}
+                      headerExtra={
+                        <>
+                          {hit.reason && (
+                            <span className="text-[11px] italic normal-case tracking-normal text-ink-mute">
+                              {hit.reason}
+                            </span>
+                          )}
+                          {originalAudioUrl && (
+                            <button
+                              type="button"
+                              className="rounded border border-paper-line px-2 py-0.5 font-mono text-[11px] text-ink hover:bg-paper-deep/40"
+                              onClick={() => playSpan(hit.start, hit.end)}
+                            >
+                              ▶ Play
+                            </button>
+                          )}
+                        </>
+                      }
+                    />
+                  </div>
+                ) : (
+                  <p
+                    key={`${hit.start}-${i}`}
+                    className="border-b rule px-5 py-2 text-[12.5px] text-ink last:border-b-0"
+                  >
+                    <span className="font-mono text-[11px] text-ink-mute">
+                      {formatClock(hit.start)}–{formatClock(hit.end)}
+                    </span>{' '}
+                    “{hit.snippet}”
+                  </p>
+                ),
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {placing && (
@@ -903,6 +1074,8 @@ type PaneProps = {
   playheadSec?: number | null
   /** Fully hide this pane (a labelled rail stays behind to restore it). */
   onCollapse?: () => void
+  /** Extra header content, right-aligned (search sets: the hit's reason + Play). */
+  headerExtra?: ReactNode
 }
 
 /**
@@ -1058,6 +1231,7 @@ function Pane({
   onPlayFrom,
   playheadSec,
   onCollapse,
+  headerExtra,
 }: PaneProps) {
   const lines = useMemo(
     () =>
@@ -1103,6 +1277,7 @@ function Pane({
           {sublabel}
         </span>
         <span className="ml-auto flex items-center gap-3">
+          {headerExtra}
           {overlaps.length > 0 && (
             <span className="font-mono text-[11px] text-amber-700">
               ⚠ {overlaps.length} overlap{overlaps.length === 1 ? '' : 's'} to resolve — drag a run off

@@ -129,6 +129,38 @@ const studioHandlers = [
     return HttpResponse.json({ jobId, status: 'pending' })
   }),
 
+  // Transcript search (story 08): deterministic keyword match over the posted
+  // timedTranscript lines — each line containing a query word (≥3 chars)
+  // becomes a hit spanning that line's 8s window. Real response shape:
+  // { results: [{ start, end, snippet, reason }] }.
+  http.post('/api/search-transcript', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      query?: string
+      transcript?: string
+      duration?: number
+    }
+    const terms = (body.query ?? '')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length >= 3)
+    const results: { start: number; end: number; snippet: string; reason: string }[] = []
+    for (const line of (body.transcript ?? '').split('\n')) {
+      const m = /^\[(\d+):(\d{2})\]\s*(.*)$/.exec(line)
+      if (!m) continue
+      const startSec = Number(m[1]) * 60 + Number(m[2])
+      const text = m[3]
+      const term = terms.find((t) => text.toLowerCase().includes(t))
+      if (!term) continue
+      results.push({
+        start: startSec,
+        end: Math.min(startSec + 8, Math.max(body.duration ?? Infinity, startSec + 1)),
+        snippet: text,
+        reason: `mentions “${term}”`,
+      })
+    }
+    return HttpResponse.json({ results: results.slice(0, 20) })
+  }),
+
   // Poll a job (story 03f Part 0). Spins `pending` → `running` over the first two
   // polls, then resolves `done` with the stashed deterministic result — so the FE
   // poll loop iterates a couple of times before resolving, like the real pipeline.
