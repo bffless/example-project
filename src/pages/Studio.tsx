@@ -273,6 +273,15 @@ export function Studio() {
     [pipe],
   )
 
+  // Drop a typed snippet — same owner routing as adopt-original.
+  const onAddSnippet = useCallback(
+    (text: string, dropStart: number) => {
+      const owner = sceneAtTime(pipe.scenes, dropStart)
+      if (owner) pipe.addSnippet(owner.id, text, dropStart)
+    },
+    [pipe],
+  )
+
   const phase = studioPhase({
     hasSource,
     ready: pipe.ready,
@@ -568,6 +577,7 @@ export function Studio() {
                     onEditCut={onEditCut}
                     dropTargets={gapSpans}
                     onAdoptOriginal={onAdoptOriginal}
+                    onAddSnippet={onAddSnippet}
                     onDeleteSegment={pipe.deleteSegment}
                     onMoveRun={pipe.moveRun}
                     overlaps={overlapSpans}
