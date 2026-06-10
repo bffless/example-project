@@ -85,8 +85,15 @@ export function SceneTabs({ scenes, selectedId, onSelect, tablistRef, tablistCla
         </div>
         {onPreview && (
           <div className="flex shrink-0 items-center border-b rule pl-3">
-            <button type="button" className="pill-ghost" disabled={previewDisabled} onClick={onPreview}>
-              Preview
+            {/* Compact control (the diff header's button size) — pill-ghost is too
+                tall for the slim tab strip. */}
+            <button
+              type="button"
+              className="whitespace-nowrap rounded-full border border-paper-line px-3 py-1 text-[12px] text-ink transition-colors hover:border-ink hover:bg-ink hover:text-paper disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-paper-line disabled:hover:bg-transparent disabled:hover:text-ink"
+              disabled={previewDisabled}
+              onClick={onPreview}
+            >
+              ▶ Preview
             </button>
           </div>
         )}
