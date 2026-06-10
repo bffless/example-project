@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useRecorder } from './useRecorder'
+import { useClipPlaying } from './clipPlayer'
 import { formatTime } from '../../lib/edl'
 
 /** One narration run's voice state + position, for the inline diff-viewer control. */
@@ -68,6 +69,7 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
   }, [recorder.status, recorder.blob, onRecord, recorder])
 
   const { audioUrl, audioSeconds, audioSource, busy } = segment
+  const playing = useClipPlaying(audioUrl)
 
   return (
     <div className="flex h-9 items-center gap-2 overflow-hidden border-t border-paper-line/60 bg-paper-deep/40 px-2 text-[11px]">
@@ -105,12 +107,24 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
             <>
               <button
                 type="button"
-                className="flex h-4 w-4 items-center justify-center rounded-full bg-terracotta text-[8px] text-paper hover:bg-terracotta-ink"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-terracotta text-paper transition-colors hover:bg-terracotta-hover"
                 onClick={() => onPlay(audioUrl)}
-                title="Play this run"
-                aria-label="Play this run"
+                title={playing ? 'Pause this run' : 'Play this run'}
+                aria-label={playing ? 'Pause this run' : 'Play this run'}
               >
-                ▶
+                {playing ? (
+                  <svg viewBox="0 0 12 12" className="h-3 w-3 fill-current" aria-hidden="true">
+                    <path d="M1.5 0.5h3.2v11H1.5zM7.3 0.5h3.2v11H7.3z" />
+                  </svg>
+                ) : (
+                  <svg
+                    viewBox="0 0 12 12"
+                    className="ml-0.5 h-3 w-3 fill-current"
+                    aria-hidden="true"
+                  >
+                    <path d="M1.5 0 11.5 6 1.5 12z" />
+                  </svg>
+                )}
               </button>
               <span className="font-mono text-ink-mute">
                 {(audioSeconds ?? 0).toFixed(1)}s · {audioSource ? sourceLabel[audioSource] : 'AI'}

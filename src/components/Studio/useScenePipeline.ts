@@ -865,15 +865,46 @@ export function useScenePipeline() {
   // Write one segment's audio back into `scene.refined` (creating a refinement
   // from the baseline if the scene wasn't refined yet), and recompute the scene's
   // total narration length from the voiced segments. Shared by AI + record.
+  // The run's `end` snaps to the measured clip length so the footprint shows
+  // what will actually play (not the refiner anchor / word-count estimate).
   const setSegmentAudio = useCallback(
     (sceneId: string, segIndex: number, audio: Partial<NarrationSegment>) => {
       const scene = scenes.find((s) => s.id === sceneId)
       if (!scene) return
       const base =
         scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
-      const segments = base.segments.map((seg, i) => (i === segIndex ? { ...seg, ...audio } : seg))
+      const segments = base.segments.map((seg, i) =>
+        i === segIndex
+          ? {
+              ...seg,
+              ...audio,
+              ...(audio.audioSeconds != null && audio.audioSeconds > 0
+                ? { end: seg.start + audio.audioSeconds }
+                : {}),
+            }
+          : seg,
+      )
       const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
       patchScene(sceneId, { refined: { ...base, segments }, narrationSeconds: total })
+    },
+    [scenes, patchScene],
+  )
+
+  // Add a hand-typed narration run (the "typed snippet" spec): an unvoiced
+  // segment sized by the word-count estimate, dropped anywhere in the scene and
+  // voiced later via its Record / AI controls. Same non-destructive layering as
+  // adopt-original; cuts are untouched (no audio contradicts a cut).
+  const addSnippet = useCallback(
+    (sceneId: string, text: string, dropStart: number) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      const trimmed = text.trim()
+      if (!scene || !trimmed) return
+      const len = narrationSeconds(trimmed)
+      const start = clampDropStart(scene, dropStart, len)
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const segments = insertSegment(base.segments, { text: trimmed, start, end: start + len })
+      patchScene(sceneId, { refined: { ...base, segments, source: 'manual' } })
     },
     [scenes, patchScene],
   )
@@ -1064,6 +1095,7 @@ export function useScenePipeline() {
     refineScene,
     editSceneCut,
     adoptOriginalAudio,
+    addSnippet,
     sliceScene,
     deleteSegment,
     moveRun,

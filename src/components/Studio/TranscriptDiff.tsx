@@ -12,6 +12,8 @@ import {
   type GridLine,
 } from '../../lib/transcriptGrid'
 import { SegmentVoiceControl, type SegmentControl } from './SegmentVoiceControl'
+import { claimPlayback, toggleClip } from './clipPlayer'
+import { narrationSeconds } from '../../lib/scenes'
 import { frameForRow, spriteStyle, type FilmFrame } from '../../lib/filmstrip'
 
 type Props = {
@@ -45,6 +47,10 @@ type Props = {
    *  tint), no longer a gate. */
   dropTargets?: CutSpan[]
   onAdoptOriginal?: (origStart: number, origEnd: number, dropStart: number) => void
+  /** Add a hand-typed narration run (the spec's "typed snippet"): type text in
+   *  the toolbar bar, then click the New pane to drop it — an unvoiced run sized
+   *  by the word-count estimate, voiced later via its Record / AI controls. */
+  onAddSnippet?: (text: string, dropStart: number) => void
   /** Delete a New-pane run (reopens its gap to make room). */
   onDeleteSegment?: (sceneId: string, index: number) => void
   /** Move a New-pane run (story 03h): vertical pointer-drag on its voice-control
@@ -85,14 +91,6 @@ type Drag = { start: number; end: number; op: 'add' | 'remove' }
 /** A range being selected on the Original pane (or the grabbed clip). */
 type Span = { start: number; end: number }
 
-// One clip plays at a time: stop the previous before starting the next.
-let currentAudio: HTMLAudioElement | null = null
-function playClip(url: string) {
-  if (currentAudio) currentAudio.pause()
-  const audio = new Audio(url)
-  currentAudio = audio
-  void audio.play().catch(() => {})
-}
 
 // Resizable split: the Original pane's width as a % of the row, clamped so
 // neither pane can collapse. Persisted to localStorage so the panes come back
@@ -163,6 +161,7 @@ export function TranscriptDiff({
   onAdoptOriginal,
   onDeleteSegment,
   onMoveRun,
+  onAddSnippet,
   overlaps = [],
   frames = [],
   duration = 0,
@@ -260,15 +259,38 @@ export function TranscriptDiff({
   const canAdopt = !!onAdoptOriginal
   const [clipSel, setClipSel] = useState<Span | null>(null)
   const [pendingClip, setPendingClip] = useState<Span | null>(null)
+  // Typed snippet (type-then-place): `snippetText` non-null = the toolbar input
+  // bar is open; `pendingSnippet` = text confirmed, New pane in place mode with
+  // a footprint sized by the word-count estimate.
+  const [snippetText, setSnippetText] = useState<string | null>(null)
+  const [pendingSnippet, setPendingSnippet] = useState<{ text: string; duration: number } | null>(
+    null,
+  )
   // The New-pane cell the cursor is over while placing — anchors the footprint
   // preview so it shows exactly where (and how many cells) the clip will land.
   const [hoverTime, setHoverTime] = useState<number | null>(null)
 
+  // Pointer-down on the Original pane. While a clip is grabbed (`pendingClip`),
+  // standard selection semantics apply: shift-click extends the grabbed span to
+  // the clicked cell (anchored at whichever edge stays put), a plain click drops
+  // it and starts a fresh selection — so a selection interrupted by scrolling
+  // can be continued with shift instead of redone from scratch.
   const onSelDown = useCallback(
-    (time: number) => {
-      if (canAdopt) setClipSel({ start: time, end: time })
+    (time: number, _isCut: boolean, extend?: boolean) => {
+      if (!canAdopt) return
+      if (extend && pendingClip) {
+        setPendingClip(
+          time >= pendingClip.start
+            ? { start: pendingClip.start, end: time + segmentSeconds }
+            : { start: time, end: pendingClip.end },
+        )
+        return
+      }
+      if (pendingClip) setPendingClip(null)
+      setPendingSnippet(null) // one placement gesture at a time
+      setClipSel({ start: time, end: time })
     },
-    [canAdopt],
+    [canAdopt, pendingClip, segmentSeconds],
   )
   const onSelEnter = useCallback((time: number) => {
     setClipSel((s) => (s ? { ...s, end: time } : s))
@@ -291,15 +313,18 @@ export function TranscriptDiff({
     return () => window.removeEventListener('pointerup', commit)
   }, [clipSel, segmentSeconds])
 
-  // Esc cancels a grabbed-but-unplaced clip.
+  // Esc cancels a grabbed-but-unplaced clip / a pending snippet placement.
   useEffect(() => {
-    if (!pendingClip) return
+    if (!pendingClip && !pendingSnippet) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPendingClip(null)
+      if (e.key === 'Escape') {
+        setPendingClip(null)
+        setPendingSnippet(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pendingClip])
+  }, [pendingClip, pendingSnippet])
 
   // Drops and moves land anywhere in the scene window (story 03h) — the only
   // constraint left is the within-scene clamp: shift the start so the footprint
@@ -313,28 +338,37 @@ export function TranscriptDiff({
     [windowStart, windowEnd],
   )
 
+  // What's being placed: a grabbed clip or a typed snippet. Both drive the same
+  // footprint preview + drop plumbing, differing only in duration and payload.
   const clipDuration = pendingClip ? pendingClip.end - pendingClip.start : 0
+  const placeDuration = pendingSnippet ? pendingSnippet.duration : clipDuration
+  const placing = !!pendingClip || !!pendingSnippet
   // Lands-clean hint (story 03h): no longer gates the drop, only tints the
   // footprint preview green (fits a gap) vs terracotta (will overlap a run).
   const fitsAt = useCallback(
-    (time: number) => dropTargets.some((g) => time >= g.start - 0.05 && time + clipDuration <= g.end + 0.05),
-    [dropTargets, clipDuration],
+    (time: number) => dropTargets.some((g) => time >= g.start - 0.05 && time + placeDuration <= g.end + 0.05),
+    [dropTargets, placeDuration],
   )
   const onDrop = useCallback(
     (time: number) => {
+      if (pendingSnippet && onAddSnippet) {
+        onAddSnippet(pendingSnippet.text, clampPlace(time, pendingSnippet.duration))
+        setPendingSnippet(null)
+        return
+      }
       if (!pendingClip || !onAdoptOriginal) return
       onAdoptOriginal(pendingClip.start, pendingClip.end, clampPlace(time, clipDuration))
       setPendingClip(null)
     },
-    [pendingClip, onAdoptOriginal, clampPlace, clipDuration],
+    [pendingSnippet, onAddSnippet, pendingClip, onAdoptOriginal, clampPlace, clipDuration],
   )
 
-  // The footprint the clip would occupy at the hovered cell (clamped, so it shows
-  // exactly where the drop lands) — green when it fits a gap clean, terracotta
-  // when it will overlap a run. Both are droppable.
-  const placeStart = pendingClip && hoverTime != null ? clampPlace(hoverTime, clipDuration) : null
+  // The footprint the clip/snippet would occupy at the hovered cell (clamped, so
+  // it shows exactly where the drop lands) — green when it fits a gap clean,
+  // terracotta when it will overlap a run. Both are droppable.
+  const placeStart = placing && hoverTime != null ? clampPlace(hoverTime, placeDuration) : null
   const placePreview: CutSpan | null =
-    placeStart != null ? { start: placeStart, end: placeStart + clipDuration } : null
+    placeStart != null ? { start: placeStart, end: placeStart + placeDuration } : null
   const placeFits = placeStart != null && fitsAt(placeStart)
 
   // Move a run (story 03h): pointer-down on its voice-control row grabs it; the
@@ -377,13 +411,14 @@ export function TranscriptDiff({
       ? { start: Math.min(clipSel.start, clipSel.end), end: Math.max(clipSel.start, clipSel.end) + segmentSeconds }
       : null
 
-  // LEFT pane: drag to grab a clip (disabled once one is grabbed — it just stays
-  // outlined until placed or cancelled).
+  // LEFT pane: drag to grab a clip. Stays live once one is grabbed — shift-click
+  // extends the grabbed span, a plain click starts a new selection (onSelDown
+  // decides); onSelEnter is a no-op unless a drag is in progress.
   const leftEdit: CellEdit | null = canAdopt
     ? {
         mode: 'select',
-        onCellDown: pendingClip ? () => {} : onSelDown,
-        onCellEnter: pendingClip ? () => {} : onSelEnter,
+        onCellDown: onSelDown,
+        onCellEnter: onSelEnter,
         preview: selPreview,
         previewKind: 'select',
         glow: [],
@@ -402,7 +437,7 @@ export function TranscriptDiff({
         preview: movePreview,
         previewKind: movePreview ? 'place-ok' : null,
       }
-    : pendingClip
+    : placing
       ? {
           mode: 'place',
           onCellEnter: setHoverTime,
@@ -432,8 +467,7 @@ export function TranscriptDiff({
         el.pause()
         return
       }
-      if (currentAudio && currentAudio !== el) currentAudio.pause()
-      currentAudio = el
+      claimPlayback(el)
       setPlayheadSec(startSec) // light the row immediately, before the first timeupdate
       const start = () => {
         el.currentTime = startSec
@@ -498,7 +532,7 @@ export function TranscriptDiff({
         canAI: canGenerateAI,
         onGenerateAI,
         onRecord,
-        onPlay: playClip,
+        onPlay: toggleClip,
         onDelete: onDeleteSegment ?? (() => {}),
         onMoveStart: onMoveRun ? onMoveStart : undefined,
       }
@@ -539,6 +573,15 @@ export function TranscriptDiff({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 font-mono text-[12px] text-ink-mute">
+          {onAddSnippet && snippetText == null && !pendingSnippet && (
+            <button
+              type="button"
+              className="border rule bg-paper px-2 py-1 text-ink transition-colors hover:bg-paper-deep/40"
+              onClick={() => setSnippetText('')}
+            >
+              ＋ Add snippet
+            </button>
+          )}
           <label className="flex items-center gap-2">
             seconds / line
             <Select
@@ -567,22 +610,65 @@ export function TranscriptDiff({
         </div>
       </div>
 
-      {pendingClip && (
+      {snippetText != null && (
+        // Typed snippet, step 1: write the text. The estimate updates live so
+        // the producer sees the footprint they're about to place.
+        <form
+          className="flex flex-wrap items-center gap-3 border-b rule bg-paper-deep/40 px-5 py-2 text-[12.5px] text-ink-soft"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const text = snippetText.trim()
+            if (!text) return
+            setHoverTime(null) // no stale footprint until the cursor moves
+            setPendingSnippet({ text, duration: narrationSeconds(text) })
+            setSnippetText(null)
+          }}
+        >
+          <input
+            autoFocus
+            value={snippetText}
+            onChange={(e) => setSnippetText(e.target.value)}
+            placeholder="Type the new narration snippet…"
+            aria-label="Snippet text"
+            className="min-w-48 flex-1 border rule bg-paper px-2 py-1 text-[13px] text-ink outline-none placeholder:text-ink-faint"
+          />
+          <span className="font-mono text-[11px] text-ink-mute">
+            ≈{narrationSeconds(snippetText.trim()).toFixed(1)}s
+          </span>
+          <button
+            type="submit"
+            disabled={!snippetText.trim()}
+            className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper disabled:opacity-50"
+          >
+            Place
+          </button>
+          <button
+            type="button"
+            className="rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper"
+            onClick={() => setSnippetText(null)}
+          >
+            Cancel
+          </button>
+        </form>
+      )}
+
+      {placing && (
         // Sticky so the "what am I placing" cue stays put as the long grid below
         // scrolls. `--diff-sticky-top` (set by the page) parks it just under the
         // sticky scene tabs; falls back to the header height alone. Frosted +
         // z-20 so grid rows scroll cleanly beneath it (under the tabs at z-30).
         <div className="sticky top-[var(--diff-sticky-top,3.5rem)] z-20 flex flex-wrap items-center gap-3 border-b rule bg-voice/20 px-5 py-2 text-[12.5px] text-ink-soft backdrop-blur">
           <span>
-            Placing <span className="font-mono text-voice-ink">{clipDuration.toFixed(1)}s</span> of
-            original audio — click anywhere on the New pane to drop it.{' '}
-            <span className="text-voice-ink">Green</span> gaps land clean; dropping on a run flags
-            an overlap to resolve.
+            Placing <span className="font-mono text-voice-ink">{placeDuration.toFixed(1)}s</span>{' '}
+            {pendingSnippet ? 'snippet — click the New pane to drop it' : 'of original audio'}
           </span>
           <button
             type="button"
             className="ml-auto rounded border border-paper-line px-2 py-0.5 text-[11px] text-ink hover:bg-paper"
-            onClick={() => setPendingClip(null)}
+            onClick={() => {
+              setPendingClip(null)
+              setPendingSnippet(null)
+            }}
           >
             Cancel (Esc)
           </button>
@@ -776,7 +862,9 @@ function CollapsedRail({ label, onExpand }: { label: string; onExpand: () => voi
  */
 type CellEdit = {
   mode: 'cut' | 'select' | 'place'
-  onCellDown?: (time: number, isCut: boolean) => void
+  /** `extend` = shift was held — select mode grows the grabbed span to this cell
+   *  instead of starting a fresh selection. */
+  onCellDown?: (time: number, isCut: boolean, extend?: boolean) => void
   onCellEnter?: (time: number) => void
   onCellClick?: (time: number) => void
   /** A span to outline: the cut being painted, the original span being grabbed,
@@ -863,6 +951,9 @@ function Filmstrip({
     return rows
   }, [segments, secondsPerLine])
 
+  // Click a thumbnail to inspect it full-size (the strip is only 150px wide).
+  const [zoomFrame, setZoomFrame] = useState<FilmFrame | null>(null)
+
   return (
     <div className="bg-paper">
       {/* header height matches a Pane header so row 0 aligns across the columns */}
@@ -886,23 +977,66 @@ function Filmstrip({
                   neighbours, with a slight border. In tall-rows mode the cell is
                   already the full frame height, so the whole frame just shows. */}
               <div className="border-t border-paper-line/60">
-                <div
-                  className="group relative overflow-hidden bg-paper-deep hover:z-10 hover:overflow-visible"
-                  style={{ width: FILMSTRIP_WIDTH, height: rowHeight }}
-                >
-                  {frame && frame.sheet.width > 0 ? (
+                {frame && frame.sheet.width > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setZoomFrame(frame)}
+                    title="Click to view full-size"
+                    aria-label={`View frame at ${formatClock(line.startSec)} full-size`}
+                    className="group relative block cursor-zoom-in appearance-none overflow-hidden border-0 bg-paper-deep p-0 outline-none hover:z-10 hover:overflow-visible"
+                    style={{ width: FILMSTRIP_WIDTH, height: rowHeight }}
+                  >
                     <div
                       className="absolute left-0 top-1/2 -translate-y-1/2 bg-paper-deep ring-ink-faint transition-shadow group-hover:ring-1 group-hover:shadow-lg group-hover:shadow-ink/30"
                       style={spriteStyle(frame, FILMSTRIP_WIDTH)}
                     />
-                  ) : null}
-                </div>
+                  </button>
+                ) : (
+                  <div className="bg-paper-deep" style={{ width: FILMSTRIP_WIDTH, height: rowHeight }} />
+                )}
               </div>
             </div>
           )
         })}
       </div>
+      {zoomFrame && <FrameZoomDialog frame={zoomFrame} onClose={() => setZoomFrame(null)} />}
     </div>
+  )
+}
+
+/**
+ * Lightbox for one filmstrip frame: the same contact-sheet sprite crop, just
+ * rendered big (no new image fetch — the sheet is already loaded). Native
+ * `<dialog>`: Esc / backdrop / ✕ all close it.
+ */
+function FrameZoomDialog({ frame, onClose }: { frame: FilmFrame; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dlg = ref.current
+    if (dlg && !dlg.open) dlg.showModal()
+  }, [])
+  // Sized once on open — as big as the viewport comfortably allows.
+  const width = Math.min(window.innerWidth * 0.92, 960)
+  return (
+    <dialog
+      ref={ref}
+      onClick={(e) => {
+        if (e.target === ref.current) onClose()
+      }}
+      onCancel={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+      className="m-auto rounded-lg border border-paper-line bg-paper p-0 shadow-xl backdrop:bg-ink/70"
+    >
+      <div className="flex items-center justify-between gap-4 border-b border-paper-line px-4 py-2">
+        <span className="meta-label">Frame · {formatClock(frame.time)}</span>
+        <button type="button" className="pill-ghost" onClick={onClose} aria-label="Close frame view">
+          ✕
+        </button>
+      </div>
+      <div className="overflow-hidden bg-ink" style={spriteStyle(frame, width)} />
+    </dialog>
   )
 }
 
@@ -1136,7 +1270,7 @@ function Row({
               draggable
                 ? (e) => {
                     e.preventDefault() // don't start a text selection while dragging
-                    edit?.onCellDown?.(time, cutCols[col])
+                    edit?.onCellDown?.(time, cutCols[col], e.shiftKey)
                   }
                 : undefined
             }
