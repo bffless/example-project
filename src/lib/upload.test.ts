@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { presignedUpload } from './upload'
+import { presignedUpload, toSignedUrl } from './upload'
 
 const ok = (body: unknown) =>
   ({ ok: true, status: 200, json: async () => body }) as Response
@@ -83,5 +83,24 @@ describe('presignedUpload', () => {
     await expect(presignedUpload(file, '/api/uploads/source')).rejects.toThrow(
       /missing url/,
     )
+  })
+})
+
+describe('toSignedUrl', () => {
+  it('reads the flat url', () => {
+    expect(toSignedUrl({ url: 'https://storage.googleapis.com/bucket/o?sig=x' })).toBe(
+      'https://storage.googleapis.com/bucket/o?sig=x',
+    )
+  })
+
+  it('reads the nested data.url shape', () => {
+    expect(toSignedUrl({ data: { url: 'https://bucket/signed' } })).toBe('https://bucket/signed')
+  })
+
+  it('throws on a missing, empty, or non-string url', () => {
+    expect(() => toSignedUrl({})).toThrow(/missing url/)
+    expect(() => toSignedUrl({ url: '' })).toThrow(/missing url/)
+    expect(() => toSignedUrl({ url: 42 })).toThrow(/missing url/)
+    expect(() => toSignedUrl(null)).toThrow(/missing url/)
   })
 })
