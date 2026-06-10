@@ -17,7 +17,8 @@ function audioCtx(): AudioContext {
 }
 
 /** Fetch + decode one clip; a failure resolves to null → that clip is silence
- *  in the preview (the assembler's "never reference a missing input" rule). */
+ *  in the preview (the assembler's "never reference a missing input" rule).
+ *  Failures are NOT cached — a transient network error can retry on the next play. */
 function loadBuffer(url: string): Promise<AudioBuffer | null> {
   let p = bufferCache.get(url)
   if (!p) {
@@ -27,7 +28,10 @@ function loadBuffer(url: string): Promise<AudioBuffer | null> {
         return res.arrayBuffer()
       })
       .then((bytes) => audioCtx().decodeAudioData(bytes))
-      .catch(() => null)
+      .catch(() => {
+        bufferCache.delete(url)
+        return null
+      })
     bufferCache.set(url, p)
   }
   return p
@@ -60,6 +64,7 @@ export function usePreviewTransport(events: AudioEvent[], duration: number): Pre
   const [failed, setFailed] = useState(0)
 
   const playingRef = useRef(false)
+  const loadingRef = useRef(false)
   const offsetRef = useRef(0)
   const startedAtRef = useRef(0)
   const nodesRef = useRef<AudioBufferSourceNode[]>([])
@@ -92,29 +97,40 @@ export function usePreviewTransport(events: AudioEvent[], duration: number): Pre
     return Math.min(Math.max(sharedCtx.currentTime - startedAtRef.current, 0), duration)
   }, [duration])
 
-  const halt = useCallback(() => {
+  const stop = useCallback(() => {
     tokenRef.current++
     offsetRef.current = clock()
     stopNodes()
+    loadingRef.current = false
     setIsPlaying(false)
     setLoading(false)
   }, [clock])
 
   const play = useCallback(
     async (offset: number) => {
+      loadingRef.current = true
+      offsetRef.current = offset
       const token = ++tokenRef.current
       setLoading(true)
       const pairs = await Promise.all(
         events.map(async (e) => [e.audioUrl, await loadBuffer(e.audioUrl)] as const),
       )
       if (token !== tokenRef.current) return
+      const ctx = audioCtx()
+      try {
+        await ctx.resume()
+      } catch {
+        if (token === tokenRef.current) {
+          loadingRef.current = false
+          setLoading(false)
+        }
+        return
+      }
+      if (token !== tokenRef.current) return
+      loadingRef.current = false
       setLoading(false)
       setFailed(pairs.filter(([, buf]) => !buf).length)
       const buffers = new Map(pairs)
-
-      const ctx = audioCtx()
-      await ctx.resume()
-      if (token !== tokenRef.current) return
 
       // A small lead so every node's start time is still in the future when set.
       const base = ctx.currentTime + 0.05
@@ -128,35 +144,37 @@ export function usePreviewTransport(events: AudioEvent[], duration: number): Pre
         nodesRef.current.push(node)
       }
       startedAtRef.current = base - offset
-      offsetRef.current = offset
       setIsPlaying(true)
 
       const remaining = Math.max(0, duration - offset)
-      endTimerRef.current = window.setTimeout(
-        () => {
-          stopNodes()
-          offsetRef.current = duration
-          setIsPlaying(false)
-        },
-        remaining * 1000 + 100,
-      )
+      endTimerRef.current = window.setTimeout(function onEnd() {
+        const left = duration - (sharedCtx ? sharedCtx.currentTime - startedAtRef.current : duration)
+        if (left > 0.05) {
+          endTimerRef.current = window.setTimeout(onEnd, left * 1000 + 100)
+          return
+        }
+        stopNodes()
+        offsetRef.current = duration
+        setIsPlaying(false)
+      }, remaining * 1000 + 100)
     },
     [events, duration],
   )
 
   const toggle = useCallback(() => {
-    if (playingRef.current) {
-      halt()
+    if (playingRef.current || loadingRef.current) {
+      stop()
       return
     }
     const from = offsetRef.current >= duration ? 0 : offsetRef.current
+    void audioCtx().resume()
     void play(from)
-  }, [duration, halt, play])
+  }, [duration, stop, play])
 
   const seek = useCallback(
     (t: number) => {
       const clamped = Math.min(Math.max(t, 0), duration)
-      if (playingRef.current) {
+      if (playingRef.current || loadingRef.current) {
         tokenRef.current++
         stopNodes()
         setIsPlaying(false)
@@ -168,9 +186,17 @@ export function usePreviewTransport(events: AudioEvent[], duration: number): Pre
     [duration, play],
   )
 
-  // Hard stop on unmount (dialog closed) so nothing keeps playing.
-  const stop = halt
-  useEffect(() => () => halt(), [halt])
+  // Mount-only unmount: always calls the latest stop without re-registering the
+  // effect when stop's identity changes (which would fire the cleanup mid-session).
+  const stopRef = useRef(stop)
+  stopRef.current = stop
+  useEffect(() => () => stopRef.current(), [])
+
+  // An edit changed the timeline while it was playing/loading — the scheduled
+  // nodes are stale. Stop; the producer presses play again on the new plan.
+  useEffect(() => {
+    if (playingRef.current || loadingRef.current) stopRef.current()
+  }, [events, duration])
 
   return { playing, loading, failed, clock, toggle, seek, stop }
 }
