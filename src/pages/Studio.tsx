@@ -25,7 +25,8 @@ import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
-import { useSignDownloadQuery, useLazySignDownloadQuery } from '../store/studioApi'
+import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMutation } from '../store/studioApi'
+import { buildSearchRequest, toSearchHits } from '../lib/search'
 import { skipToken } from '@reduxjs/toolkit/query'
 import { studioPhase, type StudioPhase } from '../lib/pipeline'
 
@@ -280,6 +281,21 @@ export function Studio() {
       if (owner) pipe.addSnippet(owner.id, text, dropStart)
     },
     [pipe],
+  )
+
+  // Transcript search (story 08): whole-talk, so it uses pipe.words (the FULL
+  // transcript), not the scene slice the diff renders. Hits come back through
+  // the shared coercion and get the owning scene's title for the results list.
+  const [searchTranscript] = useSearchTranscriptMutation()
+  const onSearch = useCallback(
+    async (query: string) => {
+      const raw = await searchTranscript(buildSearchRequest(query, pipe.words, duration)).unwrap()
+      return toSearchHits(raw, duration).map((h) => ({
+        ...h,
+        sceneTitle: sceneAtTime(pipe.scenes, h.start)?.title,
+      }))
+    },
+    [searchTranscript, pipe.words, pipe.scenes, duration],
   )
 
   const phase = studioPhase({
@@ -578,6 +594,7 @@ export function Studio() {
                     dropTargets={gapSpans}
                     onAdoptOriginal={onAdoptOriginal}
                     onAddSnippet={onAddSnippet}
+                    onSearch={onSearch}
                     onDeleteSegment={pipe.deleteSegment}
                     onMoveRun={pipe.moveRun}
                     overlaps={overlapSpans}
