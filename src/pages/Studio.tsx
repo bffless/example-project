@@ -25,6 +25,8 @@ import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
+import { useSignDownloadQuery, useLazySignDownloadQuery } from '../store/studioApi'
+import { skipToken } from '@reduxjs/toolkit/query'
 import { studioPhase, type StudioPhase } from '../lib/pipeline'
 
 export function Studio() {
@@ -83,8 +85,14 @@ export function Studio() {
   const hasPersisted = !!pipe.sourceUrl || pipe.scenes.length > 0
   const hasSource = !!file || hasPersisted
   // What the <video> plays: the local object URL when present, else the persisted
-  // serve path (proxies to the bucket). Null only before anything is loaded.
-  const previewSrc = url ?? pipe.sourceUrl
+  // source SIGNED into a direct bucket URL — the raw serve path must never be a
+  // media src (streaming ~280 MB through file_serve 504s/OOMs the backend).
+  // Null only before anything is loaded / while the signature is in flight.
+  const { data: signedSource } = useSignDownloadQuery(
+    !url && pipe.sourceUrl ? pipe.sourceUrl : skipToken,
+  )
+  const previewSrc = url ?? signedSource?.url ?? null
+  const [signSourceUrl] = useLazySignDownloadQuery()
 
   const onLoaded = useCallback((d: number) => dispatch(setDuration(d)), [dispatch])
   // The Build preview plays the selected scene's own clip once it's cut (story
@@ -124,7 +132,10 @@ export function Studio() {
     setRehydrating(true)
     setRestoreError(null)
     try {
-      const res = await fetch(pipe.sourceUrl, { credentials: 'include' })
+      // Sign first and pull straight from the bucket — no `credentials`, it's a
+      // presigned URL and cookies would fail the cross-origin CORS check.
+      const { url: signed } = await signSourceUrl(pipe.sourceUrl, true).unwrap()
+      const res = await fetch(signed)
       if (!res.ok) throw new Error(`Couldn't load the saved clip (${res.status})`)
       const blob = await res.blob()
       const f = new File([blob], fileName ?? 'clip', { type: blob.type || 'video/mp4' })

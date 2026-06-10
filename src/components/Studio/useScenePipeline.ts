@@ -30,6 +30,7 @@ import {
   useRefineSceneMutation,
   useNarrateMutation,
   useUploadMutation,
+  useLazySignDownloadQuery,
   useVoiceCloneMutation,
   useVoiceSayMutation,
 } from '../../store/studioApi'
@@ -178,6 +179,17 @@ export function useScenePipeline() {
   const [uploadReq] = useUploadMutation()
   const [voiceCloneReq] = useVoiceCloneMutation()
   const [voiceSayReq] = useVoiceSayMutation()
+  const [signReq] = useLazySignDownloadQuery()
+
+  // The raw source (~hundreds of MB) must never stream through the file_serve
+  // pipeline — it 504s/OOMs the backend. Every read of `sourceUrl` swaps it for
+  // a time-limited direct bucket URL first (`preferCacheValue` reuses the cached
+  // signature across sheet capture, slicing, and the preview within its 1 h life).
+  const signedSourceUrl = useCallback(async () => {
+    if (!sourceUrl) throw new Error('No source clip available.')
+    const { url } = await signReq(sourceUrl, true).unwrap()
+    return url
+  }, [signReq, sourceUrl])
 
   // Transient UI state — not persisted.
   const [voicingId, setVoicingId] = useState<string | null>(null)
@@ -626,7 +638,7 @@ export function useScenePipeline() {
       setSheetingId(id)
       setSceneError(null)
       try {
-        const sheets = await captureSceneContactSheet(sourceUrl, scene.start, scene.end)
+        const sheets = await captureSceneContactSheet(await signedSourceUrl(), scene.start, scene.end)
         const uploaded: ContactSheet[] = []
         for (const sheet of sheets) {
           const blob = await (await fetch(sheet.dataUrl)).blob()
@@ -644,7 +656,7 @@ export function useScenePipeline() {
         setSheetingId(null)
       }
     },
-    [sheetingId, refiningId, scenes, sourceUrl, uploadReq, patchScene],
+    [sheetingId, refiningId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
   )
 
   // Button 2: hand the scene's transcript + the director's first-pass
@@ -774,7 +786,9 @@ export function useScenePipeline() {
         const source = file
           ? new Uint8Array(await file.arrayBuffer())
           : sourceUrl
-            ? new Uint8Array(await (await fetch(sourceUrl, { credentials: 'include' })).arrayBuffer())
+            ? // Direct bucket read — no `credentials`, it's a presigned URL, and
+              // sending cookies cross-origin would fail the CORS check.
+              new Uint8Array(await (await fetch(await signedSourceUrl())).arrayBuffer())
             : null
         if (!source) throw new Error('No source clip available to cut from.')
 
@@ -793,7 +807,7 @@ export function useScenePipeline() {
         setSlicingId(null)
       }
     },
-    [slicingId, scenes, sourceUrl, uploadReq, patchScene],
+    [slicingId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
   )
 
   // Delete one New-pane run, reopening its gap (story 03d) — e.g. to clear room

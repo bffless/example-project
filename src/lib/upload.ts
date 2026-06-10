@@ -20,6 +20,26 @@
  * dev — restored in story 07's billing gate.
  */
 
+/** The `/api/uploads/sign` response — read flexibly like RegisterResponse. */
+type SignResponse = {
+  url?: string
+  data?: { url?: string }
+}
+
+/**
+ * Coerce the `/api/uploads/sign` response into the signed download URL. Mock and
+ * real both pass through here (the swap-don't-rewrite shape contract). Throws if
+ * there's no usable URL so callers surface a real error instead of fetching ''.
+ */
+export function toSignedUrl(raw: unknown): string {
+  const res = (raw ?? {}) as SignResponse
+  const url = res.url ?? res.data?.url
+  if (typeof url !== 'string' || url === '') {
+    throw new Error('Sign response missing url')
+  }
+  return url
+}
+
 type PrepareResponse = {
   uploadUrl?: string
   storageKey?: string

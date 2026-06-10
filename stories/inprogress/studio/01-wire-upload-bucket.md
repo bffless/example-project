@@ -76,3 +76,26 @@ Transcription (02), billing gate (07 — leave a TODO at `auth_required`).
 - **Dev proxy:** `vite.config.ts` points `/api` + `/_bffless` at
   `https://j5s.dev`. The `studio` rule set is attached to **both** the `preview`
   and `production` aliases.
+
+## Addendum (2026-06-10): signed downloads — `POST /api/uploads/sign`
+
+Reading a big object back has the same constraint as writing one: the
+`file_serve` route (`GET /api/uploads/source/*`, rule `b22c0d1a`) streams the
+object **through the backend**, which 504s/OOM-kills the 192 MiB-capped node
+process on a ~280 MB source (platform bug, range path has no backpressure:
+[bffless/ce#317](https://github.com/bffless/ce/issues/317)).
+
+- `POST /api/uploads/sign` (rule `1ffbbbaf`) — `function_handler` resolvePath
+  (restricts to `/api/uploads/*`, strips traversal) → `signed_url` (1 h) →
+  `{ url, expiresIn }`. Mirrors the transcribe rule's resolvePath→sign steps.
+- Front-end: `signDownload` RTK Query endpoint (`studioApi.ts`, coerced by
+  `toSignedUrl` in `lib/upload.ts`); **every** read of the raw source goes
+  through it — `rehydrateClip` + the restored-session preview `<video>`
+  (`Studio.tsx`), per-scene sheet capture + clip slicing (`useScenePipeline`).
+  Bucket reads are `fetch(signed)` with **no credentials**. Small assets
+  (sheets, audio, narration, clips) still use the serve routes.
+- Bucket CORS already allows `GET` from `localhost:5173` and the prod origins
+  (verified via preflight) — needed for `<video crossOrigin="anonymous">`
+  frame capture off the signed URL.
+- **⚠️ `auth_required` off** here too (same local-dev carve-out) — story 07
+  restores it alongside prepare/register.

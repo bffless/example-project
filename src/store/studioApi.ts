@@ -12,7 +12,7 @@
  */
 
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
-import { presignedUpload } from '../lib/upload'
+import { presignedUpload, toSignedUrl } from '../lib/upload'
 import type { TranscriptWord } from './studioSlice'
 import type { DirectorRequest, DirectorScene } from '../lib/director'
 import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
@@ -134,6 +134,23 @@ export const studioApi = createApi({
       }),
     }),
 
+    // Sign a persisted `/api/uploads/...` serve path into a time-limited direct
+    // bucket URL. The serve pipeline streams the object through the BFFless
+    // backend, which 504s/OOMs on big files (the ~280 MB source video) — so every
+    // read of the raw source goes through here and hits the bucket directly,
+    // mirroring how uploads bypass the 1 MB body cap. Signed URLs live 1 h;
+    // keep cache entries most of that so repeated reads (scene sheets, slicing,
+    // the restored-session preview) reuse one URL.
+    signDownload: builder.query<{ url: string }, string>({
+      query: (url) => ({
+        url: 'api/uploads/sign',
+        method: 'POST',
+        body: { url },
+      }),
+      transformResponse: (raw: unknown) => ({ url: toSignedUrl(raw) }),
+      keepUnusedDataFor: 45 * 60,
+    }),
+
     upload: builder.mutation<{ url: string }, { file: File; kind: UploadKind }>({
       async queryFn({ file, kind }) {
         try {
@@ -157,6 +174,8 @@ export const {
   useScenesMutation,
   useRefineSceneMutation,
   useLazyGetStudioJobQuery,
+  useSignDownloadQuery,
+  useLazySignDownloadQuery,
   useNarrateMutation,
   useUploadMutation,
   useVoiceCloneMutation,

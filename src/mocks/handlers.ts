@@ -79,6 +79,16 @@ const studioHandlers = [
     })
   }),
 
+  // Sign a serve path for direct bucket reads (mirrors `/api/uploads/sign`,
+  // which mints a presigned GCS download URL so big objects never stream through
+  // the serve pipeline). The mock has no bucket — objects serve from the
+  // in-memory store via the route below — so signing is identity.
+  http.post('/api/uploads/sign', async ({ request }) => {
+    const { url } = (await request.json().catch(() => ({}))) as { url?: string }
+    if (!url) return new HttpResponse(null, { status: 400 })
+    return HttpResponse.json({ url, expiresIn: 3600 })
+  }),
+
   // Serve an uploaded object back (mirrors the real `file_serve` route). Returns
   // the stored bytes, or 404 if they weren't kept / the worker restarted.
   http.get('/api/uploads/:kind/*', ({ request }) => {
