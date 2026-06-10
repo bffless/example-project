@@ -16,6 +16,7 @@ import { presignedUpload, toSignedUrl } from '../lib/upload'
 import type { TranscriptWord } from './studioSlice'
 import type { DirectorRequest, DirectorScene } from '../lib/director'
 import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
+import type { SearchRequest } from '../lib/search'
 
 export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export' | 'scene-clip'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
@@ -111,6 +112,19 @@ export const studioApi = createApi({
       }),
     }),
 
+    // Transcript search (story 08): one text-only LLM read of the timestamped
+    // transcript → spans matching the producer's query. SYNC — no images, so
+    // it returns in seconds (no 03f jobs flow). The raw blob goes through
+    // `toSearchHits` at the call site; results are transient UI, never
+    // persisted to the slice.
+    searchTranscript: builder.mutation<unknown, SearchRequest>({
+      query: (body) => ({
+        url: 'api/search-transcript',
+        method: 'POST',
+        body,
+      }),
+    }),
+
     // Voice clone (story 04): POST the uploaded recording's URL → a reusable
     // voiceId. The real $3 Replicate clone is DISABLED server-side for now — the
     // pipeline returns a real preset id as a stub, so the rest of the flow (and
@@ -177,6 +191,7 @@ export const {
   useSignDownloadQuery,
   useLazySignDownloadQuery,
   useNarrateMutation,
+  useSearchTranscriptMutation,
   useUploadMutation,
   useVoiceCloneMutation,
   useVoiceSayMutation,
