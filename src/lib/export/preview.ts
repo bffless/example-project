@@ -45,3 +45,23 @@ export function audioEvents(plan: AssemblePlan, segments: PreviewSegment[]): Aud
   }
   return events
 }
+
+/**
+ * Map an output-timeline second to ORIGINAL-VIDEO seconds, for the filmstrip
+ * lookup. Walks `plan.video` (kept source spans, clip-local time) accumulating
+ * piece lengths; `sceneStart` lifts the clip-local result back to the original
+ * timeline (`planScene` rebased everything by subtracting it). `t` clamps to
+ * `[0, plan.duration]`; an all-cut plan (no video) returns `sceneStart`.
+ */
+export function sourceTimeAt(plan: AssemblePlan, t: number, sceneStart: number): number {
+  const last = plan.video[plan.video.length - 1]
+  if (!last) return sceneStart
+  const clamped = Math.min(Math.max(t, 0), plan.duration)
+  let acc = 0
+  for (const piece of plan.video) {
+    const len = piece.end - piece.start
+    if (clamped <= acc + len) return sceneStart + piece.start + (clamped - acc)
+    acc += len
+  }
+  return sceneStart + last.end
+}

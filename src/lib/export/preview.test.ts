@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { planScene, type AssemblePlan } from './assemble'
-import { audioEvents } from './preview'
+import { audioEvents, sourceTimeAt } from './preview'
 
 /** A voiced segment (has an audio clip) over `[start, end]`, original-video seconds. */
 function seg(start: number, end: number, audioSeconds = end - start) {
@@ -67,5 +67,32 @@ describe('audioEvents — clip offsets on the output timeline', () => {
     expect(audioEvents(plan, segments)).toEqual([
       { segmentIndex: 0, audioUrl: 'clip-102-106.wav', offset: 2, duration: 4 },
     ])
+  })
+})
+
+describe('sourceTimeAt — output clock → original-video seconds for the flipbook', () => {
+  it('with no cuts the mapping is identity (plus the scene offset)', () => {
+    const plan = planScene({ segments: [seg(0, 10)], cuts: [], start: 0, end: 10 })
+    expect(sourceTimeAt(plan, 3, 0)).toBe(3)
+    expect(sourceTimeAt(plan, 3, 100)).toBe(103)
+  })
+
+  it('jumps across a cut: output time past the first kept piece lands after the cut', () => {
+    // Kept 0–5, cut 5–8, kept 8–10 → output [0,7]; t=5 is the cut boundary → source 8.
+    const plan = planScene({ segments: [seg(0, 10)], cuts: [{ start: 5, end: 8 }], start: 0, end: 10 })
+    expect(sourceTimeAt(plan, 4, 0)).toBe(4)
+    expect(sourceTimeAt(plan, 5, 0)).toBe(5) // boundary belongs to the earlier piece's end
+    expect(sourceTimeAt(plan, 6, 0)).toBe(9) // 1s into the second kept piece (starts at 8)
+  })
+
+  it('clamps t to [0, duration]', () => {
+    const plan = planScene({ segments: [seg(0, 10)], cuts: [{ start: 5, end: 8 }], start: 0, end: 10 })
+    expect(sourceTimeAt(plan, -1, 0)).toBe(0)
+    expect(sourceTimeAt(plan, 99, 0)).toBe(10) // end of the last kept piece
+  })
+
+  it('an empty plan returns the scene start', () => {
+    const plan = planScene({ segments: [], cuts: [{ start: 0, end: 10 }], start: 0, end: 10 })
+    expect(sourceTimeAt(plan, 0, 100)).toBe(100)
   })
 })
