@@ -9,6 +9,8 @@ export type SegmentControl = {
   index: number
   /** Anchor time (original-video seconds) — places the control on its row. */
   start: number
+  /** The run's end — `end - start` is the duration a move preserves (story 03h). */
+  end: number
   text: string
   audioUrl?: string
   audioSeconds?: number
@@ -26,6 +28,9 @@ type Props = {
   onPlay: (url: string) => void
   /** Delete this run, reopening its gap (story 03d). */
   onDelete: () => void
+  /** Begin a move drag (story 03h): pointer-down on the ⠿ handle, drag over the
+   *  grid to re-time the run. Omit to hide the handle. */
+  onMoveStart?: () => void
 }
 
 /** How the run was voiced, for the inline label. */
@@ -43,9 +48,11 @@ const btn =
  * run's start row. Two ways to voice a run: **record it yourself** (mic, so it's
  * actually you) or **AI-generate** it in the saved voice. Once voiced, a play
  * button + length + source ("you"/"AI") show, with re-record / re-AI. Kept to one
- * row tall so the two diff panes stay aligned.
+ * row tall so the two diff panes stay aligned. This row doubles as the run's
+ * **drag handle** (story 03h) — chosen so moving never collides with
+ * cut-painting, which owns pointer-drags that start on the grid cells.
  */
-export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete }: Props) {
+export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete, onMoveStart }: Props) {
   const recorder = useRecorder()
   const submitted = useRef(false)
 
@@ -64,6 +71,20 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
 
   return (
     <div className="flex h-9 items-center gap-2 overflow-hidden border-t border-paper-line/60 bg-paper-deep/40 px-2 text-[11px]">
+      {onMoveStart && (
+        <span
+          role="button"
+          aria-label="Drag to move this run"
+          title="Drag up or down over the grid to re-time this run"
+          onPointerDown={(e) => {
+            e.preventDefault() // no text selection while dragging
+            onMoveStart()
+          }}
+          className="-mx-1 cursor-grab select-none px-1 text-[13px] leading-none text-ink-faint transition-colors hover:text-ink active:cursor-grabbing"
+        >
+          ⠿
+        </span>
+      )}
       <span className="font-mono text-[10px] uppercase tracking-wide text-ink-faint">voice</span>
 
       {recorder.status === 'recording' ? (

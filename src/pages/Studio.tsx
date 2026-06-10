@@ -7,7 +7,7 @@ import { MediaImport } from '../components/Studio/MediaImport'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
-import { effectiveCuts, effectiveSegments, segmentsToTimedWords, gaps } from '../lib/refiner'
+import { effectiveCuts, effectiveSegments, segmentsToTimedWords, gaps, overlaps } from '../lib/refiner'
 import { sceneAtTime } from '../lib/scenes'
 import { buildFilmstrip } from '../lib/filmstrip'
 import type { CutSpan } from '../lib/transcriptGrid'
@@ -214,6 +214,7 @@ export function Studio() {
             sceneId: selected.id,
             index: i,
             start: seg.start,
+            end: seg.end,
             text: seg.text,
             audioUrl: seg.audioUrl,
             audioSeconds: seg.audioSeconds,
@@ -236,10 +237,17 @@ export function Studio() {
     [pipe],
   )
 
-  // Empty gaps on the selected scene's New timeline an original-audio clip can be
-  // dropped into.
+  // Empty gaps on the selected scene's New timeline — since 03h just the
+  // lands-clean hint for a drop (glow + preview tint), not a gate.
   const gapSpans = useMemo(
     () => (selected ? gaps(effectiveSegments(selected), selected) : []),
+    [selected],
+  )
+
+  // Where the selected scene's runs overlap (story 03h) — the amber conflict
+  // fill in the diff viewer; assemble stays blocked while any remain.
+  const overlapSpans = useMemo(
+    () => (selected ? overlaps(effectiveSegments(selected)) : []),
     [selected],
   )
 
@@ -546,6 +554,8 @@ export function Studio() {
                     dropTargets={gapSpans}
                     onAdoptOriginal={onAdoptOriginal}
                     onDeleteSegment={pipe.deleteSegment}
+                    onMoveRun={pipe.moveRun}
+                    overlaps={overlapSpans}
                     frames={filmstrip}
                     duration={duration}
                     windowStart={selected.start}

@@ -39,12 +39,22 @@ type Props = {
    *  grid read-only (the prep previews). */
   onEditCut?: (span: CutSpan, op: 'add' | 'remove') => void
   /** Adopt a span of the ORIGINAL audio as a New-pane run (story 03d): drag-select
-   *  a range on the Original pane to grab it, then click a glowing gap on the New
-   *  pane to drop it. `dropTargets` are the empty gaps it may land in. */
+   *  a range on the Original pane to grab it, then click the New pane to drop it
+   *  anywhere in the scene (story 03h — overlap allowed, clamped to the window).
+   *  `dropTargets` are the empty gaps, kept as a lands-clean hint (glow + preview
+   *  tint), no longer a gate. */
   dropTargets?: CutSpan[]
   onAdoptOriginal?: (origStart: number, origEnd: number, dropStart: number) => void
   /** Delete a New-pane run (reopens its gap to make room). */
   onDeleteSegment?: (sceneId: string, index: number) => void
+  /** Move a New-pane run (story 03h): vertical pointer-drag on its voice-control
+   *  row → a snapped new start, clamped so the run never passes the scene end.
+   *  Omit to make runs immovable. */
+  onMoveRun?: (sceneId: string, index: number, newStart: number) => void
+  /** Overlapping run spans (story 03h) — painted as a distinct amber conflict
+   *  fill on the New pane, with an "N to resolve" note by its header. Overlap is
+   *  a legal in-progress state; assemble is gated on it elsewhere. */
+  overlaps?: CutSpan[]
   /** Contact-sheet frames (story 03e) for the time-aligned filmstrip gutter down
    *  the left of the viewer. Empty ⇒ no gutter (e.g. before thumbnails exist). */
   frames?: FilmFrame[]
@@ -127,6 +137,8 @@ type Controls = {
   onRecord: (sceneId: string, index: number, blob: Blob) => void
   onPlay: (url: string) => void
   onDelete: (sceneId: string, index: number) => void
+  /** Begin a move drag from this run's voice-control row (story 03h). */
+  onMoveStart?: (seg: SegmentControl) => void
 }
 
 /**
@@ -150,6 +162,8 @@ export function TranscriptDiff({
   dropTargets = [],
   onAdoptOriginal,
   onDeleteSegment,
+  onMoveRun,
+  overlaps = [],
   frames = [],
   duration = 0,
   windowStart = 0,
@@ -170,6 +184,12 @@ export function TranscriptDiff({
   const containerRef = useRef<HTMLDivElement>(null)
   const [leftPct, setLeftPct] = useState(readSplit)
   const [resizing, setResizing] = useState(false)
+
+  // Fully collapse one pane (the divider only drags so far) — a header button
+  // hides it and a slim labelled rail stays in its place to bring it back, so
+  // there's always a way to uncollapse. Setting one side reopens the other, so
+  // the viewer can never end up with zero panes. Transient view state.
+  const [collapsed, setCollapsed] = useState<'left' | 'right' | null>(null)
 
   useEffect(() => {
     if (!resizing) return
@@ -281,25 +301,74 @@ export function TranscriptDiff({
     return () => window.removeEventListener('keydown', onKey)
   }, [pendingClip])
 
+  // Drops and moves land anywhere in the scene window (story 03h) — the only
+  // constraint left is the within-scene clamp: shift the start so the footprint
+  // never passes the window end, floored at its start. (The model clamps to the
+  // scene again; this keeps the preview honest about where it will land.)
+  const clampPlace = useCallback(
+    (time: number, duration: number) => {
+      const hi = Number.isFinite(windowEnd) ? windowEnd - duration : time
+      return Math.max(windowStart, Math.min(time, hi))
+    },
+    [windowStart, windowEnd],
+  )
+
   const clipDuration = pendingClip ? pendingClip.end - pendingClip.start : 0
+  // Lands-clean hint (story 03h): no longer gates the drop, only tints the
+  // footprint preview green (fits a gap) vs terracotta (will overlap a run).
   const fitsAt = useCallback(
     (time: number) => dropTargets.some((g) => time >= g.start - 0.05 && time + clipDuration <= g.end + 0.05),
     [dropTargets, clipDuration],
   )
   const onDrop = useCallback(
     (time: number) => {
-      if (!pendingClip || !onAdoptOriginal || !fitsAt(time)) return
-      onAdoptOriginal(pendingClip.start, pendingClip.end, time)
+      if (!pendingClip || !onAdoptOriginal) return
+      onAdoptOriginal(pendingClip.start, pendingClip.end, clampPlace(time, clipDuration))
       setPendingClip(null)
     },
-    [pendingClip, onAdoptOriginal, fitsAt],
+    [pendingClip, onAdoptOriginal, clampPlace, clipDuration],
   )
 
-  // The footprint the clip would occupy at the hovered cell — same cell count as
-  // the Original-pane selection — green when it fits the gap, red when it doesn't.
+  // The footprint the clip would occupy at the hovered cell (clamped, so it shows
+  // exactly where the drop lands) — green when it fits a gap clean, terracotta
+  // when it will overlap a run. Both are droppable.
+  const placeStart = pendingClip && hoverTime != null ? clampPlace(hoverTime, clipDuration) : null
   const placePreview: CutSpan | null =
-    pendingClip && hoverTime != null ? { start: hoverTime, end: hoverTime + clipDuration } : null
-  const placeFits = hoverTime != null && fitsAt(hoverTime)
+    placeStart != null ? { start: placeStart, end: placeStart + clipDuration } : null
+  const placeFits = placeStart != null && fitsAt(placeStart)
+
+  // Move a run (story 03h): pointer-down on its voice-control row grabs it; the
+  // grid cells under the pointer report their time through the same pointerenter
+  // plumbing as cut-paint, previewing the run's new band; pointer-up commits the
+  // snapped, clamped move. Vertical drag on the control row, so it never collides
+  // with cut-painting (which owns drags that START on the cells).
+  const [moveSel, setMoveSel] = useState<{ sceneId: string; index: number; duration: number } | null>(null)
+  const [moveHover, setMoveHover] = useState<number | null>(null)
+
+  const onMoveStart = useCallback(
+    (seg: SegmentControl) => {
+      setMoveHover(null)
+      setMoveSel({ sceneId: seg.sceneId, index: seg.index, duration: seg.end - seg.start })
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!moveSel) return
+    const commit = () => {
+      if (moveHover != null && onMoveRun) {
+        onMoveRun(moveSel.sceneId, moveSel.index, clampPlace(moveHover, moveSel.duration))
+      }
+      setMoveSel(null)
+      setMoveHover(null)
+    }
+    window.addEventListener('pointerup', commit)
+    return () => window.removeEventListener('pointerup', commit)
+  }, [moveSel, moveHover, onMoveRun, clampPlace])
+
+  const moveStart = moveSel && moveHover != null ? clampPlace(moveHover, moveSel.duration) : null
+  const movePreview: CutSpan | null =
+    moveSel && moveStart != null ? { start: moveStart, end: moveStart + moveSel.duration } : null
 
   // The grabbed/selecting span to outline on the Original pane.
   const selPreview: CutSpan | null = pendingClip
@@ -321,21 +390,30 @@ export function TranscriptDiff({
       }
     : null
 
-  // RIGHT pane: place mode while a clip is grabbed, else cut-paint. In place mode
-  // the gaps are faintly tinted (glow) and a footprint preview tracks the cursor.
-  const rightEdit: CellEdit | null = pendingClip
+  // RIGHT pane: a run-move drag wins (its preview band tracks the cursor), then
+  // place mode while a clip is grabbed (gaps faintly tinted as the lands-clean
+  // hint, footprint preview under the cursor — any cell is droppable), else
+  // cut-paint.
+  const rightEdit: CellEdit | null = moveSel
     ? {
         mode: 'place',
-        onCellEnter: setHoverTime,
-        onCellClick: onDrop,
-        isValidDrop: fitsAt,
-        glow: dropTargets,
-        preview: placePreview,
-        previewKind: placePreview ? (placeFits ? 'place-ok' : 'place-bad') : null,
+        onCellEnter: setMoveHover,
+        glow: [],
+        preview: movePreview,
+        previewKind: movePreview ? 'place-ok' : null,
       }
-    : editable
-      ? { mode: 'cut', onCellDown, onCellEnter, preview: cutPending, previewKind: drag?.op ?? null, glow: [] }
-      : null
+    : pendingClip
+      ? {
+          mode: 'place',
+          onCellEnter: setHoverTime,
+          onCellClick: onDrop,
+          glow: dropTargets,
+          preview: placePreview,
+          previewKind: placePreview ? (placeFits ? 'place-ok' : 'place-bad') : null,
+        }
+      : editable
+        ? { mode: 'cut', onCellDown, onCellEnter, preview: cutPending, previewKind: drag?.op ?? null, glow: [] }
+        : null
 
   // Play the ORIGINAL scene audio from a clicked timestamp. The Original pane's
   // gutter timestamps are play buttons; clicking one seeks the whole-source WAV
@@ -422,6 +500,7 @@ export function TranscriptDiff({
         onRecord,
         onPlay: playClip,
         onDelete: onDeleteSegment ?? (() => {}),
+        onMoveStart: onMoveRun ? onMoveStart : undefined,
       }
     : null
 
@@ -448,8 +527,15 @@ export function TranscriptDiff({
             {segmentSeconds === 1 ? 'second' : `${segmentSeconds}s`} ·{' '}
             <span className="text-terracotta-ink">red</span> = cut ·{' '}
             <span className="text-voice-ink">green</span> = voiced
+            {overlaps.length > 0 && (
+              <>
+                {' · '}
+                <span className="text-amber-700">amber</span> = overlapping runs
+              </>
+            )}
             {editable && ' · drag empty cells to cut, drag red cells to un-cut'}
             {canAdopt && !pendingClip && ' · drag the Original to reuse its audio'}
+            {onMoveRun && segments.length > 0 && ' · drag a run’s ⠿ handle to re-time it'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 font-mono text-[12px] text-ink-mute">
@@ -489,8 +575,9 @@ export function TranscriptDiff({
         <div className="sticky top-[var(--diff-sticky-top,3.5rem)] z-20 flex flex-wrap items-center gap-3 border-b rule bg-voice/20 px-5 py-2 text-[12.5px] text-ink-soft backdrop-blur">
           <span>
             Placing <span className="font-mono text-voice-ink">{clipDuration.toFixed(1)}s</span> of
-            original audio — click a <span className="text-voice-ink">green</span> gap on the New
-            pane to drop it.
+            original audio — click anywhere on the New pane to drop it.{' '}
+            <span className="text-voice-ink">Green</span> gaps land clean; dropping on a run flags
+            an overlap to resolve.
           </span>
           <button
             type="button"
@@ -548,7 +635,16 @@ export function TranscriptDiff({
           className={['flex min-w-0 flex-1 flex-col lg:flex-row', resizing ? 'select-none' : ''].join(' ')}
           style={{ '--lw': `${leftPct}%` } as CSSProperties}
         >
-          <div className="min-w-0 border-b rule lg:basis-[var(--lw)] lg:shrink-0 lg:grow-0 lg:border-b-0">
+          {collapsed === 'left' ? (
+            <CollapsedRail label="Original" onExpand={() => setCollapsed(null)} />
+          ) : (
+            <div
+              className={[
+                'min-w-0 border-b rule lg:border-b-0',
+                // the other pane collapsed ⇒ take the whole row; else the split %
+                collapsed === 'right' ? 'lg:flex-1' : 'lg:basis-[var(--lw)] lg:shrink-0 lg:grow-0',
+              ].join(' ')}
+            >
           <Pane
             label="Original"
             sublabel="from transcription"
@@ -565,19 +661,27 @@ export function TranscriptDiff({
             rowHeight={rowHeight}
             onPlayFrom={originalAudioUrl ? playFrom : undefined}
             playheadSec={playheadSec}
+            onCollapse={() => setCollapsed('left')}
           />
         </div>
-        {/* drag handle — only meaningful in the lg side-by-side layout */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          onPointerDown={(e) => {
-            e.preventDefault()
-            setResizing(true)
-          }}
-          className="hidden shrink-0 cursor-col-resize bg-paper-line transition-colors hover:bg-terracotta/50 lg:block lg:w-1.5"
-        />
-        <div className="min-w-0 lg:flex-1">
+        )}
+        {/* drag handle — only meaningful in the lg side-by-side layout, and only
+            while both panes are open (collapse owns the all-the-way case) */}
+        {collapsed === null && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={(e) => {
+              e.preventDefault()
+              setResizing(true)
+            }}
+            className="hidden shrink-0 cursor-col-resize bg-paper-line transition-colors hover:bg-terracotta/50 lg:block lg:w-1.5"
+          />
+        )}
+        {collapsed === 'right' ? (
+          <CollapsedRail label="New" onExpand={() => setCollapsed(null)} />
+        ) : (
+          <div className="min-w-0 lg:flex-1">
           <Pane
             label="New"
             sublabel={editedWords ? 'shortened' : 'copy — shorten in prep'}
@@ -585,6 +689,7 @@ export function TranscriptDiff({
             secondsPerLine={secondsPerLine}
             segmentSeconds={segmentSeconds}
             cuts={cuts}
+            overlaps={overlaps}
             minSeconds={span}
             windowStart={windowStart}
             windowEnd={windowEnd}
@@ -592,8 +697,10 @@ export function TranscriptDiff({
             controls={controls}
             edit={rightEdit}
             rowHeight={rowHeight}
+            onCollapse={() => setCollapsed('right')}
           />
         </div>
+        )}
         </div>
       </div>
     </div>
@@ -640,11 +747,32 @@ function Select<T extends number>({
 }
 
 /**
+ * The strip left behind by a collapsed pane: a single full-height button that
+ * names the hidden pane and brings it back. Vertical (writing-mode) in the lg
+ * side-by-side layout, a plain horizontal bar when the panes stack.
+ */
+function CollapsedRail({ label, onExpand }: { label: string; onExpand: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      title={`Show the ${label} pane`}
+      aria-label={`Show the ${label} pane`}
+      className="flex shrink-0 cursor-pointer items-center justify-center gap-1.5 border-b rule bg-paper-deep/30 px-2 py-2 font-mono text-[11px] uppercase tracking-wider text-ink-mute transition-colors hover:bg-paper-deep/60 hover:text-ink lg:w-8 lg:border-b-0 lg:px-0 lg:py-4 lg:[writing-mode:vertical-rl]"
+    >
+      <span aria-hidden>⊞</span>
+      {label}
+    </button>
+  )
+}
+
+/**
  * Per-cell interaction handed to a pane — three modes:
  * - `cut`    (New pane): pointer-drag to add/remove cuts; `preview` outlines it.
  * - `select` (Original pane): pointer-drag to grab an original-audio span.
- * - `place`  (New pane, while a clip is grabbed): `glow` gaps; click a cell the
- *   clip fits (`isValidDrop`) to drop it (`onCellClick`).
+ * - `place`  (New pane, while a clip is grabbed or a run is being moved): `glow`
+ *   hints the gaps; any cell takes the drop (`onCellClick`) — the footprint is
+ *   clamped and overlap is allowed (story 03h).
  */
 type CellEdit = {
   mode: 'cut' | 'select' | 'place'
@@ -652,12 +780,11 @@ type CellEdit = {
   onCellEnter?: (time: number) => void
   onCellClick?: (time: number) => void
   /** A span to outline: the cut being painted, the original span being grabbed,
-   *  or — in place mode — the clip's footprint under the cursor. */
+   *  or — in place mode — the clip/run's footprint under the cursor. */
   preview: CutSpan | null
   previewKind: 'add' | 'remove' | 'select' | 'place-ok' | 'place-bad' | null
-  /** Gaps to faintly tint so the droppable space is visible before hovering. */
+  /** Gaps to faintly tint so the lands-clean space is visible before hovering. */
   glow: CutSpan[]
-  isValidDrop?: (time: number) => boolean
 }
 
 type PaneProps = {
@@ -667,6 +794,8 @@ type PaneProps = {
   secondsPerLine: number
   segmentSeconds: number
   cuts: CutSpan[]
+  /** Overlapping run spans (story 03h) — the amber conflict fill (New pane). */
+  overlaps?: CutSpan[]
   minSeconds: number
   /** Scene window on the absolute timeline — rows outside it are cropped so the
    *  pane shows only the selected scene (story 03c). 0 / Infinity ⇒ whole talk. */
@@ -684,6 +813,8 @@ type PaneProps = {
   /** The audio playhead, in absolute seconds — the row containing it lights up.
    *  null when nothing is playing. */
   playheadSec?: number | null
+  /** Fully hide this pane (a labelled rail stays behind to restore it). */
+  onCollapse?: () => void
 }
 
 /**
@@ -782,6 +913,7 @@ function Pane({
   secondsPerLine,
   segmentSeconds,
   cuts,
+  overlaps = [],
   minSeconds,
   windowStart,
   windowEnd,
@@ -791,6 +923,7 @@ function Pane({
   rowHeight,
   onPlayFrom,
   playheadSec,
+  onCollapse,
 }: PaneProps) {
   const lines = useMemo(
     () =>
@@ -835,6 +968,24 @@ function Pane({
         <span className="font-mono text-[11px] uppercase tracking-wider text-ink-faint">
           {sublabel}
         </span>
+        <span className="ml-auto flex items-center gap-3">
+          {overlaps.length > 0 && (
+            <span className="font-mono text-[11px] text-amber-700">
+              ⚠ {overlaps.length} overlap{overlaps.length === 1 ? '' : 's'} to resolve — drag a run off
+            </span>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              title={`Hide the ${label} pane`}
+              aria-label={`Hide the ${label} pane`}
+              className="cursor-pointer font-mono text-[12px] leading-none text-ink-faint transition-colors hover:text-ink"
+            >
+              ⊟
+            </button>
+          )}
+        </span>
       </div>
 
       {/* single-line rows; clip horizontally so bleeding words never spill into
@@ -856,6 +1007,9 @@ function Pane({
                       onRecord={(blob) => controls.onRecord(seg.sceneId, seg.index, blob)}
                       onPlay={controls.onPlay}
                       onDelete={() => controls.onDelete(seg.sceneId, seg.index)}
+                      onMoveStart={
+                        controls.onMoveStart ? () => controls.onMoveStart?.(seg) : undefined
+                      }
                     />
                   ) : (
                     // Spacer on the Original pane so both panes stay row-aligned.
@@ -867,6 +1021,7 @@ function Pane({
                   perSecond={perSecond}
                   segmentSeconds={segmentSeconds}
                   cuts={cuts}
+                  overlaps={overlaps}
                   voiced={voiced}
                   edit={edit}
                   rowHeight={rowHeight}
@@ -892,6 +1047,7 @@ function Row({
   perSecond,
   segmentSeconds,
   cuts,
+  overlaps,
   voiced,
   edit,
   rowHeight,
@@ -903,6 +1059,7 @@ function Row({
   perSecond: number
   segmentSeconds: number
   cuts: CutSpan[]
+  overlaps: CutSpan[]
   voiced: CutSpan[]
   edit: CellEdit | null
   rowHeight: number
@@ -912,6 +1069,7 @@ function Row({
   playing?: boolean
 }) {
   const cutCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, cuts)
+  const overlapCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, overlaps)
   const voicedCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, voiced)
   const previewCols =
     edit?.preview ? cutColumns(line.startSec, line.cells.length, segmentSeconds, [edit.preview]) : []
@@ -971,7 +1129,6 @@ function Row({
 
       {line.cells.map((cell, col) => {
         const time = line.startSec + col * segmentSeconds
-        const canDrop = mode === 'place' && (edit?.isValidDrop?.(time) ?? false)
         return (
           <div
             key={col}
@@ -984,18 +1141,26 @@ function Row({
                 : undefined
             }
             onPointerEnter={edit?.onCellEnter ? () => edit.onCellEnter?.(time) : undefined}
-            onClick={canDrop ? () => edit?.onCellClick?.(time) : undefined}
+            onClick={mode === 'place' ? () => edit?.onCellClick?.(time) : undefined}
             className={[
               'flex min-h-[2rem] items-center px-1',
               draggable ? 'cursor-pointer select-none' : '',
-              mode === 'place' ? `select-none ${canDrop ? 'cursor-pointer' : 'cursor-not-allowed'}` : '',
+              // any cell takes the drop now (story 03h) — overlap is legal
+              mode === 'place' ? 'cursor-pointer select-none' : '',
               // separators only on whole-second boundaries, so quarter-slices stay quiet
               col > 0 && col % perSecond === 0 ? 'border-l border-paper-line/50' : '',
-              // dropped footage red; else the voiced span green (cut wins on overlap)
-              cutCols[col] ? 'bg-terracotta/30' : voicedCols[col] ? 'bg-voice/25' : '',
-              // place mode: faintly tint the gaps the clip may land in
+              // conflicting runs amber (the state to resolve), else dropped footage
+              // red, else the voiced span green
+              overlapCols[col]
+                ? 'bg-amber-400/50'
+                : cutCols[col]
+                  ? 'bg-terracotta/30'
+                  : voicedCols[col]
+                    ? 'bg-voice/25'
+                    : '',
+              // place mode: faintly tint the gaps where a drop lands clean
               mode === 'place' && glowCols[col] && !cutCols[col] && !voicedCols[col] ? 'bg-voice/10' : '',
-              // the active preview (cut paint / clip grab / drop footprint)
+              // the active preview (cut paint / clip grab / drop or move footprint)
               previewCols[col] && edit?.previewKind ? previewClass[edit.previewKind] : '',
             ].join(' ')}
           >

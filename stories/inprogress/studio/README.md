@@ -107,6 +107,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 04 | `../../done/04-wire-voice-clone.md` | ⑥ voice step (clone enabled · saved-id reuse · preset · TTS preview) | ✅ done |
 | 03c | `03c-wire-scene-refiner.md` | per-scene refiner (`/api/refine-scene`) · diff-viewer rework · per-segment record/AI voice · narrate TTS | 🔨 in progress (next: **manual cut editing**, see the 03d phase in-file) |
 | 03f | `03f-refiner-context-and-gating.md` | **async fire-and-poll** for director/refiner (jobs DB + `postSteps` + poll, no more timeouts) · director→refiner story-context handoff · per-scene synopsis · custom refine prompt · gate diff viewer behind sheets+refine | 🔨 Part 0 ✅ (async poll); Parts A–D next |
+| 03h | `03h-free-segment-editing.md` | free segment editing — drop original audio **anywhere** (overlap flagged amber, not blocked) · drag a run's ⠿ handle to re-time it · assemble gated on overlaps | ✅ implemented (pending PR) |
 | 05 | `../../done/05-wire-ffmpeg-assemble.md` | assemble (timeline walk: cut/segment/dead) + save + audio polish | ✅ done† |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |

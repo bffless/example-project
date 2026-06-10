@@ -28,10 +28,10 @@ export type GridLine = {
 }
 
 /** Lines default to 5 seconds; the editor lets you change it. */
-export const DEFAULT_SECONDS_PER_LINE = 5
+export const DEFAULT_SECONDS_PER_LINE = 2
 
 /** Cells default to a quarter-second slice; the editor lets you change it. */
-export const DEFAULT_SEGMENT_SECONDS = 0.25
+export const DEFAULT_SEGMENT_SECONDS = 0.1
 
 const emptyCells = (n: number): GridCell[] => Array.from({ length: n }, () => [])
 

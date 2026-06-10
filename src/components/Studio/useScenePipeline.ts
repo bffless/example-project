@@ -7,7 +7,8 @@ import {
   effectiveSegments,
   addCut,
   removeCut,
-  fitsGap,
+  clampDropStart,
+  moveRun as moveRunSegments,
   insertSegment,
   removeSegment,
   type RefineSceneRaw,
@@ -700,9 +701,11 @@ export function useScenePipeline() {
 
   // Adopt a span of the source clip's ORIGINAL audio as a New-pane run (story
   // 03d): slice `[origStart, origEnd]` out of the whole-clip audio, upload it as
-  // a real clip, and drop it into the scene at `dropStart` — fill-gaps-only, so
-  // it must sit inside an empty gap (no overlap with existing runs). Writes
-  // `scene.refined` (`source: 'manual'`), never the director baseline.
+  // a real clip, and drop it into the scene at `dropStart`. Since story 03h the
+  // drop lands ANYWHERE in the scene (clamped so it never passes `scene.end`) —
+  // overlap with existing runs is a legal, flagged state the producer resolves
+  // by moving a run. Writes `scene.refined` (`source: 'manual'`), never the
+  // director baseline.
   const adoptOriginalAudio = useCallback(
     async (sceneId: string, origStart: number, origEnd: number, dropStart: number) => {
       if (adoptingId) return
@@ -710,10 +713,6 @@ export function useScenePipeline() {
       if (!scene || !audioUrl) return
       const duration = origEnd - origStart
       const segs = effectiveSegments(scene)
-      if (!fitsGap(segs, scene, dropStart, duration)) {
-        setSceneError("That clip doesn't fit the gap there — make room or pick a longer gap.")
-        return
-      }
       setAdoptingId(sceneId)
       setSceneError(null)
       try {
@@ -724,14 +723,15 @@ export function useScenePipeline() {
         const { url } = await uploadReq({ file, kind: 'voice' }).unwrap()
         const measured = await measureAudioDuration(url)
         const len = measured > 0 ? measured : duration
+        const start = clampDropStart(scene, dropStart, len)
         const text = words
           .filter((w) => w.start >= origStart && w.start < origEnd)
           .map((w) => w.text)
           .join(' ')
         const seg: NarrationSegment = {
           text,
-          start: dropStart,
-          end: dropStart + len,
+          start,
+          end: start + len,
           audioUrl: url,
           audioSeconds: len,
           audioSource: 'original',
@@ -808,6 +808,33 @@ export function useScenePipeline() {
       const segments = removeSegment(base.segments, segIndex)
       const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
       patchScene(sceneId, { refined: { ...base, segments, source: 'manual' }, narrationSeconds: total })
+    },
+    [scenes, patchScene],
+  )
+
+  // Re-time one New-pane run (story 03h): drag its voice-control row to a new
+  // start, keeping its duration — clamped so its end never passes the scene.
+  // Materializes `refined` from the baseline like the other hand-edits, tags it
+  // `manual`. The expected way to resolve a flagged overlap.
+  const moveRun = useCallback(
+    (sceneId: string, segIndex: number, newStart: number) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const run = base.segments[segIndex]
+      if (!run) return
+      const segments = moveRunSegments(base.segments, segIndex, newStart, scene)
+      // Landing a run on cut footage means you want that footage kept — un-cut
+      // beneath its new span (same contradiction rule as adopt), otherwise the
+      // moved run renders red and you'd have to hand-un-cut it. Dropping a run
+      // you don't want is what delete (✕) is for. The clamp here mirrors the one
+      // inside moveRunSegments so the un-cut span is exactly where it landed.
+      const duration = run.end - run.start
+      const start = clampDropStart(scene, newStart, duration)
+      const cuts = removeCut(base.cuts, { start, end: start + duration })
+      const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+      patchScene(sceneId, { refined: { ...base, segments, cuts, source: 'manual' }, narrationSeconds: total })
     },
     [scenes, patchScene],
   )
@@ -1025,6 +1052,7 @@ export function useScenePipeline() {
     adoptOriginalAudio,
     sliceScene,
     deleteSegment,
+    moveRun,
     clearRefinement,
     generateSegmentNarration,
     recordSegmentNarration,

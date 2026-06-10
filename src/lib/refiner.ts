@@ -156,10 +156,11 @@ export function gaps(segments: NarrationSegment[], scene: Pick<Scene, 'start' | 
 }
 
 /**
- * Can a clip of `duration` seconds be dropped at `dropStart` — i.e. does
- * `[dropStart, dropStart + duration]` sit entirely inside a single gap (within
- * the scene, not overlapping any existing run)? The guard for placing an
- * original-audio clip; placement is fill-gaps-only.
+ * Would a clip of `duration` seconds land clean at `dropStart` — i.e. does
+ * `[dropStart, dropStart + duration]` sit entirely inside a single gap? Since
+ * story 03h this is a **hint, not a gate**: drops land anywhere in the scene
+ * (overlap allowed); the diff viewer only uses this to tint the footprint
+ * preview lands-clean vs will-overlap.
  */
 export function fitsGap(
   segments: NarrationSegment[],
@@ -170,6 +171,62 @@ export function fitsGap(
   if (duration <= 0) return false
   const end = dropStart + duration
   return gaps(segments, scene).some((g) => dropStart >= g.start - 0.05 && end <= g.end + 0.05)
+}
+
+/**
+ * Clamp a drop so `[dropStart, dropStart + duration]` stays inside the scene
+ * (story 03h "drop anywhere"): shift the start left if the tail would pass
+ * `scene.end`, floor it at `scene.start`. Overlap with existing runs is fine —
+ * the within-scene clamp is the only constraint left on a drop.
+ */
+export function clampDropStart(
+  scene: Pick<Scene, 'start' | 'end'>,
+  dropStart: number,
+  duration: number,
+): number {
+  return Math.max(scene.start, Math.min(dropStart, scene.end - duration))
+}
+
+/**
+ * Move the run at `index` to `newStart`, keeping its duration (story 03h). The
+ * start is clamped to `[scene.start, scene.end - duration]` so the run's end
+ * never passes the scene — the New side never grows. Returns the list re-sorted
+ * ascending by start; out-of-range index is a no-op. Pure: the caller snaps
+ * `newStart` to the grid.
+ */
+export function moveRun(
+  segments: NarrationSegment[],
+  index: number,
+  newStart: number,
+  scene: Pick<Scene, 'start' | 'end'>,
+): NarrationSegment[] {
+  const run = segments[index]
+  if (!run) return segments
+  const duration = run.end - run.start
+  const start = clampDropStart(scene, newStart, duration)
+  return segments
+    .map((seg, i) => (i === index ? { ...seg, start, end: start + duration } : seg))
+    .sort((a, b) => a.start - b.start)
+}
+
+/**
+ * The overlapping spans on a scene's New timeline (story 03h) — where two or
+ * more runs sit on the same footage. Overlap is a legal in-progress state the
+ * producer resolves by moving (or deleting) a run; the diff paints these spans
+ * and assemble is blocked while any remain. Exactly-touching runs
+ * (`a.end === b.start`) don't overlap; sub-0.05s slivers are ignored
+ * (consistent with `gaps()`). Piled-up overlaps are merged via `normalizeCuts`.
+ */
+export function overlaps(segments: NarrationSegment[]): Cut[] {
+  const spans: Cut[] = []
+  for (let i = 0; i < segments.length; i++) {
+    for (let j = i + 1; j < segments.length; j++) {
+      const start = Math.max(segments[i].start, segments[j].start)
+      const end = Math.min(segments[i].end, segments[j].end)
+      if (end - start > 0.05) spans.push({ start, end })
+    }
+  }
+  return normalizeCuts(spans)
 }
 
 /** Insert a segment and keep the list sorted ascending by start. */

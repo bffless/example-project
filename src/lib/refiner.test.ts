@@ -9,6 +9,9 @@ import {
   removeCut,
   gaps,
   fitsGap,
+  clampDropStart,
+  moveRun,
+  overlaps,
   insertSegment,
   removeSegment,
   type RefineSceneRaw,
@@ -233,25 +236,118 @@ describe('gaps', () => {
   })
 })
 
+// Since story 03h fitsGap is a lands-clean HINT (tints the drop preview), not a
+// gate — drops land anywhere in the scene, overlap allowed.
 describe('fitsGap', () => {
   const sc = { start: 0, end: 100 }
   const seg = (start: number, end: number): NarrationSegment => ({ text: 'x', start, end })
   const segs = [seg(10, 30), seg(60, 80)] // gaps: 0–10, 30–60, 80–100
 
-  it('accepts a clip that fits inside a single gap', () => {
+  it('is true for a clip that fits inside a single gap (lands clean)', () => {
     expect(fitsGap(segs, sc, 35, 20)).toBe(true) // 35–55 ⊂ 30–60
   })
 
-  it('rejects a clip that overlaps a run', () => {
+  it('is false for a clip that overlaps a run (will flag an overlap)', () => {
     expect(fitsGap(segs, sc, 55, 20)).toBe(false) // 55–75 hits the 60–80 run
   })
 
-  it('rejects a clip that spills past the scene', () => {
+  it('is false for a clip that spills past the scene', () => {
     expect(fitsGap(segs, sc, 90, 20)).toBe(false) // 90–110 > scene end
   })
 
-  it('rejects a zero/negative duration', () => {
+  it('is false for a zero/negative duration', () => {
     expect(fitsGap(segs, sc, 35, 0)).toBe(false)
+  })
+})
+
+describe('clampDropStart', () => {
+  const sc = { start: 10, end: 100 }
+
+  it('leaves a drop that already sits inside the scene alone', () => {
+    expect(clampDropStart(sc, 30, 20)).toBe(30)
+  })
+
+  it('shifts the start left when the tail would pass the scene end', () => {
+    expect(clampDropStart(sc, 95, 20)).toBe(80) // 80–100, pinned to the end
+  })
+
+  it('floors the start at the scene start', () => {
+    expect(clampDropStart(sc, 0, 20)).toBe(10)
+  })
+
+  it('pins to the scene start when the clip is longer than the scene', () => {
+    expect(clampDropStart(sc, 50, 200)).toBe(10)
+  })
+})
+
+describe('moveRun', () => {
+  const sc = { start: 0, end: 100 }
+  const seg = (start: number, end: number): NarrationSegment => ({ text: `${start}`, start, end })
+
+  it('moves the run keeping its duration and re-sorts ascending', () => {
+    const moved = moveRun([seg(0, 10), seg(60, 80)], 1, 20, sc)
+    expect(moved).toEqual([seg(0, 10), { text: '60', start: 20, end: 40 }])
+    // sorted: moving the FIRST run past the second re-orders the list
+    const reordered = moveRun([seg(0, 10), seg(60, 80)], 0, 85, sc)
+    expect(reordered.map((s) => s.start)).toEqual([60, 85])
+  })
+
+  it('clamps so the run end never passes the scene end', () => {
+    expect(moveRun([seg(0, 10)], 0, 95, sc)).toEqual([{ text: '0', start: 90, end: 100 }])
+  })
+
+  it('clamps the start at the scene start', () => {
+    expect(moveRun([seg(40, 50)], 0, -20, { start: 5, end: 100 })).toEqual([
+      { text: '40', start: 5, end: 15 },
+    ])
+  })
+
+  it('keeps the run audio fields intact through a move', () => {
+    const run: NarrationSegment = {
+      text: 'voiced',
+      start: 0,
+      end: 10,
+      audioUrl: '/api/uploads/voice/x.wav',
+      audioSeconds: 10,
+      audioSource: 'original',
+    }
+    expect(moveRun([run], 0, 30, sc)).toEqual([{ ...run, start: 30, end: 40 }])
+  })
+
+  it('is a no-op for an out-of-range index', () => {
+    const segs = [seg(0, 10)]
+    expect(moveRun(segs, 5, 30, sc)).toEqual(segs)
+  })
+})
+
+describe('overlaps', () => {
+  const seg = (start: number, end: number): NarrationSegment => ({ text: 'x', start, end })
+
+  it('is empty when no runs overlap', () => {
+    expect(overlaps([seg(0, 10), seg(30, 50)])).toEqual([])
+  })
+
+  it('returns the intersection of one overlapping pair', () => {
+    expect(overlaps([seg(25, 35), seg(30, 40)])).toEqual([{ start: 30, end: 35 }])
+  })
+
+  it('returns multiple overlap spans, sorted', () => {
+    expect(overlaps([seg(0, 12), seg(10, 20), seg(60, 80), seg(70, 75)])).toEqual([
+      { start: 10, end: 12 },
+      { start: 70, end: 75 },
+    ])
+  })
+
+  it('does not flag exactly-touching runs', () => {
+    expect(overlaps([seg(0, 10), seg(10, 20)])).toEqual([])
+  })
+
+  it('ignores sub-0.05s slivers', () => {
+    expect(overlaps([seg(0, 10.02), seg(10, 20)])).toEqual([])
+  })
+
+  it('merges overlap spans that themselves overlap (three runs piled up)', () => {
+    expect(overlaps([seg(0, 20), seg(5, 15), seg(10, 25)])).toEqual([{ start: 5, end: 20 }])
   })
 })
 

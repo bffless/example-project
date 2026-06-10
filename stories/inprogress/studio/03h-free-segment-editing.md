@@ -2,9 +2,9 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** 📝 design (approved, not yet implemented) · **Frontend-only — no new
-`/api/*`. Pure model + diff-viewer interactions. The ffmpeg assembler
-(`src/lib/export/assemble.ts`) is unchanged.**
+**Status:** ✅ implemented (build/lint/tests green; pending PR review) ·
+**Frontend-only — no new `/api/*`. Pure model + diff-viewer interactions. The
+ffmpeg assembler (`src/lib/export/assemble.ts`) is unchanged.**
 
 ## Why
 
@@ -80,7 +80,11 @@ never "make room" by growing the timeline, so delete is the escape hatch.
   unchanged.
 - New **`moveRun(sceneId, index, newStart)`** action → `patchScene` with
   `refined.segments = moveRun(base.segments, …)`, recomputing `narrationSeconds`.
-  Mirrors the existing adopt/delete actions.
+  Mirrors the existing adopt/delete actions — including adopt's contradiction
+  rule: **landing a run on cut footage un-cuts beneath its new span**
+  (`removeCut` over `[start, start + duration]`). Placing a run somewhere says
+  "keep this footage"; delete (✕) is how you say the opposite. Without this the
+  moved run renders red until you hand-un-cut it.
 
 ### 3. Diff viewer — `src/components/Studio/TranscriptDiff.tsx`
 

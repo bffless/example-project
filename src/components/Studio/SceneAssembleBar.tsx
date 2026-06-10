@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
-import { effectiveCuts, effectiveSegments } from '../../lib/refiner'
+import { effectiveCuts, effectiveSegments, overlaps } from '../../lib/refiner'
 import { planScene, buildFfmpegCommand } from '../../lib/export/assemble'
 import { assemble } from '../../lib/export/ffmpeg'
 
@@ -69,7 +69,12 @@ export function SceneAssembleBar({ scene, saving, onSave }: Props) {
   const droppedSeconds = Math.max(0, sceneLen - plan.duration)
   const unvoiced = segments.filter((s) => !s.audioUrl).length
   const hasClip = !!scene.clipUrl
-  const canAssemble = hasClip && plan.video.length > 0
+  // Overlapping runs block assemble (story 03h): the assembler doesn't mix audio
+  // (no `amix`), so the producer resolves overlaps by moving/deleting a run
+  // first. Belt-and-braces — the planner's first-run-wins walk stays as the
+  // deterministic fallback, so a stray overlap can never crash a render.
+  const overlapCount = useMemo(() => overlaps(segments).length, [segments])
+  const canAssemble = hasClip && plan.video.length > 0 && overlapCount === 0
 
   const savedCurrent = !!resultBlob && savedBlob === resultBlob
   const playerSrc = resultUrl ?? scene.assembledUrl ?? null
@@ -149,6 +154,11 @@ export function SceneAssembleBar({ scene, saving, onSave }: Props) {
           {unvoiced > 0 && (
             <span className="text-terracotta-ink">
               {unvoiced} run{unvoiced === 1 ? '' : 's'} unvoiced → silent
+            </span>
+          )}
+          {overlapCount > 0 && (
+            <span className="text-amber-700">
+              Resolve {overlapCount} overlapping run{overlapCount === 1 ? '' : 's'} first
             </span>
           )}
           {scene.assembledUrl && !resultBlob && <span className="text-ink">✓ assembled</span>}
