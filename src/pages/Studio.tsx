@@ -573,6 +573,7 @@ export function Studio() {
                     scene={selected}
                     saving={pipe.savingSceneCutId === selected.id}
                     onSave={(blob) => pipe.saveSceneCut(selected.id, blob)}
+                    sheets={pipe.contactSheets}
                   />
                 )}
                 {/* Master assemble: stream-copy concat of every scene's saved

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
+import type { ContactSheet } from '../../lib/frames'
 import { effectiveCuts, effectiveSegments, overlaps } from '../../lib/refiner'
 import { planScene, buildFfmpegCommand } from '../../lib/export/assemble'
 import { assemble } from '../../lib/export/ffmpeg'
+import { ScenePreviewDialog } from './ScenePreviewDialog'
 
 type Props = {
   /** The scene whose tab is selected — this bar assembles ONLY this scene. */
@@ -11,6 +13,8 @@ type Props = {
   saving: boolean
   /** Upload the assembled scene blob → bucket; resolves to its serve URL. */
   onSave: (blob: Blob) => Promise<string>
+  /** Whole-clip prep contact sheets, for the preview flipbook. */
+  sheets: ContactSheet[]
 }
 
 const fmtTime = (s: number) => {
@@ -39,8 +43,9 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
  *
  * Mounted with `key={scene.id}` so switching tabs resets this transient state.
  */
-export function SceneAssembleBar({ scene, saving, onSave }: Props) {
+export function SceneAssembleBar({ scene, saving, onSave, sheets }: Props) {
   const [running, setRunning] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [stage, setStage] = useState('')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -168,6 +173,15 @@ export function SceneAssembleBar({ scene, saving, onSave }: Props) {
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="button"
+          className="pill-ghost"
+          disabled={plan.video.length === 0}
+          onClick={() => setPreviewOpen(true)}
+        >
+          Preview
+        </button>
+
+        <button
+          type="button"
           className={resultBlob ? 'pill-ghost' : 'pill-cta'}
           disabled={running || saving || !canAssemble}
           onClick={run}
@@ -221,6 +235,13 @@ export function SceneAssembleBar({ scene, saving, onSave }: Props) {
           <video src={playerSrc} controls className="w-full rounded-md border border-paper-line" />
         </div>
       )}
+
+      <ScenePreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        scene={scene}
+        sheets={sheets}
+      />
     </div>
   )
 }
