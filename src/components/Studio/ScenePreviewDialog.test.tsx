@@ -7,17 +7,21 @@ import { ScenePreviewDialog } from './ScenePreviewDialog'
 const toggle = vi.fn()
 const seek = vi.fn()
 const stop = vi.fn()
+const capturedEvents: unknown[] = []
 
 vi.mock('./usePreviewTransport', () => ({
-  usePreviewTransport: () => ({
-    playing: false,
-    loading: false,
-    failed: 0,
-    clock: () => 0,
-    toggle,
-    seek,
-    stop,
-  }),
+  usePreviewTransport: (events: unknown) => {
+    capturedEvents.push(events)
+    return {
+      playing: false,
+      loading: false,
+      failed: 0,
+      clock: () => 0,
+      toggle,
+      seek,
+      stop,
+    }
+  },
 }))
 
 // jsdom lacks showModal/close — polyfill them as ContactDialog.test.tsx does.
@@ -82,6 +86,8 @@ describe('ScenePreviewDialog', () => {
   beforeEach(() => {
     toggle.mockClear()
     seek.mockClear()
+    stop.mockClear()
+    capturedEvents.length = 0
   })
 
   it('opens as a modal with the scene title and flags unvoiced runs', () => {
@@ -107,5 +113,23 @@ describe('ScenePreviewDialog', () => {
     const s = scene({ refined: { source: 'manual', cuts: [{ start: 0, end: 10 }], segments: [] } })
     render(<ScenePreviewDialog open onClose={() => {}} scene={s} sheets={[sheet([0, 5])]} />)
     expect(screen.getByRole('button', { name: /play/i })).toBeDisabled()
+  })
+
+  it('closing the dialog stops the transport', () => {
+    const { rerender } = render(
+      <ScenePreviewDialog open onClose={() => {}} scene={scene()} sheets={[sheet([0, 5])]} />,
+    )
+    stop.mockClear()
+    rerender(<ScenePreviewDialog open={false} onClose={() => {}} scene={scene()} sheets={[sheet([0, 5])]} />)
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it('passes referentially stable events to the transport across re-renders (the hook contract)', () => {
+    const s = scene()
+    const sheets = [sheet([0, 5])]
+    const { rerender } = render(<ScenePreviewDialog open onClose={() => {}} scene={s} sheets={sheets} />)
+    rerender(<ScenePreviewDialog open onClose={() => {}} scene={s} sheets={sheets} />)
+    expect(capturedEvents.length).toBeGreaterThanOrEqual(2)
+    expect(capturedEvents[capturedEvents.length - 1]).toBe(capturedEvents[0])
   })
 })

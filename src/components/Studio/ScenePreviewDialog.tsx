@@ -62,7 +62,7 @@ export function ScenePreviewDialog({ open, onClose, scene, sheets }: Props) {
   const unvoiced = segments.filter((s) => !s.audioUrl).length
 
   const transport = usePreviewTransport(events, plan.duration)
-  const { stop } = transport
+  const { stop, clock } = transport
 
   // Pause the audio whenever the dialog closes (✕ / Esc / backdrop).
   useEffect(() => {
@@ -76,12 +76,12 @@ export function ScenePreviewDialog({ open, onClose, scene, sheets }: Props) {
     if (!open) return
     let raf = 0
     const tick = () => {
-      setNow(transport.clock())
+      setNow(clock())
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [open, transport])
+  }, [open, clock])
 
   const frame = frameAt(frames, sourceTimeAt(plan, now, scene.start))
 
@@ -106,9 +106,9 @@ export function ScenePreviewDialog({ open, onClose, scene, sheets }: Props) {
       }}
     >
       <div className="flex items-center justify-between border-b border-paper-line px-5 py-3">
-        <p className="meta-label">
+        <h2 className="meta-label">
           Preview · {scene.title} <span className="text-ink-mute">· instant, no render</span>
-        </p>
+        </h2>
         <button type="button" className="pill-ghost" onClick={onClose} aria-label="Close preview">
           ✕
         </button>
@@ -116,7 +116,7 @@ export function ScenePreviewDialog({ open, onClose, scene, sheets }: Props) {
 
       <div className="flex aspect-video w-full items-center justify-center overflow-hidden bg-ink">
         {frame ? (
-          <div style={spriteStyle(frame, FRAME_WIDTH)} />
+          <div className="shrink-0" style={spriteStyle(frame, FRAME_WIDTH)} />
         ) : (
           <p className="px-6 text-center text-[13px] text-paper">
             No frames captured for this scene yet — the audio still previews.
@@ -127,8 +127,9 @@ export function ScenePreviewDialog({ open, onClose, scene, sheets }: Props) {
       <div className="px-5 py-4">
         <div
           ref={trackRef}
-          className="relative h-6 cursor-pointer overflow-hidden rounded bg-paper-deep"
+          className="relative h-6 cursor-pointer touch-none overflow-hidden rounded bg-paper-deep"
           onPointerDown={(e) => {
+            if (e.button !== 0) return
             e.currentTarget.setPointerCapture(e.pointerId)
             seekTo(e.clientX)
           }}
