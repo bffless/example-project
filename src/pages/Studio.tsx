@@ -22,6 +22,7 @@ import { AudioArtifact } from '../components/Studio/AudioArtifact'
 import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
+import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { studioPhase, type StudioPhase } from '../lib/pipeline'
@@ -61,6 +62,7 @@ export function Studio() {
   // ResizeObserver when the strip mounts (Build phase) and tears it down on
   // unmount — keeping the height correct across responsive font/zoom changes.
   const [tabsHeight, setTabsHeight] = useState(0)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const tabsRef = useCallback((el: HTMLDivElement | null) => {
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => setTabsHeight(el.offsetHeight))
@@ -504,6 +506,8 @@ export function Studio() {
                   onSelect={pipe.select}
                   tablistRef={tabsRef}
                   tablistClassName="sticky top-14 z-30 bg-paper/85 backdrop-blur"
+                  onPreview={() => setPreviewOpen(true)}
+                  previewDisabled={!selected}
                 />
                 {/* Video capped on the left; the space to its right carries the
                     selected scene's metadata. The diff below still gets the full
@@ -573,6 +577,14 @@ export function Studio() {
                     scene={selected}
                     saving={pipe.savingSceneCutId === selected.id}
                     onSave={(blob) => pipe.saveSceneCut(selected.id, blob)}
+                    onPreview={() => setPreviewOpen(true)}
+                  />
+                )}
+                {selected && (
+                  <ScenePreviewDialog
+                    open={previewOpen}
+                    onClose={() => setPreviewOpen(false)}
+                    scene={selected}
                     sheets={pipe.contactSheets}
                   />
                 )}

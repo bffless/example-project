@@ -120,7 +120,7 @@ A **Preview** button beside Assemble/Re-assemble — the instant path next to th
 render — opens the dialog. `SceneAssembleBar` renders the dialog and receives
 the global contact sheets from `Studio.tsx` (already in the studio slice).
 Preview is **not** gated on overlaps or built status (it's how you find
-problems); the 03h assemble gate is unchanged.
+problems); the 03h assemble gate is unchanged. The dialog is owned by `Studio.tsx` (single instance) and opened from two places — the Preview button beside Assemble, and an always-visible Preview button on the right of the sticky scene-tabs strip (tabs scroll in their own flex region so they never overlap it).
 
 ## Out of scope (YAGNI)
 

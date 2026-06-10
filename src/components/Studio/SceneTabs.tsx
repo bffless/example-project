@@ -10,6 +10,10 @@ type Props = {
    *  so it scrolls away — only the tabs pin under the header. */
   tablistRef?: Ref<HTMLDivElement>
   tablistClassName?: string
+  /** Open the scene preview dialog (sticky-header button, right side). */
+  onPreview?: () => void
+  /** Disable the preview button (no scene selected yet). */
+  previewDisabled?: boolean
 }
 
 /**
@@ -22,8 +26,12 @@ type Props = {
  * wrapping box) so the page can make ONLY the strip `sticky` — a sticky child is
  * bounded by its parent, so the strip must sit directly in the tall Build column
  * to pin across the whole scroll while the label scrolls away above it.
+ *
+ * The strip row is a flex row: tabs scroll in their own min-width region (so they
+ * can never overlap the right side), and an always-visible Preview button is
+ * pinned to the right when `onPreview` is provided.
  */
-export function SceneTabs({ scenes, selectedId, onSelect, tablistRef, tablistClassName }: Props) {
+export function SceneTabs({ scenes, selectedId, onSelect, tablistRef, tablistClassName, onPreview, previewDisabled }: Props) {
   const built = scenes.filter((s) => s.status === 'built').length
 
   return (
@@ -38,42 +46,50 @@ export function SceneTabs({ scenes, selectedId, onSelect, tablistRef, tablistCla
       </div>
       <div
         ref={tablistRef}
-        role="tablist"
-        className={['flex gap-1 overflow-x-auto border-b rule', tablistClassName].filter(Boolean).join(' ')}
+        className={['flex items-stretch', tablistClassName].filter(Boolean).join(' ')}
       >
-        {scenes.map((scene) => {
-          const active = scene.id === selectedId
-          const done = scene.status === 'built'
-          return (
-            <button
-              key={scene.id}
-              role="tab"
-              aria-selected={active}
-              type="button"
-              onClick={() => onSelect(scene.id)}
-              className={[
-                '-mb-px flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-[13.5px] transition-colors',
-                active
-                  ? 'border-terracotta text-ink'
-                  : 'border-transparent text-ink-soft hover:border-paper-line hover:text-ink',
-              ].join(' ')}
-            >
-              <span
+        <div role="tablist" className="flex min-w-0 flex-1 gap-1 overflow-x-auto border-b rule">
+          {scenes.map((scene) => {
+            const active = scene.id === selectedId
+            const done = scene.status === 'built'
+            return (
+              <button
+                key={scene.id}
+                role="tab"
+                aria-selected={active}
+                type="button"
+                onClick={() => onSelect(scene.id)}
                 className={[
-                  'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
-                  done
-                    ? 'bg-terracotta text-paper'
-                    : active
-                      ? 'border border-terracotta text-terracotta-ink'
-                      : 'border border-paper-line text-ink-faint',
+                  '-mb-px flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-[13.5px] transition-colors',
+                  active
+                    ? 'border-terracotta text-ink'
+                    : 'border-transparent text-ink-soft hover:border-paper-line hover:text-ink',
                 ].join(' ')}
               >
-                {done ? '✓' : scene.index + 1}
-              </span>
-              <span className="max-w-[14rem] truncate">{scene.title}</span>
+                <span
+                  className={[
+                    'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
+                    done
+                      ? 'bg-terracotta text-paper'
+                      : active
+                        ? 'border border-terracotta text-terracotta-ink'
+                        : 'border border-paper-line text-ink-faint',
+                  ].join(' ')}
+                >
+                  {done ? '✓' : scene.index + 1}
+                </span>
+                <span className="max-w-[14rem] truncate">{scene.title}</span>
+              </button>
+            )
+          })}
+        </div>
+        {onPreview && (
+          <div className="flex shrink-0 items-center border-b rule pl-3">
+            <button type="button" className="pill-ghost" disabled={previewDisabled} onClick={onPreview}>
+              Preview
             </button>
-          )
-        })}
+          </div>
+        )}
       </div>
     </>
   )

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
-import type { ContactSheet } from '../../lib/frames'
 import { effectiveCuts, effectiveSegments, overlaps } from '../../lib/refiner'
 import { planScene, buildFfmpegCommand } from '../../lib/export/assemble'
 import { assemble } from '../../lib/export/ffmpeg'
-import { ScenePreviewDialog } from './ScenePreviewDialog'
 
 type Props = {
   /** The scene whose tab is selected — this bar assembles ONLY this scene. */
@@ -13,8 +11,8 @@ type Props = {
   saving: boolean
   /** Upload the assembled scene blob → bucket; resolves to its serve URL. */
   onSave: (blob: Blob) => Promise<string>
-  /** Whole-clip prep contact sheets, for the preview flipbook. */
-  sheets: ContactSheet[]
+  /** Open the scene preview dialog (owned by the page — shared with the sticky tabs). */
+  onPreview: () => void
 }
 
 const fmtTime = (s: number) => {
@@ -43,9 +41,8 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
  *
  * Mounted with `key={scene.id}` so switching tabs resets this transient state.
  */
-export function SceneAssembleBar({ scene, saving, onSave, sheets }: Props) {
+export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
   const [running, setRunning] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const [stage, setStage] = useState('')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -175,7 +172,7 @@ export function SceneAssembleBar({ scene, saving, onSave, sheets }: Props) {
           type="button"
           className="pill-ghost"
           disabled={plan.video.length === 0}
-          onClick={() => setPreviewOpen(true)}
+          onClick={onPreview}
         >
           Preview
         </button>
@@ -236,12 +233,6 @@ export function SceneAssembleBar({ scene, saving, onSave, sheets }: Props) {
         </div>
       )}
 
-      <ScenePreviewDialog
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        scene={scene}
-        sheets={sheets}
-      />
     </div>
   )
 }
