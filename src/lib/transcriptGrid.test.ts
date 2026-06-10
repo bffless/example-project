@@ -67,6 +67,20 @@ describe('cutColumns', () => {
   it('returns all-false when there are no cuts', () => {
     expect(cutColumns(0, 4, 1, [])).toEqual([false, false, false, false])
   })
+
+  it('flags exactly one column for a single grid-aligned segment', () => {
+    // A one-cell grab builds its span as start = startSec + col*seg, end =
+    // start + seg. The neighbouring cell's boundary is the same number reached
+    // by different arithmetic (52 + 3*0.1 vs 52 + 2*0.1 + 0.1), off by ~1 ulp —
+    // a strict overlap test bleeds the highlight onto the neighbour, so one
+    // selected word reads as two.
+    for (let col = 0; col < 20; col++) {
+      const start = 52 + col * 0.1
+      const flags = cutColumns(52, 20, 0.1, [{ start, end: start + 0.1 }])
+      expect(flags.filter(Boolean), `col ${col}`).toHaveLength(1)
+      expect(flags[col], `col ${col}`).toBe(true)
+    }
+  })
 })
 
 describe('segmentsPerLine', () => {

@@ -139,7 +139,14 @@ export function formatClock(seconds: number): string {
  * For one row, which columns fall inside a cut span — so the renderer can fill
  * those cells red. A cell covers `[startSec + col*seg, +seg)`; it's cut if that
  * slice overlaps any cut span at all.
+ *
+ * Overlaps under a microsecond don't count: a span snapped to the grid builds
+ * its ends by different arithmetic than the cell boundaries here (52 + 3*0.1
+ * vs 52 + 2*0.1 + 0.1 differ by ~1 ulp), and a strict test would flag the
+ * neighbouring cell too.
  */
+const OVERLAP_EPS = 1e-6
+
 export function cutColumns(
   startSec: number,
   cols: number,
@@ -153,7 +160,7 @@ export function cutColumns(
     const cellStart = startSec + col * seg
     const cellEnd = cellStart + seg
     for (const c of cuts) {
-      if (cellEnd > c.start && cellStart < c.end) {
+      if (cellEnd > c.start + OVERLAP_EPS && cellStart < c.end - OVERLAP_EPS) {
         out[col] = true
         break
       }
