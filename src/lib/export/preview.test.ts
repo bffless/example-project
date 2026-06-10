@@ -68,6 +68,26 @@ describe('audioEvents — clip offsets on the output timeline', () => {
       { segmentIndex: 0, audioUrl: 'clip-102-106.wav', offset: 2, duration: 4 },
     ])
   })
+
+  it('two voiced segments accumulate offsets through the emitted clips', () => {
+    // Scene [0,10]: clip 0–3, dead 3–5, clip 5–8, dead 8–10.
+    const segments = [seg(0, 3), seg(5, 8)]
+    const plan = planScene({ segments, cuts: [], start: 0, end: 10 })
+    expect(audioEvents(plan, segments)).toEqual([
+      { segmentIndex: 0, audioUrl: 'clip-0-3.wav', offset: 0, duration: 3 },
+      { segmentIndex: 1, audioUrl: 'clip-5-8.wav', offset: 5, duration: 3 },
+    ])
+  })
+
+  it('a segment split by an internal cut stays ONE clip piece (narration continuous across the join)', () => {
+    // Segment 0–10 with cut 4–6: kept video is 0–4 + 6–10 (8s), coalesced into one
+    // 8s slot — the narration plays straight through the join, matching the render.
+    const segments = [seg(0, 10, 8)]
+    const plan = planScene({ segments, cuts: [{ start: 4, end: 6 }], start: 0, end: 10 })
+    expect(audioEvents(plan, segments)).toEqual([
+      { segmentIndex: 0, audioUrl: 'clip-0-10.wav', offset: 0, duration: 8 },
+    ])
+  })
 })
 
 describe('sourceTimeAt — output clock → original-video seconds for the flipbook', () => {
@@ -127,5 +147,9 @@ describe('scheduleFrom — which clips play (and from where) when starting at an
     expect(scheduleFrom(events, 8)).toEqual([
       { event: events[1], when: 0, bufferOffset: 0, duration: 3 },
     ])
+  })
+
+  it('an offset past everything schedules nothing', () => {
+    expect(scheduleFrom(events, 12)).toEqual([])
   })
 })
