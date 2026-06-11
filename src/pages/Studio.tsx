@@ -578,11 +578,14 @@ export function Studio() {
                     slicing={pipe.slicingId === selected.id}
                     sheeting={pipe.sheetingId === selected.id}
                     refining={pipe.refiningId === selected.id}
+                    direction={direction}
                     error={pipe.sceneError}
                     onSlice={() => pipe.sliceScene(selected.id, file)}
                     onGenerateSheets={() => pipe.generateSceneSheets(selected.id)}
                     onRefine={() => pipe.refineScene(selected.id)}
                     onClear={() => pipe.clearRefinement(selected.id)}
+                    onRefinePromptChange={(text) => pipe.setRefinePrompt(selected.id, text)}
+                    onIncludeDirectionChange={(on) => pipe.setIncludeDirection(selected.id, on)}
                   />
                 )}
                 {selected && pipe.words.length > 0 && (
