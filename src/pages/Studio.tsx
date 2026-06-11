@@ -15,6 +15,7 @@ import { SceneList } from '../components/Studio/SceneList'
 import { SceneTabs } from '../components/Studio/SceneTabs'
 import { SceneMeta } from '../components/Studio/SceneMeta'
 import { SceneRefinePanel } from '../components/Studio/SceneRefinePanel'
+import { JobPromptDisclosure } from '../components/Studio/PromptDisclosure'
 import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
 import { VoiceStudio } from '../components/Studio/VoiceStudio'
 import { StudioStepper } from '../components/Studio/StudioStepper'
@@ -473,6 +474,10 @@ export function Studio() {
                     {pipe.scenes.length > 0 && (
                       <div className="mt-6 flex flex-col gap-4">
                         {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                        <JobPromptDisclosure
+                          jobId={pipe.directorPromptJobId}
+                          label="View the prompt the director was sent"
+                        />
                         <div className="border rule bg-paper-deep/30 p-4">
                           <SceneList
                             scenes={pipe.scenes}
@@ -536,6 +541,10 @@ export function Studio() {
                 style={{ '--diff-sticky-top': `calc(3.5rem + ${tabsHeight}px)` } as CSSProperties}
               >
                 {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                <JobPromptDisclosure
+                  jobId={pipe.directorPromptJobId}
+                  label="View the prompt the director was sent"
+                />
                 {/* Only the tab strip sticks under the global header (its
                     "Scenes · chapters" label scrolls away). `tabsRef` measures
                     JUST the strip so the diff's placing bar parks flush beneath

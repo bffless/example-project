@@ -1,5 +1,6 @@
 import type { Scene } from '../../lib/scenes'
 import { ContactSheetPreview } from './ContactSheetPreview'
+import { JobPromptDisclosure } from './PromptDisclosure'
 
 type Props = {
   scene: Scene
@@ -169,6 +170,15 @@ export function SceneRefinePanel({
       </p>
 
       {error && <p className="mt-3 text-[13px] text-terracotta-ink">{error}</p>}
+
+      {scene.promptJobId && (
+        <div className="mt-3">
+          <JobPromptDisclosure
+            jobId={scene.promptJobId}
+            label="View the prompt sent for this scene"
+          />
+        </div>
+      )}
 
       {/* Show the captured sheets so the producer can see exactly what the
           refiner is handed for this scene. */}
