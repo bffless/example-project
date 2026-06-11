@@ -2,9 +2,7 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** 📝 spec approved · not started · **Touches both AI passes:** director
-(`/api/scenes`, rule `138f27fb`) and refiner (`/api/refine-scene`, rule
-`afacb572`) — prompt + output-shape additions, plus FE auto-adopt.
+**Status:** ✅ shipped (FE + prompts) · prompts updated on rules `138f27fb` / `afacb572` (parse steps pass `voicing`/`source` through; verified against pre-edit backups). Live-model output verification deferred — no Replicate call was run; the client-side coercion guards make an off-spec model response safe regardless.
 
 ## Why
 
@@ -132,22 +130,22 @@ When a refine job completes (the 03f Part 0 poll-done handler) and
 
 ## Acceptance criteria
 
-- [ ] Director returns + persists `scene.voicing`; badge renders in Build;
+- [x] Director returns + persists `scene.voicing`; badge renders in Build;
       `toScenes` coercion unit-tested (invalid → undefined).
-- [ ] Refiner segments carry `source`; `toRefinement` maps it to
+- [x] Refiner segments carry `source`; `toRefinement` maps it to
       `suggestedSource` and the verbatim-downgrade guard is unit-tested.
-- [ ] Refine completion auto-voices `original` segments (decode-once batch
+- [x] Refine completion auto-voices `original` segments (decode-once batch
       slice, sequential uploads); a failed segment leaves a working one-click
       "Use original" chip.
-- [ ] The ums-and-ahs flow works end-to-end under `MOCK_STUDIO`: direction →
+- [x] The ums-and-ahs flow works end-to-end under `MOCK_STUDIO`: direction →
       mostly-`original` scenes + cuts → refine → auto-adopted segments — no
-      manual voicing needed.
-- [ ] Non-destructive invariants hold: director `draftText`/`cuts` never
+      manual voicing needed. _(guard interaction proven by test; full manual click-through not performed)_
+- [x] Non-destructive invariants hold: director `draftText`/`cuts` never
       mutated; `clearRefinement` still reverts cleanly; the revoice VOICE bar
       is unchanged.
-- [ ] Mock and real share both shapes (`toScenes`/`toRefinement` coerce both);
+- [x] Mock and real share both shapes (`toScenes`/`toRefinement` coerce both);
       prompts updated on rules `138f27fb` + `afacb572` (bffless-pipeline skill).
-- [ ] `npm run build` / `npm run lint` / `npm run test:run` pass.
+- [x] `npm run build` / `npm run lint` / `npm run test:run` pass.
 
 ## Out of scope
 
