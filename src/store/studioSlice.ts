@@ -97,6 +97,13 @@ export type StudioState = {
    * track their own id on `Scene.refineJobId`.)
    */
   scenesJobId: string | null
+  /**
+   * Job id of the last SUCCESSFUL master-director run (story 03m) — the prompt
+   * disclosure lazy-fetches the job row to show what was sent to Gemini.
+   * Separate from `scenesJobId` (in-flight resume pointer, cleared on terminal
+   * status so the resume poller never re-runs a finished job).
+   */
+  directorPromptJobId: string | null
   /** The narration voice (cloned, reused, or preset), set in the clone prep step. */
   voice: VoiceChoice | null
   /** Cloned voice ids the user has minted/saved, reusable without re-cloning. */
@@ -127,6 +134,7 @@ const initialState: StudioState = {
   synopsis: null,
   direction: '',
   scenesJobId: null,
+  directorPromptJobId: null,
   voice: null,
   savedVoices: [],
   selectedId: null,
@@ -189,6 +197,10 @@ const studioSlice = createSlice({
     setScenesJobId(state, action: PayloadAction<string | null>) {
       state.scenesJobId = action.payload
     },
+    /** Pointer to the last successful director job's row (story 03m). */
+    setDirectorPromptJobId(state, action: PayloadAction<string | null>) {
+      state.directorPromptJobId = action.payload
+    },
     setVoice(state, action: PayloadAction<VoiceChoice | null>) {
       state.voice = action.payload
     },
@@ -243,6 +255,7 @@ export const {
   setSynopsis,
   setDirection,
   setScenesJobId,
+  setDirectorPromptJobId,
   setVoice,
   addSavedVoice,
   removeSavedVoice,

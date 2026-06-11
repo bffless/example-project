@@ -9,6 +9,7 @@ import reducer, {
   setWords,
   setSelected,
   setDirection,
+  setDirectorPromptJobId,
   resetStudio,
   type StudioState,
 } from './studioSlice'
@@ -64,6 +65,13 @@ describe('studioSlice', () => {
     expect(s.direction).toBe('keep the demo at 12:30')
     s = reducer(s, resetStudio())
     expect(s.direction).toBe('')
+  })
+
+  it('setDirectorPromptJobId stores the pointer; resetStudio clears it', () => {
+    let s = reducer(undefined, setDirectorPromptJobId('job-42'))
+    expect(s.directorPromptJobId).toBe('job-42')
+    s = reducer(s, resetStudio())
+    expect(s.directorPromptJobId).toBeNull()
   })
 
   it('resetStudio clears persisted state back to fresh', () => {

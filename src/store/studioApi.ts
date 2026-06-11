@@ -45,6 +45,11 @@ export type StudioJob = {
   kind: 'scenes' | 'refine'
   result?: ScenesResult | RefineSceneResult | null
   error?: string | null
+  /** The stitched per-run Gemini prompt, stored on the job row at enqueue
+   *  (story 03m). Null/absent on jobs older than 03m. */
+  prompt?: string | null
+  /** The system instruction sent with it (story 03m). */
+  system?: string | null
 }
 /** Voice clone (story 04): the recorded sample's URL → a reusable `voiceId`
  *  (+ a preview mp3 of the cloned voice from MiniMax). */

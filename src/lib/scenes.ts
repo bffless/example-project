@@ -99,6 +99,10 @@ export type Scene = {
    *  (story 03l). ABSENT = true (the checkbox defaults checked); explicit
    *  `false` excludes it. Input-layer, like `refinePrompt` — survives revert. */
   includeDirection?: boolean
+  /** Job id of the refine run that produced `refined` (story 03m) — lets the
+   *  prompt disclosure lazy-fetch what was sent to Gemini. Cleared on revert
+   *  (the prompt belongs to the refinement just discarded). */
+  promptJobId?: string
   /** Serve path of this scene's own sliced clip — `[start, end]` of the source,
    *  cut frame-accurately and uploaded on its own (story 03g, the "Cut this
    *  scene" build step). Absent until that step runs. Once set, the Build preview
