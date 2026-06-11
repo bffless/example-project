@@ -59,14 +59,31 @@ export async function sliceAudioWav(
   end: number,
   targetRate = 16000,
 ): Promise<Blob> {
+  const [blob] = await sliceManyAudioWav(url, [{ start, end }], targetRate)
+  return blob
+}
+
+/**
+ * The batch form (story 03j auto-adopt): fetch + decode the whole-clip audio
+ * ONCE and slice every span from the same PCM — N segments cost one decode, not
+ * N. Returns the WAVs in span order.
+ */
+export async function sliceManyAudioWav(
+  url: string,
+  spans: { start: number; end: number }[],
+  targetRate = 16000,
+): Promise<Blob[]> {
+  if (!spans.length) return []
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) throw new Error(`Couldn't load audio (${res.status})`)
   const blob = await res.blob()
   const file = new File([blob], 'audio.wav', { type: blob.type || 'audio/wav' })
   const samples = await decodeToMono(file, targetRate)
-  const lo = Math.max(0, Math.floor(Math.min(start, end) * targetRate))
-  const hi = Math.min(samples.length, Math.ceil(Math.max(start, end) * targetRate))
-  return encodeWav(samples.subarray(lo, Math.max(lo, hi)), targetRate)
+  return spans.map(({ start, end }) => {
+    const lo = Math.max(0, Math.floor(Math.min(start, end) * targetRate))
+    const hi = Math.min(samples.length, Math.ceil(Math.max(start, end) * targetRate))
+    return encodeWav(samples.subarray(lo, Math.max(lo, hi)), targetRate)
+  })
 }
 
 /**

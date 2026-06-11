@@ -37,6 +37,9 @@ export type DirectorScene = {
   draftText?: string
   /** Footage spans to drop, in original-video seconds, inside this scene. */
   cuts?: Cut[]
+  /** The director's voicing plan for this scene (story 03j): keep the creator's
+   *  original audio, re-voice the tightened script, or some of both. */
+  voicing?: 'original' | 'revoice' | 'mixed'
 }
 
 /** The director's full response: a logline plus the scene breakdown. */
@@ -94,6 +97,11 @@ function leadWords(text: string, n = 5): string {
   return words.join(' ')
 }
 
+/** Validate the director's per-scene voicing plan; anything else → undefined. */
+function toVoicing(v: unknown): Scene['voicing'] {
+  return v === 'original' || v === 'revoice' || v === 'mixed' ? v : undefined
+}
+
 /** Clamp a cut span to `[lo, hi]`, returning null if it collapses to nothing. */
 function clampCut(cut: Cut, lo: number, hi: number): Cut | null {
   const start = Math.min(Math.max(num(cut?.start), lo), hi)
@@ -131,6 +139,8 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
       .map((c) => clampCut(c, start, end))
       .filter((c): c is Cut => c !== null)
 
+    const voicing = toVoicing(s?.voicing)
+
     scenes.push({
       id: `scene-${i + 1}`,
       index: i,
@@ -142,6 +152,7 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
       status: 'pending',
       narrationSeconds: null,
       cuts,
+      ...(voicing ? { voicing } : {}),
     })
   })
   return scenes

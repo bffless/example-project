@@ -16,6 +16,8 @@ export type SegmentControl = {
   audioUrl?: string
   audioSeconds?: number
   audioSource?: 'ai' | 'recorded' | 'original'
+  /** The refiner's voicing suggestion for this run (story 03j). */
+  suggestedSource?: 'original' | 'revoice'
   /** This segment is mid-voicing (AI call or record upload). */
   busy: boolean
 }
@@ -32,6 +34,9 @@ type Props = {
   /** Begin a move drag (story 03h): pointer-down on the ⠿ handle, drag over the
    *  grid to re-time the run. Omit to hide the handle. */
   onMoveStart?: () => void
+  /** Voice this run with the clip's own audio (story 03j) — rendered only while
+   *  the run is unvoiced and the AI suggested 'original'. Omit to hide. */
+  onUseOriginal?: () => void
 }
 
 /** How the run was voiced, for the inline label. */
@@ -53,7 +58,7 @@ const btn =
  * **drag handle** (story 03h) — chosen so moving never collides with
  * cut-painting, which owns pointer-drags that start on the grid cells.
  */
-export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete, onMoveStart }: Props) {
+export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete, onMoveStart, onUseOriginal }: Props) {
   const recorder = useRecorder()
   const submitted = useRef(false)
 
@@ -130,6 +135,17 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
                 {(audioSeconds ?? 0).toFixed(1)}s · {audioSource ? sourceLabel[audioSource] : 'AI'}
               </span>
             </>
+          )}
+          {!audioUrl && segment.suggestedSource === 'original' && onUseOriginal && (
+            <button
+              type="button"
+              className={btn}
+              onClick={onUseOriginal}
+              title="The AI suggests keeping your own audio here — slice it straight from the clip"
+              aria-label="Use original audio for this run"
+            >
+              ◉ Use original
+            </button>
           )}
           <button type="button" className={btn} onClick={() => void recorder.start()}>
             ● {audioUrl ? 'Re-record' : 'Record'}

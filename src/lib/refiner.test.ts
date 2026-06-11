@@ -14,7 +14,11 @@ import {
   overlaps,
   insertSegment,
   removeSegment,
+  voicingSummary,
+  suggestedOriginalIndices,
+  applyOriginalClips,
   type RefineSceneRaw,
+  type RefineSegment,
 } from './refiner'
 import type { NarrationSegment } from './scenes'
 import type { Scene } from './scenes'
@@ -92,6 +96,74 @@ describe('toRefinement', () => {
   it('defaults to empty arrays for a junk response', () => {
     const r = toRefinement({} as RefineSceneRaw, scene())
     expect(r).toEqual({ segments: [], cuts: [], source: 'ai' })
+  })
+})
+
+describe('toRefinement voicing source (story 03j)', () => {
+  const words = [
+    { text: 'So', start: 10, end: 10.3 },
+    { text: 'the', start: 10.4, end: 10.6 },
+    { text: 'idea', start: 10.7, end: 11.2 },
+    { text: 'is', start: 11.3, end: 11.5 },
+    { text: "isn't,", start: 11.6, end: 12.1 },
+  ]
+
+  it('keeps an original tag when the text matches the span words verbatim', () => {
+    const r = toRefinement(
+      { segments: [{ text: `so the idea is isn’t`, start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+      words,
+    )
+    expect(r.segments[0].suggestedSource).toBe('original')
+  })
+
+  it('downgrades an original tag whose text was rewritten', () => {
+    const r = toRefinement(
+      { segments: [{ text: 'the idea is straightforward', start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+      words,
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+  })
+
+  it('downgrades an original tag when no transcript words are provided', () => {
+    const r = toRefinement(
+      { segments: [{ text: 'so the idea is simple', start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+  })
+
+  it('passes revoice through and drops junk source values', () => {
+    const r = toRefinement(
+      {
+        segments: [
+          { text: 'a new line', start: 0, end: 5, source: 'revoice' },
+          { text: 'another line', start: 20, end: 25, source: 'shout' as unknown as RefineSegment['source'] },
+        ],
+      },
+      scene(),
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+    expect(r.segments[1].suggestedSource).toBeUndefined()
+    // the key is genuinely ABSENT for junk values, not set to undefined
+    expect(r.segments.map((s) => 'suggestedSource' in s)).toEqual([true, false])
+  })
+
+  it('downgrades when the cursor clamp shifts the span past some of the words', () => {
+    // The first segment ends at 10.6, so the second is cursor-clamped to start
+    // there — its slice no longer plays 'So the', but its text still claims them.
+    const r = toRefinement(
+      {
+        segments: [
+          { text: 'So', start: 10, end: 10.6 },
+          { text: `so the idea is isn't`, start: 10, end: 12.5, source: 'original' },
+        ],
+      },
+      scene(),
+      words,
+    )
+    expect(r.segments[1].suggestedSource).toBe('revoice')
   })
 })
 
@@ -367,5 +439,92 @@ describe('insertSegment / removeSegment', () => {
       seg(0, 10),
       seg(60, 80),
     ])
+  })
+})
+
+describe('voicingSummary', () => {
+  it('shows the director plan before refining', () => {
+    expect(voicingSummary(scene({ voicing: 'original' }))).toBe('original audio')
+    expect(voicingSummary(scene({ voicing: 'revoice' }))).toBe('re-voice')
+    expect(voicingSummary(scene({ voicing: 'mixed' }))).toBe('partial')
+    expect(voicingSummary(scene())).toBeNull()
+  })
+
+  it('derives the real mix from refined segments', () => {
+    const refined = {
+      segments: [
+        { text: 'a', start: 0, end: 10, suggestedSource: 'original' as const },
+        { text: 'b', start: 20, end: 30, suggestedSource: 'revoice' as const },
+        { text: 'c', start: 40, end: 50 },
+      ],
+      cuts: [],
+      source: 'ai' as const,
+    }
+    expect(voicingSummary(scene({ refined }))).toBe('1 original · 2 re-voice')
+  })
+
+  it('reads what actually happened over the suggestion', () => {
+    const refined = {
+      segments: [
+        {
+          text: 'a',
+          start: 0,
+          end: 10,
+          suggestedSource: 'revoice' as const,
+          audioUrl: '/x.wav',
+          audioSeconds: 10,
+          audioSource: 'original' as const,
+        },
+      ],
+      cuts: [],
+      source: 'ai' as const,
+    }
+    expect(voicingSummary(scene({ refined }))).toBe('original audio')
+  })
+})
+
+describe('suggestedOriginalIndices', () => {
+  it('lists unvoiced original-tagged segments only', () => {
+    expect(
+      suggestedOriginalIndices([
+        { text: 'a', start: 0, end: 5, suggestedSource: 'original' },
+        { text: 'b', start: 10, end: 15, suggestedSource: 'revoice' },
+        { text: 'c', start: 20, end: 25, suggestedSource: 'original', audioUrl: '/x.wav' },
+        { text: 'd', start: 30, end: 35 },
+        { text: 'e', start: 40, end: 45, suggestedSource: 'original' },
+      ]),
+    ).toEqual([0, 4])
+  })
+})
+
+describe('applyOriginalClips', () => {
+  const segs: NarrationSegment[] = [
+    { text: 'a', start: 0, end: 5, suggestedSource: 'original' },
+    { text: 'b', start: 10, end: 15, suggestedSource: 'revoice' },
+    { text: 'c', start: 20, end: 25, suggestedSource: 'original' },
+  ]
+
+  it('attaches clips, snapping each end to the measured length', () => {
+    const { segments, failed } = applyOriginalClips(segs, [0, 2], [
+      { url: '/api/uploads/voice/a.wav', seconds: 4.2 },
+      { url: '/api/uploads/voice/c.wav', seconds: 5.5 },
+    ])
+    expect(failed).toBe(0)
+    expect(segments[0]).toMatchObject({
+      audioUrl: '/api/uploads/voice/a.wav',
+      audioSeconds: 4.2,
+      end: 4.2,
+      audioSource: 'original',
+      suggestedSource: 'original',
+    })
+    expect(segments[1]).toEqual(segs[1]) // untouched
+    expect(segments[2]).toMatchObject({ audioSeconds: 5.5, end: 25.5 })
+  })
+
+  it('counts failed clips and leaves those segments unvoiced', () => {
+    const { segments, failed } = applyOriginalClips(segs, [0, 2], [null, { url: '/c.wav', seconds: 5 }])
+    expect(failed).toBe(1)
+    expect(segments[0].audioUrl).toBeUndefined()
+    expect(segments[2].audioUrl).toBe('/c.wav')
   })
 })

@@ -122,6 +122,7 @@ const studioHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       start?: number
       end?: number
+      transcript?: string
       draftText?: string
       cuts?: { start: number; end: number }[]
     }
@@ -207,37 +208,69 @@ const studioHandlers = [
 ]
 
 /**
- * A deterministic canned refiner response for one scene: split the first-pass
- * `draftText` into two runs around the kept pause (the first-pass cut, or the
- * scene's middle third if none), each anchored to the retained footage on either
- * side. Returns refined cuts that tighten the pause slightly so it visibly
- * differs from the director's first pass.
+ * A deterministic canned refiner response for one scene, now with voicing
+ * sources (story 03j): the first half of the scene's spoken lines keep the
+ * creator's own audio (`source: 'original'` — text VERBATIM from the posted
+ * timed transcript, span snapped to the 8s line boundaries, so it survives
+ * `toRefinement`'s word-sequence guard and auto-adopts), and the second half is
+ * re-voiced from the draft (`source: 'revoice'`). The gap between them is the
+ * refined cut. Falls back to the old draft-split when the transcript is too
+ * short to halve.
  */
 function mockRefiner(body: {
   start?: number
   end?: number
+  transcript?: string
   draftText?: string
   cuts?: { start: number; end: number }[]
 }) {
   const start = Number.isFinite(body.start) ? (body.start as number) : 0
-  const end = Number.isFinite(body.end) && (body.end as number) > start ? (body.end as number) : start + 1
+  const end =
+    Number.isFinite(body.end) && (body.end as number) > start ? (body.end as number) : start + 1
+
+  // Parse the `[m:ss] words` lines back into (lineStart, words) pairs.
+  const lines = (body.transcript ?? '')
+    .split('\n')
+    .map((l) => /^\[(\d+):(\d{2})\]\s*(.+)$/.exec(l))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({ start: Number(m[1]) * 60 + Number(m[2]), text: m[3] }))
+
+  if (lines.length >= 2) {
+    const mid = Math.ceil(lines.length / 2)
+    const splitAt = lines[mid].start // a line boundary — the halves' words split cleanly
+    // Out-of-range timestamps (transcription jitter) would make a zero-length
+    // second half — fall through to the draft-split below instead.
+    if (splitAt < end) {
+      const pauseEnd = Math.min(splitAt + 2, end)
+      const segments = [
+        {
+          text: lines.slice(0, mid).map((l) => l.text).join(' '),
+          start,
+          end: splitAt,
+          source: 'original',
+        },
+        {
+          text: (body.draftText ?? '').trim() || lines.slice(mid).map((l) => l.text).join(' '),
+          start: pauseEnd,
+          end,
+          source: 'revoice',
+        },
+      ]
+      return { segments, cuts: [{ start: splitAt, end: pauseEnd }] }
+    }
+  }
+
+  // Transcript too short to halve — the old draft-split, now tagged revoice.
   const span = end - start
-  // The pause to keep: the director's first cut, else the middle third.
   const first = body.cuts?.[0]
   const pauseStart = first ? first.start : start + span * 0.45
   const pauseEnd = first ? first.end : start + span * 0.62
-
   const words = (body.draftText ?? '').trim().split(/\s+/).filter(Boolean)
   const mid = Math.ceil(words.length / 2)
-  const head = words.slice(0, mid).join(' ')
-  const tail = words.slice(mid).join(' ')
-
   const segments = [
-    head && { text: head, start, end: pauseStart },
-    tail && { text: tail, start: pauseEnd, end },
-  ].filter(Boolean)
-
-  // "Refine" the cut: trim 0.3s off each edge so it reads as a tightened pass.
+    { text: words.slice(0, mid).join(' '), start, end: pauseStart, source: 'revoice' },
+    { text: words.slice(mid).join(' '), start: pauseEnd, end, source: 'revoice' },
+  ].filter((s) => s.text)
   const cuts = [{ start: pauseStart + 0.3, end: Math.max(pauseStart + 0.4, pauseEnd - 0.3) }]
   return { segments, cuts }
 }
@@ -280,6 +313,9 @@ function toneWavDataUrl(seconds: number): string {
 function mockDirector(duration: number, direction: string) {
   const total = Number.isFinite(duration) && duration > 0 ? duration : 600
   const count = Math.max(1, Math.round(total / 210)) // ~3.5 min scenes
+  // "keep my voice / cut the ums" direction → an all-original plan (story 03j).
+  const keepOriginal = /\b(um+s?|uh+s?|ah+s?|filler|keep my (own )?voice|original audio)\b/i.test(direction)
+  const VOICINGS = ['revoice', 'original', 'mixed'] as const
   const each = total / count
   const beats = [
     { title: 'Cold open — the problem', draft: 'Here is the problem we kept running into, and why the usual fix falls apart at scale.' },
@@ -299,6 +335,7 @@ function mockDirector(duration: number, direction: string) {
       title: beat.title,
       start,
       end,
+      voicing: keepOriginal ? 'original' : VOICINGS[i % VOICINGS.length],
       transcript: `(${Math.round(end - start)}s of original footage for this scene)`,
       draftText: direction ? `${beat.draft} (${direction})` : beat.draft,
       cuts: [{ start: cutStart, end: cutEnd }],

@@ -19,6 +19,9 @@ screenshots
 # Local Studio test scratch clip (not a fixture)
 .studio-test.mp4
 
+# Pipeline-rule pre-edit backups (local scratch, never commit)
+.bffless-backups/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

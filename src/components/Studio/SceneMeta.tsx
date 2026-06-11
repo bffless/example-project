@@ -8,7 +8,7 @@ import {
   type Alignment,
   type Scene,
 } from '../../lib/scenes'
-import { effectiveCuts, effectiveSegments, normalizeCuts } from '../../lib/refiner'
+import { effectiveCuts, effectiveSegments, normalizeCuts, voicingSummary } from '../../lib/refiner'
 
 type Props = {
   scene: Scene
@@ -34,6 +34,9 @@ export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
   const segments = effectiveSegments(scene)
   const clipCount = segments.filter((s) => s.audioUrl).length
   const silentRuns = segments.filter((s) => !s.audioUrl).length
+
+  // The director's voicing plan pre-refine; the real segment mix after (03j).
+  const voicing = voicingSummary(scene)
 
   const origWords = wordCount(scene.transcript)
   const draftWords = wordCount(scene.draftText)
@@ -115,6 +118,11 @@ export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
             </span>
           )}
         </Stat>
+        {voicing && (
+          <Stat label="Voicing">
+            <span className="font-mono">{voicing}</span>
+          </Stat>
+        )}
         <Stat label="Script">
           <span className="font-mono">
             {origWords.toLocaleString()} → {draftWords.toLocaleString()} words

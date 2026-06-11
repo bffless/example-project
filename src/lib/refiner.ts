@@ -22,8 +22,17 @@
 import { WORDS_PER_SECOND, type Cut, type NarrationSegment, type Scene, type SceneRefinement } from './scenes'
 import type { TWord } from './transcriptGrid'
 
-/** A segment as the model returns it, before we coerce/clamp it. */
-export type RefineSegment = { text?: string; start?: number; end?: number }
+/** A segment as the model returns it, before we coerce/clamp it. On the wire
+ *  the per-segment voicing suggestion is `source` (simplest for the model);
+ *  `toRefinement` maps it to `NarrationSegment.suggestedSource` so it can't be
+ *  confused with the refinement-level `source: 'ai' | 'manual'`, which is
+ *  client-assigned and never on the wire. */
+export type RefineSegment = {
+  text?: string
+  start?: number
+  end?: number
+  source?: 'original' | 'revoice'
+}
 
 /** The refiner's raw response: the new segments + the refined cuts. */
 export type RefineSceneRaw = { segments?: RefineSegment[]; cuts?: Cut[] }
@@ -48,6 +57,18 @@ export type RefineSceneRequest = {
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
+/** Lowercase + strip punctuation → the word sequence both sides of the
+ *  verbatim check are compared in (tolerant of case/punctuation drift between
+ *  the model's echo and the WhisperX words, strict about the words themselves). */
+function normWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'") // curly → straight apostrophe
+    .replace(/[^\p{L}\p{N}']+/gu, ' ')
+    .split(' ')
+    .filter(Boolean)
+}
+
 /** Clamp a cut span to `[lo, hi]`, returning null if it collapses to nothing. */
 function clampSpan(start: number, end: number, lo: number, hi: number): { start: number; end: number } | null {
   const s = Math.min(Math.max(start, lo), hi)
@@ -63,8 +84,14 @@ function clampSpan(start: number, end: number, lo: number, hi: number): { start:
  * kept dead air), empty/zero-length spans dropped. The server validates too; this
  * guarantees the UI never sees a segment or cut outside the scene even if the
  * model slips. `source` is always `'ai'` here — hand-edits set `'manual'`.
+ *
+ * `words` is the WhisperX transcript for the whole talk. An `'original'` tag on a
+ * segment survives only when the segment's text matches the span's transcript words
+ * verbatim (case/punctuation-normalised) — a mismatch means the model rewrote the
+ * line, so the tag is downgraded to `'revoice'`. Passing no `words` (or `[]`)
+ * conservatively downgrades every `'original'` tag. (story 03j)
  */
-export function toRefinement(raw: RefineSceneRaw, scene: Scene): SceneRefinement {
+export function toRefinement(raw: RefineSceneRaw, scene: Scene, words: TWord[] = []): SceneRefinement {
   const lo = scene.start
   const hi = scene.end
 
@@ -77,7 +104,26 @@ export function toRefinement(raw: RefineSceneRaw, scene: Scene): SceneRefinement
     if (!text) continue
     const span = clampSpan(Math.max(num(seg?.start), cursor), num(seg?.end), lo, hi)
     if (!span) continue
-    segments.push({ text, start: span.start, end: span.end })
+    let suggestedSource =
+      seg?.source === 'original' || seg?.source === 'revoice' ? seg.source : undefined
+    if (suggestedSource === 'original') {
+      // The slice plays EVERYTHING spoken in the span — the tag survives only if
+      // the text is exactly the span's words. The model drops words by SPLITTING
+      // segments around them (the gap carries the removal), never by omitting
+      // them from the text; a mismatch here means a rewrite or an omission, so
+      // downgrade rather than auto-slice the wrong audio (story 03j).
+      const spanText = words
+        .filter((w) => typeof w.start === 'number' && w.start >= span.start && w.start < span.end)
+        .map((w) => w.text)
+        .join(' ')
+      if (normWords(text).join(' ') !== normWords(spanText).join(' ')) suggestedSource = 'revoice'
+    }
+    segments.push({
+      text,
+      start: span.start,
+      end: span.end,
+      ...(suggestedSource ? { suggestedSource } : {}),
+    })
     cursor = span.end
   }
 
@@ -283,4 +329,62 @@ export function segmentsToTimedWords(
     })
   }
   return out
+}
+
+/**
+ * The SceneMeta "Voicing" line (story 03j): the director's coarse plan until
+ * the scene is refined, then the real segment mix. Each refined segment counts
+ * by what ACTUALLY happened to it (`audioSource`), falling back to the AI's
+ * suggestion. Null = nothing to show (old data, no plan).
+ */
+export function voicingSummary(scene: Scene): string | null {
+  const segs = scene.refined?.segments
+  if (segs?.length) {
+    const original = segs.filter((s) => (s.audioSource ?? s.suggestedSource) === 'original').length
+    const revoice = segs.length - original
+    if (!original) return 're-voice'
+    if (!revoice) return 'original audio'
+    return `${original} original · ${revoice} re-voice`
+  }
+  if (scene.voicing === 'original') return 'original audio'
+  if (scene.voicing === 'revoice') return 're-voice'
+  if (scene.voicing === 'mixed') return 'partial'
+  return null
+}
+
+/** The auto-adopt work list (story 03j): segments the refiner wants voiced from
+ *  the clip's own audio that aren't voiced yet. */
+export function suggestedOriginalIndices(segments: NarrationSegment[]): number[] {
+  return segments.flatMap((s, i) => (s.suggestedSource === 'original' && !s.audioUrl ? [i] : []))
+}
+
+/**
+ * Fold uploaded original-audio clips back onto their segments (story 03j).
+ * `clips[k]` belongs to `segments[indices[k]]`; null = that slice/upload failed
+ * and the segment stays unvoiced (it keeps its "Use original" chip). A voiced
+ * run's `end` snaps to its measured length, mirroring `setSegmentAudio`.
+ */
+export function applyOriginalClips(
+  segments: NarrationSegment[],
+  indices: number[],
+  clips: ({ url: string; seconds: number } | null)[],
+): { segments: NarrationSegment[]; failed: number } {
+  const out = [...segments]
+  let failed = 0
+  indices.forEach((segIndex, k) => {
+    const clip = clips[k]
+    const seg = out[segIndex]
+    if (!clip || !seg) {
+      failed += 1
+      return
+    }
+    out[segIndex] = {
+      ...seg,
+      audioUrl: clip.url,
+      audioSeconds: clip.seconds,
+      end: seg.start + clip.seconds,
+      audioSource: 'original',
+    }
+  })
+  return { segments: out, failed }
 }
