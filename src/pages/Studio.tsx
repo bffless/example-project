@@ -233,6 +233,7 @@ export function Studio() {
             audioUrl: seg.audioUrl,
             audioSeconds: seg.audioSeconds,
             audioSource: seg.audioSource,
+            suggestedSource: seg.suggestedSource,
             busy: pipe.voicingSegKey === `${selected.id}:${i}`,
           }))
         : [],
@@ -592,6 +593,7 @@ export function Studio() {
                     canGenerateAI={!!pipe.voice}
                     onGenerateAI={pipe.generateSegmentNarration}
                     onRecord={pipe.recordSegmentNarration}
+                    onUseOriginal={pipe.adoptSegmentOriginal}
                     onEditCut={onEditCut}
                     dropTargets={gapSpans}
                     onAdoptOriginal={onAdoptOriginal}

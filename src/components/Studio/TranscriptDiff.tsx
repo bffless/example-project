@@ -36,6 +36,7 @@ type Props = {
   canGenerateAI?: boolean
   onGenerateAI?: (sceneId: string, index: number) => void
   onRecord?: (sceneId: string, index: number, blob: Blob) => void
+  onUseOriginal?: (sceneId: string, index: number) => void
   /** Hand-edit the cuts by dragging on the grid. The drag's start cell decides
    *  the op: starting on kept footage **adds** a cut (drag to size / extend an
    *  adjacent one); starting on a red cell **removes** (contract or split). The
@@ -146,6 +147,8 @@ type Controls = {
   onDelete: (sceneId: string, index: number) => void
   /** Begin a move drag from this run's voice-control row (story 03h). */
   onMoveStart?: (seg: SegmentControl) => void
+  /** Voice a run from the clip's own audio (story 03j). */
+  onUseOriginal?: (sceneId: string, index: number) => void
 }
 
 /**
@@ -165,6 +168,7 @@ export function TranscriptDiff({
   canGenerateAI = false,
   onGenerateAI,
   onRecord,
+  onUseOriginal,
   onEditCut,
   dropTargets = [],
   onAdoptOriginal,
@@ -585,6 +589,7 @@ export function TranscriptDiff({
         onPlay: toggleClip,
         onDelete: onDeleteSegment ?? (() => {}),
         onMoveStart: onMoveRun ? onMoveStart : undefined,
+        onUseOriginal,
       }
     : null
 
@@ -1324,6 +1329,11 @@ function Pane({
                       onDelete={() => controls.onDelete(seg.sceneId, seg.index)}
                       onMoveStart={
                         controls.onMoveStart ? () => controls.onMoveStart?.(seg) : undefined
+                      }
+                      onUseOriginal={
+                        controls.onUseOriginal
+                          ? () => controls.onUseOriginal?.(seg.sceneId, seg.index)
+                          : undefined
                       }
                     />
                   ) : (
