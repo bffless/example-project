@@ -161,6 +161,23 @@ response shape doesn't change in this story).
       (swap-don't-rewrite holds).
 - [ ] `npm run build` / `npm run lint` / `npm run test:run` green.
 
+## Built — rule edit (2026-06-11)
+
+- **Rule `afacb572` (`POST /api/refine-scene`)** — only the `prep` function-handler
+  changed (the 03f Part 0 enqueue/postSteps shape untouched). Pre-edit backup:
+  `.bffless-backups/2026-06-11-03l-refine-scene.json`. The prep code already read
+  `body.direction` (03c-era, always `''` from the FE until now) and injected it as
+  "EXTRA DIRECTION FROM THE CREATOR"; that block is replaced by the two labeled
+  injections, each trimmed server-side and added only when non-empty, in order:
+  1. `THE CREATOR'S OVERALL DIRECTION FOR THE WHOLE VIDEO (context for this scene): <directorDirection>`
+  2. `THE CREATOR'S INSTRUCTIONS FOR THIS SCENE (follow these): <direction>`
+- **Verified via debug logs** (rule ships with debug on): a live POST with both
+  fields shows both labeled lines in `steps.prep.prompt` immediately before the
+  closing "produce STRICT JSON" instruction; a POST with both fields empty shows
+  neither label. Enqueue path unchanged (`{ jobId, status: 'pending' }`, ~10 ms).
+- ⚠️ Same caveat as 03j/03k: the **live-Gemini steering effect** (does the model
+  actually obey the prompts?) is unverified until a real cut+refine runs.
+
 ## Out of scope
 
 - **03f Part A** — the AI-generated `refinerBrief` (director-authored handoff).
