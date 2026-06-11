@@ -80,6 +80,19 @@ describe('toScenes', () => {
   it('returns [] for non-array input', () => {
     expect(toScenes(undefined as unknown as DirectorScene[], 10)).toEqual([])
   })
+
+  it('keeps a valid voicing plan and drops junk values (story 03j)', () => {
+    const scenes = toScenes(
+      [
+        { start: 0, end: 30, draftText: 'a', voicing: 'original' },
+        { start: 30, end: 60, draftText: 'b', voicing: 'mixed' },
+        { start: 60, end: 90, draftText: 'c', voicing: 'shout it' as unknown as DirectorScene['voicing'] },
+        { start: 90, end: 120, draftText: 'd' },
+      ],
+      120,
+    )
+    expect(scenes.map((s) => s.voicing)).toEqual(['original', 'mixed', undefined, undefined])
+  })
 })
 
 describe('scenesToTimedWords', () => {
