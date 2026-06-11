@@ -742,6 +742,10 @@ export function useScenePipeline() {
       setRefiningId(id)
       setSceneError(null)
       try {
+        // Belt-and-braces with the SceneRefinePanel gate (story 03k): the refiner
+        // is required to listen, so refining an un-cut scene is an error, not a
+        // silent fall-back to the old deaf behavior.
+        if (!scene.clipAudioUrl) throw new Error('Cut this scene first — the refiner needs its audio.')
         const scoped = words.filter((w) => w.start >= scene.start && w.start < scene.end)
         const sheetUrls = (scene.sheets ?? []).map((s) => s.url).filter((u): u is string => !!u)
         // Enqueue-only (story 03f Part 0): returns a job id; the Gemini refine runs
@@ -754,6 +758,7 @@ export function useScenePipeline() {
           draftText: scene.draftText,
           cuts: scene.cuts ?? [],
           sheetUrls,
+          audioUrl: scene.clipAudioUrl,
           direction: '',
         }).unwrap()
         patchScene(id, { refineJobId: jobId })

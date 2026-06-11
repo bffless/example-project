@@ -50,6 +50,10 @@ export type RefineSceneRequest = {
   cuts: Cut[]
   /** Bucket serve paths of the scene's dense contact sheets, in order. */
   sheetUrls: string[]
+  /** Serve path of the scene's cut soundtrack (`scene.clipAudioUrl`) — required;
+   *  the pipeline signs it like the sheets and Gemini listens to align cut and
+   *  segment boundaries to the natural flow of speech (story 03k). */
+  audioUrl: string
   /** Optional free-text direction from the user. */
   direction: string
 }
