@@ -414,7 +414,8 @@ export function useScenePipeline() {
         patchScene(sceneId, {
           refined: { ...refinement, segments },
           refineJobId: null,
-          ...(total > 0 ? { narrationSeconds: total } : {}),
+          // null (not stale) when the new refinement has no voiced audio yet.
+          narrationSeconds: total > 0 ? total : null,
         })
         if (failed > 0) {
           setSceneError(
@@ -928,7 +929,7 @@ export function useScenePipeline() {
   const clearRefinement = useCallback(
     (id: string) => {
       setSceneError(null)
-      patchScene(id, { refined: null })
+      patchScene(id, { refined: null, narrationSeconds: null })
     },
     [patchScene],
   )
