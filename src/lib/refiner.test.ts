@@ -17,6 +17,7 @@ import {
   voicingSummary,
   suggestedOriginalIndices,
   applyOriginalClips,
+  refineDirections,
   type RefineSceneRaw,
   type RefineSegment,
 } from './refiner'
@@ -526,5 +527,39 @@ describe('applyOriginalClips', () => {
     expect(failed).toBe(1)
     expect(segments[0].audioUrl).toBeUndefined()
     expect(segments[2].audioUrl).toBe('/c.wav')
+  })
+})
+
+describe('refineDirections (story 03l)', () => {
+  it('sends the trimmed per-scene prompt and the trimmed global direction by default', () => {
+    expect(refineDirections({ refinePrompt: '  trim the pause  ' }, '  punchy intro  ')).toEqual({
+      direction: 'trim the pause',
+      directorDirection: 'punchy intro',
+    })
+  })
+
+  it('defaults both to empty strings when nothing is set', () => {
+    expect(refineDirections({}, '')).toEqual({ direction: '', directorDirection: '' })
+  })
+
+  it('treats an absent includeDirection as include (default checked)', () => {
+    expect(refineDirections({ includeDirection: undefined }, 'punchy')).toEqual({
+      direction: '',
+      directorDirection: 'punchy',
+    })
+  })
+
+  it('excludes the director prompt when includeDirection is false', () => {
+    expect(refineDirections({ refinePrompt: 'keep the code', includeDirection: false }, 'punchy')).toEqual({
+      direction: 'keep the code',
+      directorDirection: '',
+    })
+  })
+
+  it('whitespace-only global direction sends empty regardless of the checkbox', () => {
+    expect(refineDirections({ includeDirection: true }, '   ')).toEqual({
+      direction: '',
+      directorDirection: '',
+    })
   })
 })

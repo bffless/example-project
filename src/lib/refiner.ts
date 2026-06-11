@@ -58,6 +58,22 @@ export type RefineSceneRequest = {
   direction: string
 }
 
+/**
+ * The two creator-prompt fields of a refine request (story 03l): the scene's own
+ * `refinePrompt`, plus the global director prompt — forwarded only while the
+ * scene's include-checkbox is on (absent = on). Both trimmed and never
+ * undefined, so the wire shape stays stable for mock and real alike.
+ */
+export function refineDirections(
+  scene: Pick<Scene, 'refinePrompt' | 'includeDirection'>,
+  direction: string,
+): { direction: string; directorDirection: string } {
+  return {
+    direction: (scene.refinePrompt ?? '').trim(),
+    directorDirection: scene.includeDirection === false ? '' : direction.trim(),
+  }
+}
+
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
