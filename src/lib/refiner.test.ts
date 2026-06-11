@@ -105,12 +105,12 @@ describe('toRefinement voicing source (story 03j)', () => {
     { text: 'the', start: 10.4, end: 10.6 },
     { text: 'idea', start: 10.7, end: 11.2 },
     { text: 'is', start: 11.3, end: 11.5 },
-    { text: 'simple,', start: 11.6, end: 12.1 },
+    { text: "isn't,", start: 11.6, end: 12.1 },
   ]
 
   it('keeps an original tag when the text matches the span words verbatim', () => {
     const r = toRefinement(
-      { segments: [{ text: 'so the idea is simple', start: 10, end: 12.5, source: 'original' }] },
+      { segments: [{ text: `so the idea is isn’t`, start: 10, end: 12.5, source: 'original' }] },
       scene(),
       words,
     )
@@ -148,6 +148,22 @@ describe('toRefinement voicing source (story 03j)', () => {
     expect(r.segments[1].suggestedSource).toBeUndefined()
     // the key is genuinely ABSENT for junk values, not set to undefined
     expect(r.segments.map((s) => 'suggestedSource' in s)).toEqual([true, false])
+  })
+
+  it('downgrades when the cursor clamp shifts the span past some of the words', () => {
+    // The first segment ends at 10.6, so the second is cursor-clamped to start
+    // there — its slice no longer plays 'So the', but its text still claims them.
+    const r = toRefinement(
+      {
+        segments: [
+          { text: 'So', start: 10, end: 10.6 },
+          { text: `so the idea is isn't`, start: 10, end: 12.5, source: 'original' },
+        ],
+      },
+      scene(),
+      words,
+    )
+    expect(r.segments[1].suggestedSource).toBe('revoice')
   })
 })
 

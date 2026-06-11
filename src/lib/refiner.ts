@@ -63,6 +63,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 function normWords(text: string): string[] {
   return text
     .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'") // curly → straight apostrophe
     .replace(/[^\p{L}\p{N}']+/gu, ' ')
     .split(' ')
     .filter(Boolean)
