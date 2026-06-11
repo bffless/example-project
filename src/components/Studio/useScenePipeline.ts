@@ -840,13 +840,14 @@ export function useScenePipeline() {
     [adoptingId, scenes, audioUrl, words, uploadReq, patchScene],
   )
 
-  // Cut this scene into its own video clip (story 03g, build step 0). The raw
-  // source is the immutable source of truth — every scene re-reads it: prefer the
-  // in-memory `file` (no refetch), else pull the persisted source serve URL back.
-  // We trim `[start, end]` frame-accurately in ffmpeg.wasm, upload the small clip
-  // (kind `scene-clip`), and persist its serve path on the scene (`clipUrl`), so a
-  // reload resumes with the cut already done and the Build preview plays the clip,
-  // not the whole film. Re-cutting overwrites it.
+  // Cut this scene into its own video clip + soundtrack (story 03g + 03k, build
+  // step 0). The raw source is the immutable source of truth — every scene
+  // re-reads it: prefer the in-memory `file` (no refetch), else pull the persisted
+  // source serve URL back. We trim `[start, end]` frame-accurately in ffmpeg.wasm
+  // and slice the same span from the talk WAV, upload both (kind `scene-clip` /
+  // `audio`, SEQUENTIALLY — the keep-alive 502 lesson), and persist both serve
+  // paths in ONE patch, so the scene gets both resources or neither and a reload
+  // resumes with the cut done. Re-cutting overwrites both.
   const sliceScene = useCallback(
     async (sceneId: string, file: File | null) => {
       if (slicingId) return
@@ -855,6 +856,7 @@ export function useScenePipeline() {
       setSlicingId(sceneId)
       setSceneError(null)
       try {
+        if (!audioUrl) throw new Error('No extracted audio to cut the scene soundtrack from.')
         const source = file
           ? new Uint8Array(await file.arrayBuffer())
           : sourceUrl
@@ -872,14 +874,17 @@ export function useScenePipeline() {
         const blob = await ffmpegSlice({ source, command })
         const clip = new File([blob], `scene-${scene.index}.mp4`, { type: 'video/mp4' })
         const { url } = await uploadReq({ file: clip, kind: 'scene-clip' }).unwrap()
-        patchScene(sceneId, { clipUrl: url })
+        const wav = await sliceAudioWav(audioUrl, scene.start, scene.end)
+        const audioFile = new File([wav], `scene-${scene.index}-audio.wav`, { type: 'audio/wav' })
+        const { url: clipAudioUrl } = await uploadReq({ file: audioFile, kind: 'audio' }).unwrap()
+        patchScene(sceneId, { clipUrl: url, clipAudioUrl })
       } catch (e) {
         setSceneError(stageError(e))
       } finally {
         setSlicingId(null)
       }
     },
-    [slicingId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
+    [slicingId, scenes, audioUrl, sourceUrl, signedSourceUrl, uploadReq, patchScene],
   )
 
   // Delete one New-pane run, reopening its gap (story 03d) — e.g. to clear room
