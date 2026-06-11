@@ -50,6 +50,7 @@ import {
   setWords,
   setSynopsis,
   setScenesJobId,
+  setDirectorPromptJobId,
   setVoice,
   addSavedVoice,
   removeSavedVoice,
@@ -167,6 +168,7 @@ export function useScenePipeline() {
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
   const direction = useAppSelector((s) => s.studio.direction)
+  const directorPromptJobId = useAppSelector((s) => s.studio.directorPromptJobId)
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
   const duration = useAppSelector((s) => s.studio.duration)
   const voice = useAppSelector((s) => s.studio.voice)
@@ -353,6 +355,9 @@ export function useScenePipeline() {
           status: 'done',
           detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · ${cutCount} cut${cutCount === 1 ? '' : 's'} · script tightened`,
         })
+        // Remember the job row so the prompt disclosure can fetch what was sent
+        // to Gemini (story 03m). Separate from the in-flight id cleared below.
+        dispatch(setDirectorPromptJobId(jobId))
         dispatch(setScenesJobId(null))
       } catch (e) {
         // Terminal: drop the persisted job id (so we don't resume a dead job) and
@@ -414,6 +419,7 @@ export function useScenePipeline() {
         patchScene(sceneId, {
           refined: { ...refinement, segments },
           refineJobId: null,
+          promptJobId: jobId,
           // null (not stale) when the new refinement has no voiced audio yet.
           narrationSeconds: total > 0 ? total : null,
         })
@@ -573,6 +579,23 @@ export function useScenePipeline() {
       await completeDirectorJob(jobId, src, clipDuration)
     },
     [patch, dispatch, words, persistedSheets, direction, scenesReq, completeDirectorJob],
+  )
+
+  // Re-run the master director after it's already done (story 03m). `next()`
+  // runs the CURRENT stage — wrong here, it would run clone — so this drives the
+  // director step directly. The UI confirm has already happened by now; the
+  // scene queue is replaced wholesale by `completeDirectorJob` (which also
+  // resets the selection). Same enqueue+poll as a first run, so `scenesJobId`
+  // persists and a mid-redo reload resumes polling.
+  const rerunDirector = useCallback(
+    async (ctx: StepContext) => {
+      try {
+        await runDirector(ctx)
+      } catch (e) {
+        patch('director', { status: 'error', detail: stageError(e) })
+      }
+    },
+    [runDirector, patch],
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
@@ -953,7 +976,7 @@ export function useScenePipeline() {
   const clearRefinement = useCallback(
     (id: string) => {
       setSceneError(null)
-      patchScene(id, { refined: null, narrationSeconds: null })
+      patchScene(id, { refined: null, narrationSeconds: null, promptJobId: undefined })
     },
     [patchScene],
   )
@@ -1221,6 +1244,8 @@ export function useScenePipeline() {
     direction,
     setRefinePrompt,
     setIncludeDirection,
+    directorPromptJobId,
+    rerunDirector,
     editSceneCut,
     adoptOriginalAudio,
     adoptSegmentOriginal,
