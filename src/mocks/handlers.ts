@@ -238,22 +238,26 @@ function mockRefiner(body: {
   if (lines.length >= 2) {
     const mid = Math.ceil(lines.length / 2)
     const splitAt = lines[mid].start // a line boundary — the halves' words split cleanly
-    const pauseEnd = Math.min(splitAt + 2, end)
-    const segments = [
-      {
-        text: lines.slice(0, mid).map((l) => l.text).join(' '),
-        start,
-        end: splitAt,
-        source: 'original',
-      },
-      {
-        text: (body.draftText ?? '').trim() || lines.slice(mid).map((l) => l.text).join(' '),
-        start: pauseEnd,
-        end,
-        source: 'revoice',
-      },
-    ]
-    return { segments, cuts: [{ start: splitAt, end: pauseEnd }] }
+    // Out-of-range timestamps (transcription jitter) would make a zero-length
+    // second half — fall through to the draft-split below instead.
+    if (splitAt < end) {
+      const pauseEnd = Math.min(splitAt + 2, end)
+      const segments = [
+        {
+          text: lines.slice(0, mid).map((l) => l.text).join(' '),
+          start,
+          end: splitAt,
+          source: 'original',
+        },
+        {
+          text: (body.draftText ?? '').trim() || lines.slice(mid).map((l) => l.text).join(' '),
+          start: pauseEnd,
+          end,
+          source: 'revoice',
+        },
+      ]
+      return { segments, cuts: [{ start: splitAt, end: pauseEnd }] }
+    }
   }
 
   // Transcript too short to halve — the old draft-split, now tagged revoice.
@@ -310,7 +314,7 @@ function mockDirector(duration: number, direction: string) {
   const total = Number.isFinite(duration) && duration > 0 ? duration : 600
   const count = Math.max(1, Math.round(total / 210)) // ~3.5 min scenes
   // "keep my voice / cut the ums" direction → an all-original plan (story 03j).
-  const keepOriginal = /\b(um+s?|ah+s?|filler|keep my (own )?voice|original audio)\b/i.test(direction)
+  const keepOriginal = /\b(um+s?|uh+s?|ah+s?|filler|keep my (own )?voice|original audio)\b/i.test(direction)
   const VOICINGS = ['revoice', 'original', 'mixed'] as const
   const each = total / count
   const beats = [
