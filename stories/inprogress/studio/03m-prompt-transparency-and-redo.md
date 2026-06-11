@@ -3,7 +3,8 @@
 > Read `00-architecture-and-state.md` first, then `03l-scene-prompt-context.md`
 > (this builds directly on its UI surfaces and the creator-prompt plumbing).
 
-**Status:** 📝 spec ready (brainstormed 2026-06-11, not started).
+**Status:** ✅ shipped (2026-06-11; FE + schema v2 + rules `138f27fb`/`afacb572`/
+`a486eb93`, see "Built" below). Rides PR #20 with 03l.
 
 ## Why
 
@@ -140,21 +141,24 @@ type Scene = {
 
 ## Acceptance criteria
 
-- [ ] `studio_jobs` has `prompt`/`system`; both AI rules store them at enqueue;
-      the poll endpoint returns them (rule edits recorded here).
-- [ ] After a director run, a collapsed disclosure under the synopsis shows the
-      exact prompt + system instruction on expand (lazy-fetched, not persisted).
-- [ ] After a scene refine, the same disclosure appears in that scene's refine
-      panel; revert removes it.
-- [ ] The director can be re-run from Prep after completion: confirm-gated,
-      replaces all scenes (build work included), selection resets, direction
-      textarea feeds the new run, mid-redo reload resumes polling.
-- [ ] Old jobs / old persisted sessions degrade gracefully (no disclosure or
-      "Not available for this run." — never an error).
-- [ ] MSW mocks cover stash + return of prompt/system; mock and real share the
+- [x] `studio_jobs` has `prompt`/`system`; both AI rules store them at enqueue;
+      the poll endpoint returns them (rule edits recorded below; curl-verified).
+- [x] After a director run, a collapsed disclosure under the synopsis shows the
+      exact prompt + system instruction on expand (lazy-fetched, not persisted) —
+      in both Prep and Build.
+- [x] After a scene refine, the same disclosure appears in that scene's refine
+      panel; revert removes it (`clearRefinement` drops `promptJobId`).
+- [x] The director can be re-run from Prep after completion: confirm-gated
+      (RTL-tested), replaces all scenes (build work included), selection resets
+      (`completeDirectorJob`), direction textarea feeds the new run, mid-redo
+      reload resumes polling (`scenesJobId` path unchanged).
+- [x] Old jobs / old persisted sessions degrade gracefully (no disclosure
+      without a pointer; "Not available for this run." on pre-03m rows —
+      curl-verified null, never an error).
+- [x] MSW mocks cover stash + return of prompt/system; mock and real share the
       poll shape.
-- [ ] `npm run build` / `npm run lint` / `npm run test:run` green (modulo the
-      two known ChatPanel lint errors).
+- [x] `npm run build` / `npm run lint` / `npm run test:run` green (modulo the
+      two known ChatPanel lint errors; zero findings in 03m files).
 
 ## Built — backend edits (2026-06-11)
 
