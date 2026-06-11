@@ -329,3 +329,61 @@ export function segmentsToTimedWords(
   }
   return out
 }
+
+/**
+ * The SceneMeta "Voicing" line (story 03j): the director's coarse plan until
+ * the scene is refined, then the real segment mix. Each refined segment counts
+ * by what ACTUALLY happened to it (`audioSource`), falling back to the AI's
+ * suggestion. Null = nothing to show (old data, no plan).
+ */
+export function voicingSummary(scene: Scene): string | null {
+  const segs = scene.refined?.segments
+  if (segs?.length) {
+    const original = segs.filter((s) => (s.audioSource ?? s.suggestedSource) === 'original').length
+    const revoice = segs.length - original
+    if (!original) return 're-voice'
+    if (!revoice) return 'original audio'
+    return `${original} original · ${revoice} re-voice`
+  }
+  if (scene.voicing === 'original') return 'original audio'
+  if (scene.voicing === 'revoice') return 're-voice'
+  if (scene.voicing === 'mixed') return 'partial'
+  return null
+}
+
+/** The auto-adopt work list (story 03j): segments the refiner wants voiced from
+ *  the clip's own audio that aren't voiced yet. */
+export function suggestedOriginalIndices(segments: NarrationSegment[]): number[] {
+  return segments.flatMap((s, i) => (s.suggestedSource === 'original' && !s.audioUrl ? [i] : []))
+}
+
+/**
+ * Fold uploaded original-audio clips back onto their segments (story 03j).
+ * `clips[k]` belongs to `segments[indices[k]]`; null = that slice/upload failed
+ * and the segment stays unvoiced (it keeps its "Use original" chip). A voiced
+ * run's `end` snaps to its measured length, mirroring `setSegmentAudio`.
+ */
+export function applyOriginalClips(
+  segments: NarrationSegment[],
+  indices: number[],
+  clips: ({ url: string; seconds: number } | null)[],
+): { segments: NarrationSegment[]; failed: number } {
+  const out = [...segments]
+  let failed = 0
+  indices.forEach((segIndex, k) => {
+    const clip = clips[k]
+    const seg = out[segIndex]
+    if (!clip || !seg) {
+      failed += 1
+      return
+    }
+    out[segIndex] = {
+      ...seg,
+      audioUrl: clip.url,
+      audioSeconds: clip.seconds,
+      end: seg.start + clip.seconds,
+      audioSource: 'original',
+    }
+  })
+  return { segments: out, failed }
+}
