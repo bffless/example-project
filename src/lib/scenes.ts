@@ -41,6 +41,11 @@ export type NarrationSegment = {
    *  slice of the source clip's ORIGINAL audio dropped back into the new edit
    *  (story 03d — "use the original audio here", no re-voicing). */
   audioSource?: 'ai' | 'recorded' | 'original'
+  /** The refiner's per-segment suggestion (story 03j): voice this run with the
+   *  span's own ORIGINAL audio, or re-voice its (new) text. Pure provenance —
+   *  it survives user overrides, so revert/re-open flows can still show what
+   *  the AI wanted. `audioSource` above stays "what actually happened". */
+  suggestedSource?: 'original' | 'revoice'
 }
 
 /**
@@ -96,6 +101,12 @@ export type Scene = {
    *  it; cleared (null) on terminal status. */
   refineJobId?: string | null
   thumb?: string
+  /** The master director's coarse voicing plan for this chapter (story 03j):
+   *  'original' = ship this span in the creator's own audio, trims as cuts;
+   *  'revoice' = tightened narration to be re-voiced (the pre-03j behavior);
+   *  'mixed' = some of both — the refiner decides where. Absent = unknown
+   *  (old persisted projects / old responses) — no badge. */
+  voicing?: 'original' | 'revoice' | 'mixed'
 }
 
 /** How much the AI condenses each scene's words (mock). */
