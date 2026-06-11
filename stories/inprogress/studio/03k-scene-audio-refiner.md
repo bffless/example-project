@@ -2,8 +2,11 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** 📝 spec ready (brainstormed 2026-06-11) — builds on 03j (`suggestedSource`,
-verbatim guard) and 03g (`clipUrl` scene cut), so the branch stacks on PR #18.
+**Status:** ✅ shipped (FE + rule `afacb572` prep/signAudio/audio-input/prompt; pre-edit
+backup + payload in `.bffless-backups/*-03k*`) — live-Gemini effect (does it dodge the
+cough?) deferred until a real cut+refine runs, same as 03j. Note: the server enforces
+the missing-`audioUrl` rejection as a `prep` throw → **500 `EXECUTION_ERROR`** (verified
+by curl, no job enqueued); the MSW mock's 400 is the same contract with a stricter status.
 
 ## Why
 
@@ -99,16 +102,20 @@ type Scene = {
 
 ## Acceptance criteria
 
-- [ ] Cutting a scene uploads + persists both `clipUrl` and `clipAudioUrl`
+- [x] Cutting a scene uploads + persists both `clipUrl` and `clipAudioUrl`
       (sequential uploads, both-or-neither patch); re-cut overwrites both.
-- [ ] Refine is disabled without `clipAudioUrl` (hint shown) and the request
-      carries `audioUrl`; the MSW mock rejects a missing `audioUrl`.
-- [ ] Rule `afacb572` signs the scene audio and passes it as the Gemini `audio`
+- [x] Refine is disabled without `clipAudioUrl` (hint shown, RTL-tested) and the
+      request carries `audioUrl`; the MSW mock rejects a missing `audioUrl`.
+- [x] Rule `afacb572` signs the scene audio and passes it as the Gemini `audio`
       input; prompt carries the offset mapping + the flow-general rule.
-- [ ] Non-destructive invariants hold: director `draftText`/`cuts` untouched;
-      `toRefinement` + 03j verbatim guard unchanged; revert still = clear
-      `refined`.
-- [ ] `npm run build` / `npm run lint` / `npm run test:run` pass.
+      _(missing-`audioUrl` rejection curl-verified — `prep` throws before
+      `createJob`, so nothing is enqueued and no credits are spent)_
+- [x] Non-destructive invariants hold: director `draftText`/`cuts` untouched;
+      `toRefinement` + 03j verbatim guard unchanged (zero edits to either);
+      revert still = clear `refined`.
+- [x] `npm run build` / `npm run lint` / `npm run test:run` pass. _(lint: zero
+      findings in 03k files; the two pre-existing `ChatPanel.tsx` errors are the
+      known 03i-era debt, unchanged)_
 - [ ] ⚠️ Live-Gemini effect (does it actually dodge the cough?) needs a real
       cut+refine with the Replicate token — same deferral as 03j; the code-level
       done bar is the items above.
