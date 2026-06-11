@@ -4,6 +4,7 @@ import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '.
 import { timedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import {
   toRefinement,
+  refineDirections,
   effectiveSegments,
   addCut,
   removeCut,
@@ -124,12 +125,10 @@ function stageError(e: unknown): string {
 
 export type { TranscriptWord }
 
-/**
- * What each step needs: the source file, its object URL, and its duration.
- * `direction` is the optional free-text note the user types for the master
- * director step; ignored by every other step.
- */
-export type StepContext = { file: File; src: string; duration: number; direction?: string }
+/** What each step needs: the source file, its object URL, and its duration.
+ *  (The director's free-text direction now comes from the persisted slice —
+ *  story 03l — not the step context.) */
+export type StepContext = { file: File; src: string; duration: number }
 
 /**
  * Owns the one-time prep pipeline and the scene queue you build afterwards.
@@ -167,6 +166,7 @@ export function useScenePipeline() {
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
+  const direction = useAppSelector((s) => s.studio.direction)
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
   const duration = useAppSelector((s) => s.studio.duration)
   const voice = useAppSelector((s) => s.studio.voice)
@@ -556,7 +556,7 @@ export function useScenePipeline() {
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(
-    async ({ src, duration: clipDuration, direction }: StepContext) => {
+    async ({ src, duration: clipDuration }: StepContext) => {
       patch('director', { status: 'active' })
       const transcript = timedTranscript(words)
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
@@ -566,13 +566,13 @@ export function useScenePipeline() {
       const { jobId } = await scenesReq({
         transcript,
         sheetUrls,
-        direction: direction ?? '',
+        direction,
         duration: clipDuration,
       }).unwrap()
       dispatch(setScenesJobId(jobId))
       await completeDirectorJob(jobId, src, clipDuration)
     },
-    [patch, dispatch, words, persistedSheets, scenesReq, completeDirectorJob],
+    [patch, dispatch, words, persistedSheets, direction, scenesReq, completeDirectorJob],
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
@@ -759,7 +759,9 @@ export function useScenePipeline() {
           cuts: scene.cuts ?? [],
           sheetUrls,
           audioUrl: scene.clipAudioUrl,
-          direction: '',
+          // Creator steering (story 03l): the scene's own prompt + the global
+          // director prompt (subject to the scene's include-checkbox).
+          ...refineDirections(scene, direction),
         }).unwrap()
         patchScene(id, { refineJobId: jobId })
         await completeRefineJob(id, jobId)
@@ -768,7 +770,19 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene, completeRefineJob],
+    [sheetingId, refiningId, scenes, words, direction, refineSceneReq, patchScene, completeRefineJob],
+  )
+
+  // Creator steering for the refine call (story 03l). Both are INPUT-layer scene
+  // fields — they survive revert (`clearRefinement` never touches them) and seed
+  // the next re-refine.
+  const setRefinePrompt = useCallback(
+    (sceneId: string, text: string) => patchScene(sceneId, { refinePrompt: text }),
+    [patchScene],
+  )
+  const setIncludeDirection = useCallback(
+    (sceneId: string, on: boolean) => patchScene(sceneId, { includeDirection: on }),
+    [patchScene],
   )
 
   // Hand-edit a scene's cuts directly on the diff grid (story 03d). `add` paints
@@ -1204,6 +1218,9 @@ export function useScenePipeline() {
     saveSceneCut,
     generateSceneSheets,
     refineScene,
+    direction,
+    setRefinePrompt,
+    setIncludeDirection,
     editSceneCut,
     adoptOriginalAudio,
     adoptSegmentOriginal,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
+import { setDirection, setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -40,8 +40,9 @@ export function Studio() {
   const [rehydrating, setRehydrating] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
   // Free-text direction the user hands the master director (e.g. "keep the demo
-  // at 12:30, make the intro punchy"). Only used by the director prep step.
-  const [direction, setDirection] = useState('')
+  // at 12:30, make the intro punchy"). Persisted in the studio slice (story 03l)
+  // so Build forwards it to per-scene refines long after prep, across reloads.
+  const direction = useAppSelector((s) => s.studio.direction)
   // The voice step's resource is revealed by clicking its board action (rather
   // than running a pipeline inline) — and stays open once a voice exists.
   const [showVoiceStudio, setShowVoiceStudio] = useState(false)
@@ -155,14 +156,14 @@ export function Studio() {
   // revoke once the step is done (the persisted `file`/`url` drive the preview).
   async function runStep() {
     if (file && url) {
-      pipe.next({ file, src: url, duration, direction })
+      pipe.next({ file, src: url, duration })
       return
     }
     const f = await rehydrateClip()
     if (!f) return
     const tmpUrl = URL.createObjectURL(f)
     try {
-      await pipe.next({ file: f, src: tmpUrl, duration, direction })
+      await pipe.next({ file: f, src: tmpUrl, duration })
     } finally {
       URL.revokeObjectURL(tmpUrl)
     }
@@ -457,7 +458,7 @@ export function Studio() {
                       <div className="mt-6">
                         <DirectorPanel
                           value={direction}
-                          onChange={setDirection}
+                          onChange={(v) => dispatch(setDirection(v))}
                           onSubmit={runStep}
                           busy={pipe.running || rehydrating}
                           sheetCount={pipe.contactSheets.length}

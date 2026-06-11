@@ -54,8 +54,12 @@ export type RefineSceneRequest = {
    *  the pipeline signs it like the sheets and Gemini listens to align cut and
    *  segment boundaries to the natural flow of speech (story 03k). */
   audioUrl: string
-  /** Optional free-text direction from the user. */
+  /** The creator's per-scene instruction (`scene.refinePrompt`, trimmed). */
   direction: string
+  /** The creator's global director prompt, forwarded as whole-video context
+   *  while the scene's include-checkbox is on (story 03l); `''` when the
+   *  checkbox is off or the prompt is empty. */
+  directorDirection: string
 }
 
 /**
