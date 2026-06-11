@@ -126,6 +126,12 @@ const studioHandlers = [
       draftText?: string
       cuts?: { start: number; end: number }[]
       audioUrl?: string
+      // Creator steering (story 03l): the scene's own prompt + the global
+      // director prompt (empty when the scene's include-checkbox is off).
+      // Accepted so mock and real share the request shape; the deterministic
+      // fixture ignores the content.
+      direction?: string
+      directorDirection?: string
     }
     // Mirrors the real rule's schema (story 03k): the scene's cut audio is
     // required — refine without ears is the old cough-blind behavior.
