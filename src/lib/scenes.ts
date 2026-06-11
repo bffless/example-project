@@ -78,6 +78,12 @@ export type Scene = {
    *  master director's first pass — never overwritten; refined edits live in
    *  `refined.cuts`. */
   cuts?: Cut[]
+  /** The master director's coarse voicing plan for this chapter (story 03j):
+   *  'original' = ship this span in the creator's own audio, trims as cuts;
+   *  'revoice' = tightened narration to be re-voiced (the pre-03j behavior);
+   *  'mixed' = some of both — the refiner decides where. Absent = unknown
+   *  (old persisted projects / old responses) — no badge. */
+  voicing?: 'original' | 'revoice' | 'mixed'
   /** Per-scene dense contact sheets captured for the refiner (story 03c,
    *  button 1). Like the prep sheets, only the bucket `url` is persisted — the
    *  base64 `dataUrl` is dropped after upload. */
@@ -101,12 +107,6 @@ export type Scene = {
    *  it; cleared (null) on terminal status. */
   refineJobId?: string | null
   thumb?: string
-  /** The master director's coarse voicing plan for this chapter (story 03j):
-   *  'original' = ship this span in the creator's own audio, trims as cuts;
-   *  'revoice' = tightened narration to be re-voiced (the pre-03j behavior);
-   *  'mixed' = some of both — the refiner decides where. Absent = unknown
-   *  (old persisted projects / old responses) — no badge. */
-  voicing?: 'original' | 'revoice' | 'mixed'
 }
 
 /** How much the AI condenses each scene's words (mock). */
