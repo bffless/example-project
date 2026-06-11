@@ -156,6 +156,24 @@ type Scene = {
 - [ ] `npm run build` / `npm run lint` / `npm run test:run` green (modulo the
       two known ChatPanel lint errors).
 
+## Built — backend edits (2026-06-11)
+
+- **Schema `studio_jobs`** (`acdca97c`) → v2: added optional `prompt` + `system`
+  as **`text`** fields (not `string` — the director prompt embeds the whole-talk
+  transcript, tens of KB).
+- **Rule `138f27fb` (`/api/scenes`)** and **rule `afacb572`
+  (`/api/refine-scene`)**: `createJob` (`data_create`) fields gained
+  `prompt: "steps.prep.prompt"` + `system: "steps.prep.system"`. Nothing else
+  changed (prep/postSteps untouched). Pre-edit backups:
+  `.bffless-backups/2026-06-11-03m-scenes.json` / `…-03m-refine-scene.json`
+  (gitignored, local-only).
+- **Poll rule `a486eb93`**: the `shape` function returns `prompt`/`system`
+  (null when absent). Backup: `.bffless-backups/2026-06-11-03m-job-poll.json`.
+- **Verified live by curl**: a fresh refine enqueue → poll returns the full
+  stitched prompt (both 03l creator labels present) + system instruction while
+  the job is still `running` (stored at enqueue — no model run needed); a
+  pre-03m job id returns `prompt: null` / `system: null`, not an error.
+
 ## Out of scope
 
 - Prompts for the transcribe / voice / search jobs (director + refiner only).
