@@ -38,9 +38,13 @@ voicing work in Build.
   Replicate credits; recording needs a human).
 - **Scene level keeps `mixed`** — a chapter can legitimately contain both kinds
   of segments; the badge is a pre-refine forecast, not a contract.
-- **Prompt-preference UI deferred.** The free-text `direction` already reaches
-  both passes; the prompts below are taught to honor voice-keeping directions.
-  Preset/edit-style pickers fold into story 03f Parts A–D (custom prompt).
+- **Prompt-preference UI deferred.** The free-text `direction` reaches the
+  director today; the prompts below are taught to honor voice-keeping
+  directions. Note the refiner call still sends `direction: ''`
+  (`useScenePipeline.refineScene`), so the refiner-prompt direction sentence is
+  dormant until the 03f Part A handoff passes it through — same deferral as the
+  scene-`voicing` context handoff. Preset/edit-style pickers fold into story
+  03f Parts A–D (custom prompt).
 
 ## Data model (`src/lib/scenes.ts` — both fields optional, no migration)
 
