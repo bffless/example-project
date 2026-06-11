@@ -71,9 +71,23 @@ describe('SegmentVoiceControl — Use original (story 03j)', () => {
   })
 
   it('hides it for revoice / untagged runs', () => {
-    render(
+    const { unmount } = render(
       <SegmentVoiceControl
         segment={seg({ suggestedSource: 'revoice' })}
+        canAI
+        onGenerateAI={noop}
+        onRecord={noop}
+        onPlay={noop}
+        onDelete={noop}
+        onUseOriginal={noop}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /use original/i })).toBeNull()
+    unmount()
+    // untagged (no suggestedSource) — the common case for un-refined scenes
+    render(
+      <SegmentVoiceControl
+        segment={seg()}
         canAI
         onGenerateAI={noop}
         onRecord={noop}

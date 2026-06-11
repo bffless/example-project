@@ -142,6 +142,7 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
               className={btn}
               onClick={onUseOriginal}
               title="The AI suggests keeping your own audio here — slice it straight from the clip"
+              aria-label="Use original audio for this run"
             >
               ◉ Use original
             </button>
