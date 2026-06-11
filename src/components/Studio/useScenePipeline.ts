@@ -11,9 +11,11 @@ import {
   moveRun as moveRunSegments,
   insertSegment,
   removeSegment,
+  suggestedOriginalIndices,
+  applyOriginalClips,
   type RefineSceneRaw,
 } from '../../lib/refiner'
-import { extractAudio, extractAudioWav, sliceAudioWav } from '../../lib/audio'
+import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
 import {
@@ -278,6 +280,41 @@ export function useScenePipeline() {
   )
 
   /**
+   * Voice a list of spans with the clip's OWN audio (story 03j): decode the
+   * whole-clip WAV once, slice every span from the same PCM, then upload the
+   * slices SEQUENTIALLY (parallel registers reset the dev proxy's keep-alive
+   * sockets — same lesson as the contact-sheet uploads). One entry per span:
+   * the uploaded clip + its measured length, or null if that span failed (the
+   * caller leaves that segment unvoiced).
+   */
+  const sliceAndUploadSpans = useCallback(
+    async (
+      spans: { start: number; end: number }[],
+    ): Promise<({ url: string; seconds: number } | null)[]> => {
+      if (!audioUrl) throw new Error('No extracted audio to slice from.')
+      const blobs = await sliceManyAudioWav(audioUrl, spans)
+      const out: ({ url: string; seconds: number } | null)[] = []
+      for (let i = 0; i < blobs.length; i++) {
+        try {
+          const { start, end } = spans[i]
+          const file = new File(
+            [blobs[i]],
+            `original-${Math.round(start)}-${Math.round(end)}.wav`,
+            { type: 'audio/wav' },
+          )
+          const { url } = await uploadReq({ file, kind: 'voice' }).unwrap()
+          const measured = await measureAudioDuration(url)
+          out.push({ url, seconds: measured > 0 ? measured : end - start })
+        } catch {
+          out.push(null)
+        }
+      }
+      return out
+    },
+    [audioUrl, uploadReq],
+  )
+
+  /**
    * Drive a master-director job to completion, then commit it — shared by the
    * live action (`runDirector`) and resume-on-reload. `videoSrc` is the in-memory
    * object URL when we have it (live) or the persisted source serve URL (resume);
@@ -335,6 +372,13 @@ export function useScenePipeline() {
    * (non-destructive). Shared by the live `refineScene` and resume-on-reload;
    * `pollsInFlight` keeps the two from double-polling one job. Clears the scene's
    * `refineJobId` on any terminal status.
+   *
+   * Auto-adopt (story 03j): segments the refiner tagged `original` (and the
+   * verbatim guard upheld) are voiced from the clip's own audio BEFORE the
+   * refinement is committed — one decode, sequential uploads, per-segment
+   * failures non-fatal (each keeps its one-click "Use original" chip).
+   * Committing ONCE, after the audio work, means no second patch racing the
+   * producer's hand-edits.
    */
   const completeRefineJob = useCallback(
     async (sceneId: string, jobId: string) => {
@@ -345,10 +389,37 @@ export function useScenePipeline() {
       try {
         const { result } = await pollJob(jobId)
         const scene = scenes.find((s) => s.id === sceneId)
-        if (scene) {
-          patchScene(sceneId, { refined: toRefinement(result as RefineSceneRaw, scene), refineJobId: null })
-        } else {
+        if (!scene) {
           patchScene(sceneId, { refineJobId: null })
+          return
+        }
+        const refinement = toRefinement(result as RefineSceneRaw, scene, words)
+
+        const idx = suggestedOriginalIndices(refinement.segments)
+        let segments = refinement.segments
+        let failed = 0
+        if (idx.length) {
+          let clips: ({ url: string; seconds: number } | null)[] = idx.map(() => null)
+          try {
+            clips = await sliceAndUploadSpans(
+              idx.map((i) => ({ start: segments[i].start, end: segments[i].end })),
+            )
+          } catch {
+            // No extracted audio / decode failed — every tagged segment falls
+            // back to its chip.
+          }
+          ;({ segments, failed } = applyOriginalClips(segments, idx, clips))
+        }
+        const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+        patchScene(sceneId, {
+          refined: { ...refinement, segments },
+          refineJobId: null,
+          ...(total > 0 ? { narrationSeconds: total } : {}),
+        })
+        if (failed > 0) {
+          setSceneError(
+            `Couldn't reuse the original audio for ${failed} segment${failed === 1 ? '' : 's'} — use the run's "Use original" button to retry.`,
+          )
         }
       } catch (e) {
         setSceneError(stageError(e))
@@ -358,7 +429,7 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [pollJob, scenes, patchScene],
+    [pollJob, scenes, words, patchScene, sliceAndUploadSpans],
   )
 
   // Resume any in-flight job after a hard reload (redux-persist brings back the
@@ -956,6 +1027,35 @@ export function useScenePipeline() {
     [voicingSegKey, uploadReq, setSegmentAudio],
   )
 
+  // One-click "Use original" (story 03j): voice THIS run with the slice of the
+  // clip's own audio under its span — the manual completion of an AI 'original'
+  // suggestion auto-adopt couldn't finish (or whose audio was later cleared).
+  // Same per-segment busy key as the other voicing actions.
+  const adoptSegmentOriginal = useCallback(
+    async (sceneId: string, segIndex: number) => {
+      if (voicingSegKey) return
+      const scene = scenes.find((s) => s.id === sceneId)
+      const seg = scene && effectiveSegments(scene)[segIndex]
+      if (!seg) return
+      setVoicingSegKey(`${sceneId}:${segIndex}`)
+      setSceneError(null)
+      try {
+        const [clip] = await sliceAndUploadSpans([{ start: seg.start, end: seg.end }])
+        if (!clip) throw new Error("Couldn't slice the original audio for this run.")
+        setSegmentAudio(sceneId, segIndex, {
+          audioUrl: clip.url,
+          audioSeconds: clip.seconds,
+          audioSource: 'original',
+        })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setVoicingSegKey(null)
+      }
+    },
+    [voicingSegKey, scenes, sliceAndUploadSpans, setSegmentAudio],
+  )
+
   // ---- Scene build loop -----------------------------------------------------
 
   const updateDraft = useCallback(
@@ -1095,6 +1195,7 @@ export function useScenePipeline() {
     refineScene,
     editSceneCut,
     adoptOriginalAudio,
+    adoptSegmentOriginal,
     addSnippet,
     sliceScene,
     deleteSegment,
