@@ -8,6 +8,7 @@ import reducer, {
   setSourceUrl,
   setWords,
   setSelected,
+  setDirection,
   resetStudio,
   type StudioState,
 } from './studioSlice'
@@ -56,6 +57,13 @@ describe('studioSlice', () => {
     s = reducer(s, patchScene({ id: 'scene-2', patch: { status: 'built' } }))
     expect(s.scenes.find((sc) => sc.id === 'scene-2')?.status).toBe('built')
     expect(s.scenes.find((sc) => sc.id === 'scene-1')?.status).toBe('pending')
+  })
+
+  it('setDirection stores the director prompt; resetStudio clears it', () => {
+    let s = reducer(undefined, setDirection('keep the demo at 12:30'))
+    expect(s.direction).toBe('keep the demo at 12:30')
+    s = reducer(s, resetStudio())
+    expect(s.direction).toBe('')
   })
 
   it('resetStudio clears persisted state back to fresh', () => {

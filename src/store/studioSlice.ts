@@ -82,6 +82,14 @@ export type StudioState = {
   /** One-line logline of the whole talk, from the master director (story 03). */
   synopsis: string | null
   /**
+   * The creator's free-text direction to the master director (story 03l).
+   * Persisted — it's sent with `/api/scenes` at prep time AND forwarded to every
+   * per-scene refine in Build (each scene has an include-checkbox), so it must
+   * outlive the prep step and survive reloads. Old persisted sessions rehydrate
+   * without the key and fall back to '' (top-level persist merge) — no migration.
+   */
+  direction: string
+  /**
    * In-flight master-director job id (story 03f Part 0). The director call is now
    * async fire-and-poll: `/api/scenes` enqueues a job and returns an id we poll on.
    * Persisted so a hard reload resumes polling instead of stranding a running job;
@@ -117,6 +125,7 @@ const initialState: StudioState = {
   contactSheets: [],
   words: [],
   synopsis: null,
+  direction: '',
   scenesJobId: null,
   voice: null,
   savedVoices: [],
@@ -171,6 +180,10 @@ const studioSlice = createSlice({
     },
     setSynopsis(state, action: PayloadAction<string | null>) {
       state.synopsis = action.payload
+    },
+    /** The creator's master-director prompt (story 03l) — see `direction` above. */
+    setDirection(state, action: PayloadAction<string>) {
+      state.direction = action.payload
     },
     /** The in-flight director job id (story 03f). Null clears it on terminal status. */
     setScenesJobId(state, action: PayloadAction<string | null>) {
@@ -228,6 +241,7 @@ export const {
   setContactSheets,
   setWords,
   setSynopsis,
+  setDirection,
   setScenesJobId,
   setVoice,
   addSavedVoice,
