@@ -3,6 +3,7 @@ import {
   buildTranscriptGrid,
   cutColumns,
   formatClock,
+  gridPosition,
   segmentsPerLine,
   windowLines,
   DEFAULT_SECONDS_PER_LINE,
@@ -1269,6 +1270,11 @@ function Pane({
   // gutter (timestamp) + one equal column per time slice
   const template = `3.5rem repeat(${cols}, minmax(0, 1fr))`
 
+  // Which row + cell the audio playhead sits in — the row lights up and the
+  // exact cell being spoken gets a stronger highlight that walks the grid.
+  const playPos =
+    playheadSec != null ? gridPosition(playheadSec, secondsPerLine, segmentSeconds) : null
+
   return (
     <div className="bg-paper">
       <div className="flex items-baseline gap-2 px-4 py-2.5">
@@ -1335,11 +1341,8 @@ function Pane({
                   edit={edit}
                   rowHeight={rowHeight}
                   onPlay={onPlayFrom ? () => onPlayFrom(line.startSec) : undefined}
-                  playing={
-                    playheadSec != null &&
-                    playheadSec >= line.startSec &&
-                    playheadSec < line.startSec + secondsPerLine
-                  }
+                  playing={playPos?.line === line.index}
+                  playingCol={playPos?.line === line.index ? playPos.col : null}
                 />
               </div>
             )
@@ -1362,6 +1365,7 @@ function Row({
   rowHeight,
   onPlay,
   playing = false,
+  playingCol = null,
 }: {
   line: GridLine
   template: string
@@ -1376,6 +1380,9 @@ function Row({
   onPlay?: () => void
   /** This row holds the audio playhead — lit up + the timestamp shown active. */
   playing?: boolean
+  /** The column the playhead is in (this row only) — that exact cell gets a
+   *  stronger highlight that steps cell-by-cell as the audio plays. */
+  playingCol?: number | null
 }) {
   const cutCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, cuts)
   const overlapCols = cutColumns(line.startSec, line.cells.length, segmentSeconds, overlaps)
@@ -1466,7 +1473,12 @@ function Row({
                   ? 'bg-terracotta/30'
                   : voicedCols[col]
                     ? 'bg-voice/25'
-                    : '',
+                    : playingCol === col
+                      ? 'bg-terracotta/30'
+                      : '',
+              // the exact cell under the playhead — outlined so it reads on top
+              // of any fill (cut red / overlap amber / voiced green) as well
+              playingCol === col ? 'ring-2 ring-inset ring-terracotta' : '',
               // place mode: faintly tint the gaps where a drop lands clean
               mode === 'place' && glowCols[col] && !cutCols[col] && !voicedCols[col] ? 'bg-voice/10' : '',
               // the active preview (cut paint / clip grab / drop or move footprint)

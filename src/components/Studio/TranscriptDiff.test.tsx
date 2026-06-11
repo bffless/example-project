@@ -224,3 +224,46 @@ describe('TranscriptDiff original-pane selection', () => {
     expect(origEnd).toBeCloseTo(2.1)
   })
 })
+
+describe('TranscriptDiff original-audio playback highlight', () => {
+  // jsdom doesn't implement media playback — polyfill pause() (the component
+  // calls it on mount/scene-switch) to fire the event it would in a browser.
+  beforeEach(() => {
+    HTMLMediaElement.prototype.pause = function () {
+      this.dispatchEvent(new Event('pause'))
+    }
+  })
+
+  // jsdom never fires loadedmetadata, so playback in these tests is the click
+  // (lights the start cell) plus hand-fired timeupdate events with a hand-set
+  // currentTime — exactly the inputs the playhead tracking consumes.
+  const playFromRowZero = () => {
+    const audio = document.querySelector('audio')!
+    fireEvent.click(screen.getByRole('button', { name: 'Play original audio from 0:00' }))
+    return audio
+  }
+  const seek = (audio: HTMLAudioElement, time: number) => {
+    Object.defineProperty(audio, 'currentTime', { value: time, configurable: true })
+    fireEvent.timeUpdate(audio)
+  }
+  /** The grid cell (grandparent div) holding a word in the Original pane. */
+  const cellOf = (text: string) => originalCell(text).closest('div')!
+
+  it('highlights the exact cell under the playhead, and moves it as time advances', () => {
+    render(<TranscriptDiff words={words} duration={6} originalAudioUrl="blob:original" />)
+    const audio = playFromRowZero()
+    seek(audio, 0.04) // col 0 of row 0 — the cell holding "alpha"
+    expect(cellOf('alpha').className).toContain('ring-terracotta')
+    seek(audio, 0.65) // col 6 of row 0 — the highlight leaves alpha's cell
+    expect(cellOf('alpha').className).not.toContain('ring-terracotta')
+  })
+
+  it('clears the cell highlight when playback pauses', () => {
+    render(<TranscriptDiff words={words} duration={6} originalAudioUrl="blob:original" />)
+    const audio = playFromRowZero()
+    seek(audio, 0.04)
+    expect(cellOf('alpha').className).toContain('ring-terracotta')
+    fireEvent.pause(audio)
+    expect(cellOf('alpha').className).not.toContain('ring-terracotta')
+  })
+})
