@@ -91,7 +91,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              🔨 03f refiner context+gating · ✅ Part 0 async fire-and-poll (jobs DB + postSteps + poll, no more timeouts) · ▶ next: Parts A–D (handoff · synopsis · prompt · gate)
              ✅ 03j ai voicing source (director `voicing` plan · refiner segment `source` · auto-adopt original)
              ✅ 03k scene audio → refiner (cut audio saved with the clip · Gemini hears it · audio-aware cuts)
-             📝 03l scene prompts (per-scene direction · director-prompt passthrough + include-checkbox)
+             ✅ 03l scene prompts (per-scene direction · director-prompt passthrough + include-checkbox)
              ·  06 · 07                                (queued)
 ```
 
@@ -116,7 +116,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 08 | `08-transcript-search.md` | transcript search (`/api/search-transcript`, rule `504a39bd`, Gemini text-only, sync) — find-by-meaning over the whole talk · Play preview · Grab → existing place mode | ✅ done |
 | 03j | `03j-ai-voicing-source.md` | director per-scene `voicing` plan · refiner per-segment `source` (original/revoice) · auto-adopt original audio | ✅ done* |
 | 03k | `03k-scene-audio-refiner.md` | scene cut saves audio too (`clipAudioUrl`) · `/api/refine-scene` hears it (audio-aware cut/segment boundaries) | ✅ done* |
-| 03l | `03l-scene-prompt-context.md` | per-scene refine direction + director-prompt passthrough (persisted `direction`, include-checkbox, two labeled fields to rule `afacb572`) — absorbs 03f Part B | 📝 spec ready |
+| 03l | `03l-scene-prompt-context.md` | per-scene refine direction + director-prompt passthrough (persisted `direction`, include-checkbox, two labeled fields to rule `afacb572`) — absorbs 03f Part B | ✅ done* |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 

@@ -4,7 +4,9 @@
 > custom prompt) into its own story; 03f's Parts A (AI `refinerBrief`), C (scene
 > synopsis), and D (diff-viewer gating) are untouched and stay queued there.
 
-**Status:** 📝 spec ready (brainstormed 2026-06-11, not started).
+**Status:** ✅ shipped (2026-06-11; FE + rule `afacb572` prep, see "Built" below).
+Live-Gemini *steering effect* unverified until a real cut+refine runs — same
+deferral as 03j/03k.
 
 ## Why
 
@@ -146,20 +148,22 @@ response shape doesn't change in this story).
 
 ## Acceptance criteria
 
-- [ ] Director prompt persists in the slice (`direction` + `setDirection`),
+- [x] Director prompt persists in the slice (`direction` + `setDirection`),
       `DirectorPanel` bound to it, `resetStudio` clears it; `/api/scenes`
       behavior unchanged.
-- [ ] Every refine request carries `direction` (= the scene's `refinePrompt`)
+- [x] Every refine request carries `direction` (= the scene's `refinePrompt`)
       and `directorDirection` (= the global prompt, `''` when the scene's
-      checkbox is unchecked) — no hardcoded `''`.
-- [ ] `SceneRefinePanel` has the per-scene textarea + the default-checked
+      checkbox is unchecked) — no hardcoded `''` (`refineDirections`, unit-tested).
+- [x] `SceneRefinePanel` has the per-scene textarea + the default-checked
       include-checkbox with the read-only director prompt; row hidden when no
-      director prompt exists; both inputs survive revert and reloads.
-- [ ] Rule `afacb572` `prep` injects both fields, labeled, only when non-empty;
-      rule edit recorded here + memory updated.
-- [ ] MSW mock accepts the new fields; mock and real share the request shape
+      director prompt exists (RTL-tested); both inputs survive revert and reloads
+      (input-layer scene fields, persisted).
+- [x] Rule `afacb572` `prep` injects both fields, labeled, only when non-empty;
+      rule edit recorded here (debug-log verified) + memory updated.
+- [x] MSW mock accepts the new fields; mock and real share the request shape
       (swap-don't-rewrite holds).
-- [ ] `npm run build` / `npm run lint` / `npm run test:run` green.
+- [x] `npm run build` / `npm run test:run` green; `npm run lint` shows only the
+      two pre-existing `ChatPanel.tsx` errors (known 03i debt, untouched).
 
 ## Built — rule edit (2026-06-11)
 
