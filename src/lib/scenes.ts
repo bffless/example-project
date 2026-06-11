@@ -97,6 +97,11 @@ export type Scene = {
    *  plays this small clip instead of the whole source, and the per-scene assemble
    *  reads it. Re-cutting overwrites it. */
   clipUrl?: string
+  /** Serve path of this scene's soundtrack — the same `[start, end]` span sliced
+   *  from the talk WAV and uploaded at cut time alongside `clipUrl` (story 03k).
+   *  URL-only, like everything persisted. The refiner requires it (Gemini listens
+   *  to align cuts/segments to the natural flow). Re-cutting overwrites it. */
+  clipAudioUrl?: string
   /** Serve path of this scene's **assembled** cut — its clip with cuts dropped and
    *  narration laid over it, rendered + saved one scene at a time (story 03g phase
    *  2). Absent until you assemble & save this scene. The final master cut is the

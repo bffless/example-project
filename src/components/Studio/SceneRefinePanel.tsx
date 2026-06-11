@@ -34,6 +34,7 @@ export function SceneRefinePanel({
   const hasSheets = sheetCount > 0
   const refined = scene.refined ?? null
   const hasClip = !!scene.clipUrl
+  const hasAudio = !!scene.clipAudioUrl
   const busy = slicing || sheeting || refining
 
   return (
@@ -54,7 +55,9 @@ export function SceneRefinePanel({
           <span className="text-[13.5px] text-ink">
             0 · Cut this scene
             {hasClip && (
-              <span className="ml-2 font-mono text-[12px] text-ink-mute">clip ready</span>
+              <span className="ml-2 font-mono text-[12px] text-ink-mute">
+                {hasAudio ? 'clip + audio ready' : 'clip ready — re-cut to save audio'}
+              </span>
             )}
           </span>
           <button
@@ -107,9 +110,15 @@ export function SceneRefinePanel({
             <button
               type="button"
               className="pill-cta"
-              disabled={busy || !hasSheets}
+              disabled={busy || !hasSheets || !hasAudio}
               onClick={onRefine}
-              title={hasSheets ? undefined : 'Generate scene contact sheets first'}
+              title={
+                !hasAudio
+                  ? 'Cut this scene first'
+                  : hasSheets
+                    ? undefined
+                    : 'Generate scene contact sheets first'
+              }
             >
               {refining ? 'Refining…' : refined ? 'Re-refine' : 'Refine scene'}
             </button>

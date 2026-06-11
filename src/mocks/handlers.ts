@@ -125,6 +125,12 @@ const studioHandlers = [
       transcript?: string
       draftText?: string
       cuts?: { start: number; end: number }[]
+      audioUrl?: string
+    }
+    // Mirrors the real rule's schema (story 03k): the scene's cut audio is
+    // required — refine without ears is the old cough-blind behavior.
+    if (!body.audioUrl) {
+      return HttpResponse.json({ error: 'audioUrl is required' }, { status: 400 })
     }
     const jobId = enqueueJob('refine', mockRefiner(body))
     return HttpResponse.json({ jobId, status: 'pending' })
