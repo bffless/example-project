@@ -34,12 +34,25 @@ const lastSegment = (url: string) =>
  * `pending` → `running` → `done` across the first few polls so the FE poll loop
  * actually iterates before resolving (exactly like the real pipeline's postSteps).
  */
-type MockJob = { kind: 'scenes' | 'refine'; result: unknown; polls: number }
+type MockJob = {
+  kind: 'scenes' | 'refine'
+  result: unknown
+  polls: number
+  // What the "pipeline" sent the model (story 03m) — fabricated here, but the
+  // poll returns it exactly like the real rule, so the disclosure UI works offline.
+  prompt?: string
+  system?: string
+}
 const jobStore = new Map<string, MockJob>()
 let jobCounter = 0
-const enqueueJob = (kind: MockJob['kind'], result: unknown): string => {
+const enqueueJob = (
+  kind: MockJob['kind'],
+  result: unknown,
+  prompt?: string,
+  system?: string,
+): string => {
   const jobId = `mock-job-${++jobCounter}`
-  jobStore.set(jobId, { kind, result, polls: 0 })
+  jobStore.set(jobId, { kind, result, polls: 0, prompt, system })
   return jobId
 }
 
@@ -109,7 +122,12 @@ const studioHandlers = [
   // transcript, draftText, cuts }] }.
   http.post('/api/scenes', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { duration?: number; direction?: string }
-    const jobId = enqueueJob('scenes', mockDirector(body.duration ?? 0, body.direction ?? ''))
+    const jobId = enqueueJob(
+      'scenes',
+      mockDirector(body.duration ?? 0, body.direction ?? ''),
+      `[mock] director prompt — duration: ${body.duration ?? 0}s · your direction: ${body.direction || '(none)'}`,
+      '[mock] director system instruction — the standing rules the real pipeline sends Gemini.',
+    )
     return HttpResponse.json({ jobId, status: 'pending' })
   }),
 
@@ -138,7 +156,12 @@ const studioHandlers = [
     if (!body.audioUrl) {
       return HttpResponse.json({ error: 'audioUrl is required' }, { status: 400 })
     }
-    const jobId = enqueueJob('refine', mockRefiner(body))
+    const jobId = enqueueJob(
+      'refine',
+      mockRefiner(body),
+      `[mock] refine prompt — scene [${body.start ?? 0}, ${body.end ?? 0}] · scene direction: ${body.direction || '(none)'} · director context: ${body.directorDirection || '(none)'}`,
+      '[mock] refiner system instruction — the standing rules the real pipeline sends Gemini.',
+    )
     return HttpResponse.json({ jobId, status: 'pending' })
   }),
 
@@ -187,7 +210,13 @@ const studioHandlers = [
     job.polls += 1
     if (job.polls === 1) return HttpResponse.json({ status: 'pending', kind: job.kind })
     if (job.polls === 2) return HttpResponse.json({ status: 'running', kind: job.kind })
-    return HttpResponse.json({ status: 'done', kind: job.kind, result: job.result })
+    return HttpResponse.json({
+      status: 'done',
+      kind: job.kind,
+      result: job.result,
+      prompt: job.prompt ?? null,
+      system: job.system ?? null,
+    })
   }),
 
   // Scene narration (story 03c): a short tone stands in for the persisted mp3 so
