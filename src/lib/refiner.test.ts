@@ -15,6 +15,7 @@ import {
   insertSegment,
   removeSegment,
   type RefineSceneRaw,
+  type RefineSegment,
 } from './refiner'
 import type { NarrationSegment } from './scenes'
 import type { Scene } from './scenes'
@@ -92,6 +93,58 @@ describe('toRefinement', () => {
   it('defaults to empty arrays for a junk response', () => {
     const r = toRefinement({} as RefineSceneRaw, scene())
     expect(r).toEqual({ segments: [], cuts: [], source: 'ai' })
+  })
+})
+
+describe('toRefinement voicing source (story 03j)', () => {
+  const words = [
+    { text: 'So', start: 10, end: 10.3 },
+    { text: 'the', start: 10.4, end: 10.6 },
+    { text: 'idea', start: 10.7, end: 11.2 },
+    { text: 'is', start: 11.3, end: 11.5 },
+    { text: 'simple,', start: 11.6, end: 12.1 },
+  ]
+
+  it('keeps an original tag when the text matches the span words verbatim', () => {
+    const r = toRefinement(
+      { segments: [{ text: 'so the idea is simple', start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+      words,
+    )
+    expect(r.segments[0].suggestedSource).toBe('original')
+  })
+
+  it('downgrades an original tag whose text was rewritten', () => {
+    const r = toRefinement(
+      { segments: [{ text: 'the idea is straightforward', start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+      words,
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+  })
+
+  it('downgrades an original tag when no transcript words are provided', () => {
+    const r = toRefinement(
+      { segments: [{ text: 'so the idea is simple', start: 10, end: 12.5, source: 'original' }] },
+      scene(),
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+  })
+
+  it('passes revoice through and drops junk source values', () => {
+    const r = toRefinement(
+      {
+        segments: [
+          { text: 'a new line', start: 0, end: 5, source: 'revoice' },
+          { text: 'another line', start: 20, end: 25, source: 'shout' as unknown as RefineSegment['source'] },
+        ],
+      },
+      scene(),
+    )
+    expect(r.segments[0].suggestedSource).toBe('revoice')
+    expect(r.segments[1].suggestedSource).toBeUndefined()
+    // the key is genuinely ABSENT for junk values, not set to undefined
+    expect(r.segments.map((s) => 'suggestedSource' in s)).toEqual([true, false])
   })
 })
 
@@ -369,3 +422,4 @@ describe('insertSegment / removeSegment', () => {
     ])
   })
 })
+
