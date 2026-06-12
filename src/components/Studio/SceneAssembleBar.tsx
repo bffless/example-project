@@ -11,6 +11,8 @@ import {
 } from '../../lib/export/assemble'
 import { assemble, measureLoudness } from '../../lib/export/ffmpeg'
 import { useSignedBytes } from './useSignedBytes'
+import { useSignDownloadQuery } from '../../store/studioApi'
+import { skipToken } from '@reduxjs/toolkit/query'
 
 type Props = {
   /** The scene whose tab is selected — this bar assembles ONLY this scene. */
@@ -83,7 +85,13 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
   const canAssemble = hasClip && plan.video.length > 0 && overlapCount === 0
 
   const savedCurrent = !!resultBlob && savedBlob === resultBlob
-  const playerSrc = resultUrl ?? scene.assembledUrl ?? null
+  // Playback of the SAVED cut signs the serve path to a direct bucket URL (a
+  // big MP4 must never stream through file_serve — it buffers/OOMs the
+  // backend). The download link keeps the serve path: `download` is ignored on
+  // cross-origin URLs, so signing it would cost the filename.
+  const { data: signedAssembled } = useSignDownloadQuery(scene.assembledUrl ?? skipToken)
+  const playbackSrc = resultUrl ?? (scene.assembledUrl ? (signedAssembled?.url ?? null) : null)
+  const downloadHref = resultUrl ?? scene.assembledUrl ?? null
 
   const run = useCallback(async () => {
     if (running || !canAssemble || !scene.clipUrl) return
@@ -224,8 +232,8 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
         )}
         {savedCurrent && <span className="text-[12.5px] text-ink-soft">✓ Saved</span>}
 
-        {playerSrc && !running && (
-          <a className="pill-ghost" href={playerSrc} download={`scene-${scene.index + 1}.mp4`}>
+        {downloadHref && !running && (
+          <a className="pill-ghost" href={downloadHref} download={`scene-${scene.index + 1}.mp4`}>
             Download
           </a>
         )}
@@ -254,9 +262,14 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
       {error && <p className="mt-3 whitespace-pre-wrap text-[13px] text-terracotta-ink">{error}</p>}
       {saveError && <p className="mt-3 text-[13px] text-terracotta-ink">Couldn’t save: {saveError}</p>}
 
-      {playerSrc && !running && (
+      {playbackSrc && !running && (
         <div className="mt-4">
-          <video src={playerSrc} controls className="w-full rounded-md border border-paper-line" />
+          <video
+            src={playbackSrc}
+            controls
+            crossOrigin="anonymous"
+            className="w-full rounded-md border border-paper-line"
+          />
         </div>
       )}
 

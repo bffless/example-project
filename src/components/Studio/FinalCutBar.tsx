@@ -3,6 +3,8 @@ import type { Scene } from '../../lib/scenes'
 import { buildConcatCommand } from '../../lib/export/assemble'
 import { concat } from '../../lib/export/ffmpeg'
 import { useSignedBytes } from './useSignedBytes'
+import { useSignDownloadQuery } from '../../store/studioApi'
+import { skipToken } from '@reduxjs/toolkit/query'
 
 type Props = {
   scenes: Scene[]
@@ -47,7 +49,13 @@ export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
   const pending = scenes.filter((s) => !s.assembledUrl)
 
   const savedCurrent = !!resultBlob && savedBlob === resultBlob
-  const playerSrc = resultUrl ?? finalCutUrl
+  // Playback of the SAVED final cut signs the serve path to a direct bucket
+  // URL (the whole video — the biggest MP4 we serve — must never stream
+  // through file_serve). The download link keeps the serve path: `download`
+  // is ignored on cross-origin URLs, so signing it would cost the filename.
+  const { data: signedFinal } = useSignDownloadQuery(finalCutUrl ?? skipToken)
+  const playbackSrc = resultUrl ?? (finalCutUrl ? (signedFinal?.url ?? null) : null)
+  const downloadHref = resultUrl ?? finalCutUrl
 
   const run = useCallback(async () => {
     if (running || !allAssembled) return
@@ -138,8 +146,8 @@ export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
         )}
         {savedCurrent && <span className="text-[12.5px] text-ink-soft">✓ Saved</span>}
 
-        {playerSrc && !running && (
-          <a className="pill-ghost" href={playerSrc} download="studio-final-cut.mp4">
+        {downloadHref && !running && (
+          <a className="pill-ghost" href={downloadHref} download="studio-final-cut.mp4">
             Download MP4
           </a>
         )}
@@ -157,9 +165,14 @@ export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
       {error && <p className="mt-3 whitespace-pre-wrap text-[13px] text-terracotta-ink">{error}</p>}
       {saveError && <p className="mt-3 text-[13px] text-terracotta-ink">Couldn’t save: {saveError}</p>}
 
-      {playerSrc && !running && (
+      {playbackSrc && !running && (
         <div className="mt-4">
-          <video src={playerSrc} controls className="w-full rounded-md border border-paper-line" />
+          <video
+            src={playbackSrc}
+            controls
+            crossOrigin="anonymous"
+            className="w-full rounded-md border border-paper-line"
+          />
         </div>
       )}
     </div>

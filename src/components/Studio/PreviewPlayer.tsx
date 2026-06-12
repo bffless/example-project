@@ -51,6 +51,12 @@ export function PreviewPlayer({ src, videoRef, cuts, onTime, onLoaded }: Props) 
         ref={videoRef}
         src={src}
         controls
+        // Signed bucket URLs are cross-origin: CORS mode (the bucket allows GET
+        // from our origins) keeps them loadable on the cross-origin-isolated
+        // page regardless of COEP flavor — a no-cors <video> is blocked under
+        // require-corp (GCS objects can't carry a CORP header). Harmless for
+        // same-origin and blob: sources.
+        crossOrigin="anonymous"
         className="block aspect-video w-full bg-ink"
       />
     </div>
