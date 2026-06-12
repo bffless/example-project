@@ -47,4 +47,14 @@ describe('buildSliceCommand', () => {
     expect(argAfter(args, '-ss')).toBe('50')
     expect(argAfter(args, '-t')).toBe('0')
   })
+
+  it('caps the encoder at 4 threads (bounds x264 init memory in the fixed wasm heap)', () => {
+    const { args } = buildSliceCommand({ start: 0, end: 10 })
+    const i = args.indexOf('-threads')
+    expect(i).toBeGreaterThan(-1)
+    expect(args[i + 1]).toBe('4')
+    // An output option: after the input, before the output filename.
+    expect(i).toBeGreaterThan(args.indexOf('-i'))
+    expect(i).toBeLessThan(args.length - 1)
+  })
 })

@@ -14,6 +14,16 @@
  * deploy. Idempotent: a no-op once patched; exits non-zero if the target strings
  * are gone (e.g. a core-mt version bump) so the drift is caught, not silently lost.
  *
+ * Second patch: raise the heap from 1 GiB to 3 GiB. core-mt creates its shared
+ * `WebAssembly.Memory` with `initial === maximum` (pthread memory can't grow), so
+ * the build's 1 GiB default is a HARD cap — and `@ffmpeg/ffmpeg`'s loader never
+ * passes `INITIAL_MEMORY`, so it can't be raised at load time. That's half what
+ * the single-threaded core can grow to (2 GiB), and the per-scene assemble OOMs
+ * at x264 init: the MEMFS-staged clip + narration WAVs + decoder + filtergraph
+ * already fill most of the gigabyte. 3 GiB clears it while staying under the
+ * 4 GiB wasm32 ceiling; if a device refuses a SharedArrayBuffer that large,
+ * `getFFmpeg()` (src/lib/export/ffmpeg.ts) already falls back to the ST core.
+ *
  * See `stories/inprogress/studio/03g-per-scene-clip-slicing.md` (multithreading).
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -28,6 +38,12 @@ const EDITS = [
   {
     from: 'worker=new Worker(pthreadMainJs)',
     to: 'worker=new Worker(pthreadMainJs,{type:"module"})',
+  },
+  {
+    // 1 GiB → 3 GiB. initial === maximum on the shared memory, so this default
+    // is the only heap the multithreaded core will ever have.
+    from: 'INITIAL_MEMORY=Module["INITIAL_MEMORY"]||1073741824',
+    to: 'INITIAL_MEMORY=Module["INITIAL_MEMORY"]||3221225472',
   },
 ]
 
@@ -54,7 +70,7 @@ for (const { from, to } of EDITS) {
 
 if (changed) {
   writeFileSync(FILE, src)
-  console.log(`[patch-core-mt] applied {type:"module"} to ${changed} worker call(s).`)
+  console.log(`[patch-core-mt] applied ${changed} patch(es).`)
 } else {
   console.log('[patch-core-mt] already patched.')
 }

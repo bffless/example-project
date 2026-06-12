@@ -202,6 +202,17 @@ describe('buildFfmpegCommand', () => {
     expect(cmd.audioInputs).toEqual([])
     expect(cmd.args.filter((a) => a === '-i')).toHaveLength(1) // just the source
   })
+
+  it('caps the encoder at 4 threads (bounds x264 init memory in the fixed wasm heap)', () => {
+    const plan = planAssembly({ segments: [seg(0, 4)], cuts: [], duration: 4 })
+    const { args } = buildFfmpegCommand(plan)
+    const i = args.indexOf('-threads')
+    expect(i).toBeGreaterThan(-1)
+    expect(args[i + 1]).toBe('4')
+    // An output option: after the inputs, before the output filename.
+    expect(i).toBeGreaterThan(args.lastIndexOf('-i'))
+    expect(i).toBeLessThan(args.length - 1)
+  })
 })
 
 describe('planScene (per-scene clip, story 03g phase 2)', () => {

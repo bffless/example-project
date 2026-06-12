@@ -293,6 +293,12 @@ export function buildFfmpegCommand(
     'libx264',
     '-preset',
     'ultrafast',
+    // Cap x264's thread pool: under the multithreaded core it defaults to the
+    // machine's core count, and each frame thread allocates its own full-res
+    // buffers inside the fixed-size wasm heap — unbounded, that's an OOM at
+    // encoder init. 4 keeps most of the speedup with a bounded footprint.
+    '-threads',
+    '4',
     '-pix_fmt',
     'yuv420p',
     '-c:a',
