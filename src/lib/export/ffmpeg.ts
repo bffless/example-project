@@ -198,7 +198,11 @@ export async function measureLoudness({ clip, command, onLog }: MeasureAssets): 
 
   const written: string[] = []
   try {
-    await ff.writeFile(command.input, clip)
+    // writeFile TRANSFERS the buffer to the worker, detaching it on this
+    // thread. Measurement is a side-read — hand over a copy so the caller can
+    // still write these same bytes in the assemble that follows ("attempting
+    // to access detached ArrayBuffer" otherwise).
+    await ff.writeFile(command.input, clip.slice())
     written.push(command.input)
 
     const code = await ff.exec(command.args)
