@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
+import { setDirection, setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -15,6 +15,8 @@ import { SceneList } from '../components/Studio/SceneList'
 import { SceneTabs } from '../components/Studio/SceneTabs'
 import { SceneMeta } from '../components/Studio/SceneMeta'
 import { SceneRefinePanel } from '../components/Studio/SceneRefinePanel'
+import { JobPromptDisclosure } from '../components/Studio/PromptDisclosure'
+import { DirectorPanel } from '../components/Studio/DirectorPanel'
 import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
 import { VoiceStudio } from '../components/Studio/VoiceStudio'
 import { StudioStepper } from '../components/Studio/StudioStepper'
@@ -40,8 +42,9 @@ export function Studio() {
   const [rehydrating, setRehydrating] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
   // Free-text direction the user hands the master director (e.g. "keep the demo
-  // at 12:30, make the intro punchy"). Only used by the director prep step.
-  const [direction, setDirection] = useState('')
+  // at 12:30, make the intro punchy"). Persisted in the studio slice (story 03l)
+  // so Build forwards it to per-scene refines long after prep, across reloads.
+  const direction = useAppSelector((s) => s.studio.direction)
   // The voice step's resource is revealed by clicking its board action (rather
   // than running a pipeline inline) — and stays open once a voice exists.
   const [showVoiceStudio, setShowVoiceStudio] = useState(false)
@@ -84,6 +87,10 @@ export function Studio() {
   // restored session's persisted source/scenes. Drives the import-vs-workspace
   // split and the top-level stepper so progress survives a reload.
   const hasPersisted = !!pipe.sourceUrl || pipe.scenes.length > 0
+  // The director already ran and produced scenes — show DirectorPanel in its
+  // confirm-gated re-run variant (story 03m) instead of hiding it.
+  const directorDone =
+    pipe.stages.find((s) => s.id === 'director')?.status === 'done' && pipe.scenes.length > 0
   const hasSource = !!file || hasPersisted
   // What the <video> plays: the local object URL when present, else the persisted
   // source SIGNED into a direct bucket URL — the raw serve path must never be a
@@ -155,14 +162,32 @@ export function Studio() {
   // revoke once the step is done (the persisted `file`/`url` drive the preview).
   async function runStep() {
     if (file && url) {
-      pipe.next({ file, src: url, duration, direction })
+      pipe.next({ file, src: url, duration })
       return
     }
     const f = await rehydrateClip()
     if (!f) return
     const tmpUrl = URL.createObjectURL(f)
     try {
-      await pipe.next({ file: f, src: tmpUrl, duration, direction })
+      await pipe.next({ file: f, src: tmpUrl, duration })
+    } finally {
+      URL.revokeObjectURL(tmpUrl)
+    }
+  }
+
+  // Re-run the master director (story 03m) — confirm already happened in the
+  // panel. Same clip-rehydration dance as runStep, but drives the director step
+  // directly instead of whatever stage is current.
+  async function rerunStep() {
+    if (file && url) {
+      void pipe.rerunDirector({ file, src: url, duration })
+      return
+    }
+    const f = await rehydrateClip()
+    if (!f) return
+    const tmpUrl = URL.createObjectURL(f)
+    try {
+      await pipe.rerunDirector({ file: f, src: tmpUrl, duration })
     } finally {
       URL.revokeObjectURL(tmpUrl)
     }
@@ -453,15 +478,17 @@ export function Studio() {
                     )}
                     {/* The master director's action sits at the bottom — after the
                         ingredients — when it's the current step. */}
-                    {pipe.currentStageId === 'director' && (
+                    {(pipe.currentStageId === 'director' || directorDone) && (
                       <div className="mt-6">
                         <DirectorPanel
                           value={direction}
-                          onChange={setDirection}
-                          onSubmit={runStep}
+                          onChange={(v) => dispatch(setDirection(v))}
+                          onSubmit={directorDone ? rerunStep : runStep}
                           busy={pipe.running || rehydrating}
                           sheetCount={pipe.contactSheets.length}
                           wordCount={pipe.words.length}
+                          rerun={directorDone}
+                          sceneCount={pipe.scenes.length}
                         />
                       </div>
                     )}
@@ -472,6 +499,10 @@ export function Studio() {
                     {pipe.scenes.length > 0 && (
                       <div className="mt-6 flex flex-col gap-4">
                         {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                        <JobPromptDisclosure
+                          jobId={pipe.directorPromptJobId}
+                          label="View the prompt the director was sent"
+                        />
                         <div className="border rule bg-paper-deep/30 p-4">
                           <SceneList
                             scenes={pipe.scenes}
@@ -535,6 +566,10 @@ export function Studio() {
                 style={{ '--diff-sticky-top': `calc(3.5rem + ${tabsHeight}px)` } as CSSProperties}
               >
                 {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+                <JobPromptDisclosure
+                  jobId={pipe.directorPromptJobId}
+                  label="View the prompt the director was sent"
+                />
                 {/* Only the tab strip sticks under the global header (its
                     "Scenes · chapters" label scrolls away). `tabsRef` measures
                     JUST the strip so the diff's placing bar parks flush beneath
@@ -577,11 +612,14 @@ export function Studio() {
                     slicing={pipe.slicingId === selected.id}
                     sheeting={pipe.sheetingId === selected.id}
                     refining={pipe.refiningId === selected.id}
+                    direction={direction}
                     error={pipe.sceneError}
                     onSlice={() => pipe.sliceScene(selected.id, file)}
                     onGenerateSheets={() => pipe.generateSceneSheets(selected.id)}
                     onRefine={() => pipe.refineScene(selected.id)}
                     onClear={() => pipe.clearRefinement(selected.id)}
+                    onRefinePromptChange={(text) => pipe.setRefinePrompt(selected.id, text)}
+                    onIncludeDirectionChange={(on) => pipe.setIncludeDirection(selected.id, on)}
                   />
                 )}
                 {selected && pipe.words.length > 0 && (
@@ -644,60 +682,6 @@ export function Studio() {
         )}
       </Section>
     </>
-  )
-}
-
-/**
- * The headline prep step: hand the cut to the AI master director. Shown in the
- * right column only when the director step is current, so the direction input
- * and the "send" action sit together and read as the big moment (not a buried
- * board button). The free-text direction is optional — an aside to the AI ("keep
- * the demo at 12:30", "punchier intro") — so the button works empty too.
- */
-function DirectorPanel({
-  value,
-  onChange,
-  onSubmit,
-  busy,
-  sheetCount,
-  wordCount,
-}: {
-  value: string
-  onChange: (v: string) => void
-  onSubmit: () => void
-  busy?: boolean
-  sheetCount: number
-  wordCount: number
-}) {
-  return (
-    <div className="mb-6 border-l-2 border-terracotta bg-terracotta/5 p-5">
-      <p className="meta-label">Final prep step · the master director</p>
-      <h3 className="mt-1 font-serif text-[22px] leading-tight text-ink">
-        Send it to the AI director
-      </h3>
-      <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-soft">
-        Gemini reads your {wordCount.toLocaleString()}-word transcript and{' '}
-        {sheetCount} contact sheet{sheetCount === 1 ? '' : 's'} together, then returns a
-        one-line synopsis and your scenes — each with a tightened script, the
-        original-video span, and the footage to cut.
-      </p>
-
-      <label className="mt-4 flex flex-col gap-1.5">
-        <span className="meta-label">Your direction · optional</span>
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={busy}
-          rows={3}
-          placeholder="e.g. Keep the live demo around 12:30. Make the intro punchy and drop the throat-clearing."
-          className="w-full resize-y rounded-md border border-paper-line bg-paper p-3 text-[14px] leading-relaxed text-ink disabled:opacity-60"
-        />
-      </label>
-
-      <button type="button" className="pill-cta mt-4" disabled={busy} onClick={onSubmit}>
-        {busy ? 'Directing…' : 'Send to the AI director →'}
-      </button>
-    </div>
   )
 }
 

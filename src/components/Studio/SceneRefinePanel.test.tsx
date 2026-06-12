@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { SceneRefinePanel } from './SceneRefinePanel'
 import type { Scene } from '../../lib/scenes'
 
@@ -20,17 +20,23 @@ function makeScene(overrides: Partial<Scene> = {}): Scene {
   } as unknown as Scene
 }
 
-function renderPanel(scene: Scene) {
+type PanelProps = Parameters<typeof SceneRefinePanel>[0]
+
+function renderPanel(scene: Scene, extra: Partial<PanelProps> = {}) {
   return render(
     <SceneRefinePanel
       scene={scene}
       slicing={false}
       sheeting={false}
       refining={false}
+      direction=""
       onSlice={noop}
       onGenerateSheets={noop}
       onRefine={noop}
       onClear={noop}
+      onRefinePromptChange={noop}
+      onIncludeDirectionChange={noop}
+      {...extra}
     />,
   )
 }
@@ -63,5 +69,40 @@ describe('SceneRefinePanel refine gate (story 03k)', () => {
     const refine = screen.getByRole('button', { name: /refine scene/i })
     expect(refine).toBeDisabled()
     expect(refine).toHaveAttribute('title', 'Generate scene contact sheets first')
+  })
+})
+
+describe('SceneRefinePanel scene prompts (story 03l)', () => {
+  it('edits the per-scene direction through onRefinePromptChange', () => {
+    const onChange = vi.fn()
+    renderPanel(makeScene({ refinePrompt: 'old' }), { onRefinePromptChange: onChange })
+    const box = screen.getByLabelText(/direction for this scene/i)
+    expect(box).toHaveValue('old')
+    fireEvent.change(box, { target: { value: 'trim the pause' } })
+    expect(onChange).toHaveBeenCalledWith('trim the pause')
+  })
+
+  it('hides the director-prompt row when there is no director prompt', () => {
+    renderPanel(makeScene(), { direction: '   ' })
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('shows the director prompt read-only with the checkbox checked by default', () => {
+    renderPanel(makeScene(), { direction: 'punchy intro' })
+    const box = screen.getByRole('checkbox', { name: /include your director prompt/i })
+    expect(box).toBeChecked()
+    expect(screen.getByText('punchy intro')).toBeInTheDocument()
+  })
+
+  it('reflects an unchecked scene and reports toggles through onIncludeDirectionChange', () => {
+    const onToggle = vi.fn()
+    renderPanel(makeScene({ includeDirection: false }), {
+      direction: 'punchy intro',
+      onIncludeDirectionChange: onToggle,
+    })
+    const box = screen.getByRole('checkbox', { name: /include your director prompt/i })
+    expect(box).not.toBeChecked()
+    fireEvent.click(box)
+    expect(onToggle).toHaveBeenCalledWith(true)
   })
 })

@@ -4,6 +4,7 @@ import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '.
 import { timedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import {
   toRefinement,
+  refineDirections,
   effectiveSegments,
   addCut,
   removeCut,
@@ -49,6 +50,7 @@ import {
   setWords,
   setSynopsis,
   setScenesJobId,
+  setDirectorPromptJobId,
   setVoice,
   addSavedVoice,
   removeSavedVoice,
@@ -124,12 +126,10 @@ function stageError(e: unknown): string {
 
 export type { TranscriptWord }
 
-/**
- * What each step needs: the source file, its object URL, and its duration.
- * `direction` is the optional free-text note the user types for the master
- * director step; ignored by every other step.
- */
-export type StepContext = { file: File; src: string; duration: number; direction?: string }
+/** What each step needs: the source file, its object URL, and its duration.
+ *  (The director's free-text direction now comes from the persisted slice —
+ *  story 03l — not the step context.) */
+export type StepContext = { file: File; src: string; duration: number }
 
 /**
  * Owns the one-time prep pipeline and the scene queue you build afterwards.
@@ -167,6 +167,8 @@ export function useScenePipeline() {
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
+  const direction = useAppSelector((s) => s.studio.direction)
+  const directorPromptJobId = useAppSelector((s) => s.studio.directorPromptJobId)
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
   const duration = useAppSelector((s) => s.studio.duration)
   const voice = useAppSelector((s) => s.studio.voice)
@@ -353,6 +355,9 @@ export function useScenePipeline() {
           status: 'done',
           detail: `${withThumbs.length} scene${withThumbs.length === 1 ? '' : 's'} · ${cutCount} cut${cutCount === 1 ? '' : 's'} · script tightened`,
         })
+        // Remember the job row so the prompt disclosure can fetch what was sent
+        // to Gemini (story 03m). Separate from the in-flight id cleared below.
+        dispatch(setDirectorPromptJobId(jobId))
         dispatch(setScenesJobId(null))
       } catch (e) {
         // Terminal: drop the persisted job id (so we don't resume a dead job) and
@@ -414,6 +419,7 @@ export function useScenePipeline() {
         patchScene(sceneId, {
           refined: { ...refinement, segments },
           refineJobId: null,
+          promptJobId: jobId,
           // null (not stale) when the new refinement has no voiced audio yet.
           narrationSeconds: total > 0 ? total : null,
         })
@@ -556,7 +562,7 @@ export function useScenePipeline() {
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(
-    async ({ src, duration: clipDuration, direction }: StepContext) => {
+    async ({ src, duration: clipDuration }: StepContext) => {
       patch('director', { status: 'active' })
       const transcript = timedTranscript(words)
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
@@ -566,13 +572,30 @@ export function useScenePipeline() {
       const { jobId } = await scenesReq({
         transcript,
         sheetUrls,
-        direction: direction ?? '',
+        direction,
         duration: clipDuration,
       }).unwrap()
       dispatch(setScenesJobId(jobId))
       await completeDirectorJob(jobId, src, clipDuration)
     },
-    [patch, dispatch, words, persistedSheets, scenesReq, completeDirectorJob],
+    [patch, dispatch, words, persistedSheets, direction, scenesReq, completeDirectorJob],
+  )
+
+  // Re-run the master director after it's already done (story 03m). `next()`
+  // runs the CURRENT stage — wrong here, it would run clone — so this drives the
+  // director step directly. The UI confirm has already happened by now; the
+  // scene queue is replaced wholesale by `completeDirectorJob` (which also
+  // resets the selection). Same enqueue+poll as a first run, so `scenesJobId`
+  // persists and a mid-redo reload resumes polling.
+  const rerunDirector = useCallback(
+    async (ctx: StepContext) => {
+      try {
+        await runDirector(ctx)
+      } catch (e) {
+        patch('director', { status: 'error', detail: stageError(e) })
+      }
+    },
+    [runDirector, patch],
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
@@ -759,7 +782,9 @@ export function useScenePipeline() {
           cuts: scene.cuts ?? [],
           sheetUrls,
           audioUrl: scene.clipAudioUrl,
-          direction: '',
+          // Creator steering (story 03l): the scene's own prompt + the global
+          // director prompt (subject to the scene's include-checkbox).
+          ...refineDirections(scene, direction),
         }).unwrap()
         patchScene(id, { refineJobId: jobId })
         await completeRefineJob(id, jobId)
@@ -768,7 +793,19 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [sheetingId, refiningId, scenes, words, refineSceneReq, patchScene, completeRefineJob],
+    [sheetingId, refiningId, scenes, words, direction, refineSceneReq, patchScene, completeRefineJob],
+  )
+
+  // Creator steering for the refine call (story 03l). Both are INPUT-layer scene
+  // fields — they survive revert (`clearRefinement` never touches them) and seed
+  // the next re-refine.
+  const setRefinePrompt = useCallback(
+    (sceneId: string, text: string) => patchScene(sceneId, { refinePrompt: text }),
+    [patchScene],
+  )
+  const setIncludeDirection = useCallback(
+    (sceneId: string, on: boolean) => patchScene(sceneId, { includeDirection: on }),
+    [patchScene],
   )
 
   // Hand-edit a scene's cuts directly on the diff grid (story 03d). `add` paints
@@ -939,7 +976,7 @@ export function useScenePipeline() {
   const clearRefinement = useCallback(
     (id: string) => {
       setSceneError(null)
-      patchScene(id, { refined: null, narrationSeconds: null })
+      patchScene(id, { refined: null, narrationSeconds: null, promptJobId: undefined })
     },
     [patchScene],
   )
@@ -1204,6 +1241,11 @@ export function useScenePipeline() {
     saveSceneCut,
     generateSceneSheets,
     refineScene,
+    direction,
+    setRefinePrompt,
+    setIncludeDirection,
+    directorPromptJobId,
+    rerunDirector,
     editSceneCut,
     adoptOriginalAudio,
     adoptSegmentOriginal,

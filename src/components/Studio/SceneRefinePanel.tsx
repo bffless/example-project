@@ -1,16 +1,22 @@
 import type { Scene } from '../../lib/scenes'
 import { ContactSheetPreview } from './ContactSheetPreview'
+import { JobPromptDisclosure } from './PromptDisclosure'
 
 type Props = {
   scene: Scene
   slicing: boolean
   sheeting: boolean
   refining: boolean
+  /** The creator's global director prompt (persisted slice value) — shown
+   *  read-only with the include-checkbox; the row hides when it's empty. */
+  direction: string
   error?: string | null
   onSlice: () => void
   onGenerateSheets: () => void
   onRefine: () => void
   onClear: () => void
+  onRefinePromptChange: (text: string) => void
+  onIncludeDirectionChange: (on: boolean) => void
 }
 
 /**
@@ -24,11 +30,14 @@ export function SceneRefinePanel({
   slicing,
   sheeting,
   refining,
+  direction,
   error,
   onSlice,
   onGenerateSheets,
   onRefine,
   onClear,
+  onRefinePromptChange,
+  onIncludeDirectionChange,
 }: Props) {
   const sheetCount = scene.sheets?.length ?? 0
   const hasSheets = sheetCount > 0
@@ -90,6 +99,35 @@ export function SceneRefinePanel({
           </button>
         </div>
 
+        {/* Creator steering for the refine call (story 03l). Both are inputs —
+            they survive Revert and seed the next re-refine. The director prompt
+            itself isn't editable here: include it as context, or don't. */}
+        <label className="flex flex-col gap-1.5">
+          <span className="meta-label">Direction for this scene · optional</span>
+          <textarea
+            value={scene.refinePrompt ?? ''}
+            onChange={(e) => onRefinePromptChange(e.target.value)}
+            disabled={busy}
+            rows={2}
+            placeholder="e.g. Trim the long pause; keep the on-screen code visible."
+            className="w-full resize-y rounded-md border border-paper-line bg-paper p-3 text-[14px] leading-relaxed text-ink disabled:opacity-60"
+          />
+        </label>
+        {direction.trim() !== '' && (
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-2 text-[13.5px] text-ink">
+              <input
+                type="checkbox"
+                checked={scene.includeDirection !== false}
+                disabled={busy}
+                onChange={(e) => onIncludeDirectionChange(e.target.checked)}
+              />
+              Include your director prompt as context
+            </label>
+            <p className="pl-6 text-[12.5px] leading-relaxed text-ink-mute">{direction}</p>
+          </div>
+        )}
+
         {/* Step 2 — refine */}
         <div className="flex items-center justify-between gap-4">
           <span className="text-[13.5px] text-ink">
@@ -132,6 +170,15 @@ export function SceneRefinePanel({
       </p>
 
       {error && <p className="mt-3 text-[13px] text-terracotta-ink">{error}</p>}
+
+      {scene.promptJobId && (
+        <div className="mt-3">
+          <JobPromptDisclosure
+            jobId={scene.promptJobId}
+            label="View the prompt sent for this scene"
+          />
+        </div>
+      )}
 
       {/* Show the captured sheets so the producer can see exactly what the
           refiner is handed for this scene. */}

@@ -91,6 +91,18 @@ export type Scene = {
   /** Second-pass refiner output (story 03c). Absent/null = fall back to the
    *  director baseline (`draftText` + `cuts`). */
   refined?: SceneRefinement | null
+  /** Creator's per-scene instruction for the refiner (story 03l). An INPUT, not
+   *  refiner output — it survives revert (`refined = null`) and seeds the next
+   *  re-refine. Sent as the refine request's `direction`. */
+  refinePrompt?: string
+  /** Include the global director prompt as context in this scene's refine calls
+   *  (story 03l). ABSENT = true (the checkbox defaults checked); explicit
+   *  `false` excludes it. Input-layer, like `refinePrompt` — survives revert. */
+  includeDirection?: boolean
+  /** Job id of the refine run that produced `refined` (story 03m) — lets the
+   *  prompt disclosure lazy-fetch what was sent to Gemini. Cleared on revert
+   *  (the prompt belongs to the refinement just discarded). */
+  promptJobId?: string
   /** Serve path of this scene's own sliced clip — `[start, end]` of the source,
    *  cut frame-accurately and uploaded on its own (story 03g, the "Cut this
    *  scene" build step). Absent until that step runs. Once set, the Build preview
