@@ -3,6 +3,7 @@ import type { Scene } from '../../lib/scenes'
 import { effectiveCuts, effectiveSegments, overlaps } from '../../lib/refiner'
 import { planScene, buildFfmpegCommand } from '../../lib/export/assemble'
 import { assemble } from '../../lib/export/ffmpeg'
+import { useSignedBytes } from './useSignedBytes'
 
 type Props = {
   /** The scene whose tab is selected — this bar assembles ONLY this scene. */
@@ -21,13 +22,6 @@ const fmtTime = (s: number) => {
   return `${m}:${String(sec).padStart(2, '0')}`
 }
 
-/** Fetch a serve path / data URL into raw bytes for ffmpeg's virtual FS. */
-async function fetchBytes(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { credentials: 'include' })
-  if (!res.ok) throw new Error(`Couldn't load ${url} (${res.status})`)
-  return new Uint8Array(await res.arrayBuffer())
-}
-
 /**
  * Assemble **one scene** (story 03g phase 2) — the producer works tab by tab:
  * assemble the selected scene off its own cut clip (`scene.clipUrl`), preview it,
@@ -42,6 +36,9 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
  * Mounted with `key={scene.id}` so switching tabs resets this transient state.
  */
 export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
+  // Serve-path-aware fetch: swaps `/api/uploads/...` for direct bucket URLs so
+  // the big clip download doesn't crawl through (or OOM) the BFFless backend.
+  const fetchBytes = useSignedBytes()
   const [running, setRunning] = useState(false)
   const [stage, setStage] = useState('')
   const [progress, setProgress] = useState(0)
@@ -120,7 +117,7 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
     } finally {
       setRunning(false)
     }
-  }, [running, canAssemble, scene.clipUrl, plan, segments, resultUrl])
+  }, [running, canAssemble, scene.clipUrl, plan, segments, resultUrl, fetchBytes])
 
   const save = useCallback(async () => {
     if (!resultBlob || saving) return

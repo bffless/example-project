@@ -40,6 +40,16 @@ export function toSignedUrl(raw: unknown): string {
   return url
 }
 
+/**
+ * Is this URL a persisted `/api/uploads/...` bucket serve path — i.e. something
+ * `/api/uploads/sign` can swap for a direct bucket URL? Anything else (an
+ * already-signed bucket URL, a transient `data:`/`blob:` URL, a non-upload API
+ * route) must be fetched as-is.
+ */
+export function isUploadServePath(url: string): boolean {
+  return url.startsWith('/api/uploads/') && !url.startsWith('/api/uploads/sign')
+}
+
 type PrepareResponse = {
   uploadUrl?: string
   storageKey?: string
