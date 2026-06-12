@@ -5,7 +5,9 @@
 > (which already cut `draftText` out of the refiner). Backend work uses the
 > **`bffless-pipeline`** skill; the FE follows **`wire-studio-stage`**.
 
-**Status:** 📝 spec ready (2026-06-12).
+**Status:** ✅ shipped (2026-06-12; FE + rule `138f27fb` rewrite, see "Built"
+below). Unlike 03l/03j/03k, the **live-Gemini effect is verified** — a real POST
+returned per-scene `refinePrompt` (no `draftText`), honoring the creator direction.
 
 ## Why
 
@@ -194,27 +196,50 @@ the live pipeline never touches a component.
 
 ## Acceptance criteria
 
-- [ ] Master director returns a per-scene `refinePrompt` and no `draftText`;
+- [x] Master director returns a per-scene `refinePrompt` and no `draftText`;
       `toScenes` seeds `scene.refinePrompt` and the title falls back to the
       transcript (director.ts + tests).
-- [ ] `Scene.draftText` is removed; nothing in `src/` references it; the pre-refine
+- [x] `Scene.draftText` is removed; nothing in `src/` references it; the pre-refine
       diff baseline (`effectiveSegments`) falls back to `scene.transcript`.
-- [ ] Opening a scene shows the "Direction for this scene" textarea **prefilled**
+- [x] Opening a scene shows the "Direction for this scene" textarea **prefilled**
       with the director's suggestion, editable, persisted, surviving refine-revert
       (reuses 03l `refinePrompt`); the global director-prompt context row is
       unchanged.
-- [ ] Refining a scene sends that (possibly edited) prompt as `direction` with no
+- [x] Refining a scene sends that (possibly edited) prompt as `direction` with no
       code change to the refiner — `/api/refine-scene` (rule `afacb572`) and
       `toRefinement` are untouched.
-- [ ] `SceneMeta`'s Script + Est-narration stats derive from the effective
+- [x] `SceneMeta`'s Script + Est-narration stats derive from the effective
       narration text, not `draftText`.
-- [ ] Orphaned code removed: `SceneEditor.tsx` (+test), `scenesToTimedWords`,
-      `updateDraft`, `generateVoice`.
-- [ ] Rule `138f27fb` `prep` rewritten to request `refinePrompt` and drop
-      `draftText`; backup saved; debug-log verified; rule id + memory updated.
-- [ ] MSW mock emits `refinePrompt` (no `draftText`); mock and real share the shape.
-- [ ] `npm run build`, `npm run lint` (only the two pre-existing `ChatPanel.tsx`
-      errors), `npm run test:run` all green.
+- [x] Orphaned code removed: `SceneEditor.tsx`, `scenesToTimedWords`,
+      `updateDraft`, `generateVoice` (also the dead `voicingId` flag + `SHORTEN_RATIO`).
+- [x] Rule `138f27fb` `prep` **and** `parse` rewritten to request/emit `refinePrompt`
+      and drop `draftText`; backup saved; live-verified; rule id + memory updated.
+- [x] MSW mock emits `refinePrompt` (no `draftText`); mock and real share the shape.
+- [x] `npm run build`, `npm run lint` (only the two pre-existing `ChatPanel.tsx`
+      errors), `npm run test:run` (283) all green.
+
+## Built — rule edit (2026-06-12)
+
+- **Rule `138f27fb-9fd1-4986-bc84-ac2b2a4a020c` (`POST /api/scenes`)** — only the
+  `prep` and `parse` function-handlers changed; the 03f Part-0 enqueue + `postSteps`
+  (sign → collect → Gemini → finishOk/finishErr) are untouched. Pre-edit backup:
+  `.bffless-backups/2026-06-12-03q-scenes.json`. A pre-apply diff confirmed **only
+  those two steps** differed from the backup.
+  - `prep`: the `system_instruction` now frames the director as "BIG PICTURE only",
+    drops job-item 3's "rewrite the narration into a tight script (draftText)" in
+    favour of "write a REFINE PROMPT (refinePrompt) … a DIRECTION for the editor,
+    NOT narration", and the requested JSON scene shape swaps `draftText` →
+    `refinePrompt`. Synopsis/title/start/end/cuts/voicing unchanged.
+  - `parse`: the per-scene `sceneOut` drops `draftText`, adds
+    `refinePrompt` (only when non-empty). Clamps/sort/voicing unchanged.
+- **Live-verified** (debug on): a real `POST /api/scenes`
+  (`direction:"keep it punchy"`) enqueued a job that ran to `status:done` — the
+  stored `system` mentions `refinePrompt` and **not** `draftText`, and the parsed
+  result scene has keys `[cuts,end,refinePrompt,start,title,transcript,voicing]`
+  with a genuine per-scene instruction ("Keep the delivery punchy … aggressively
+  trim all the dead air …"). The Replicate token is configured, so this also
+  confirms the **live steering effect** (the model obeyed the direction) — the
+  caveat left open in 03l/03j/03k.
 
 ## Out of scope
 

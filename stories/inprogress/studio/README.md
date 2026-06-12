@@ -125,7 +125,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03n | `03n-snap-to-verbatim.md` | `toRefinement` snaps mistimed `original` tags to the real WhisperX word run (nearest occurrence; cuts follow) instead of demoting — fixes the "asked for original, got revoice" bug | ✅ done |
 | 03o | `03o-trust-the-tag.md` | `toRefinement` trusts the model's `source` tag + its own `start`/`end`; the 03j verbatim gate, the 03n snap, and the contraction map are all removed — text is a label, not a gate (fixes the "asked for original, got revoice" bug at the root) | ✅ done |
 | 03p | `03p-word-timings-from-scratch.md` | refine request sends per-word `wordTimings` (drops `transcript`/`draftText`/first-pass `cuts`); rule `afacb572` prompt rewritten to build the cut FROM SCRATCH off exact word times — so the trusted timestamps are accurate | ✅ done |
-| 03q | `03q-director-scene-prompts.md` | master director stops drafting `draftText`, instead authors a **default per-scene refine prompt** that prepopulates 03l's `scene.refinePrompt`; `draftText` removed (refiner already ignored it since 03p) + orphaned code cleaned; rule `138f27fb` prompt rewritten | 📝 spec ready |
+| 03q | `03q-director-scene-prompts.md` | master director stops drafting `draftText`, instead authors a **default per-scene refine prompt** that prepopulates 03l's `scene.refinePrompt`; `draftText` removed (refiner already ignored it since 03p) + orphaned code cleaned; rule `138f27fb` `prep`+`parse` rewritten (live-verified) | ✅ done |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 
