@@ -6,6 +6,7 @@ import {
   buildFfmpegCommand,
   buildMeasureCommand,
   parseLoudnorm,
+  LOUDNORM_ENABLED,
   type LoudnormStats,
 } from '../../lib/export/assemble'
 import { assemble, measureLoudness } from '../../lib/export/ffmpeg'
@@ -117,14 +118,17 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
       // Loudnorm pass 1: measure each clip so the assemble can apply a single
       // constant gain per clip (linear two-pass). Sequential — one wasm worker.
       // A failed measurement leaves that clip on the dynamic single-pass.
+      // Skipped entirely while normalization is off (LOUDNORM_ENABLED).
       const loudness: (LoudnormStats | null)[] = []
-      for (let k = 0; k < clips.length; k++) {
-        setStage(`Measuring narration loudness (${k + 1}/${clips.length})…`)
-        loudness.push(
-          await measureLoudness({ clip: clips[k], command: buildMeasureCommand(`m${k}.wav`) })
-            .then(parseLoudnorm)
-            .catch(() => null),
-        )
+      if (LOUDNORM_ENABLED) {
+        for (let k = 0; k < clips.length; k++) {
+          setStage(`Measuring narration loudness (${k + 1}/${clips.length})…`)
+          loudness.push(
+            await measureLoudness({ clip: clips[k], command: buildMeasureCommand(`m${k}.wav`) })
+              .then(parseLoudnorm)
+              .catch(() => null),
+          )
+        }
       }
       const command = buildFfmpegCommand(plan, {
         source: 'clip.mp4',

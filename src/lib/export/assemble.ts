@@ -222,6 +222,18 @@ const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11'
 const FADE = 0.01
 
 /**
+ * Loudness normalization is **switched off** for now: single-pass loudnorm
+ * audibly stepped the volume between the short narration clips, and the
+ * measured two-pass replacement still didn't sound right in practice — so
+ * clips currently play at their recorded level (the edge fades stay; they're
+ * what kills the clicks at joins, and were never the problem). All of the
+ * two-pass machinery (measure command, stats parsing, `opts.loudness`,
+ * `measureLoudness` in ./ffmpeg.ts and the pass-1 loop in SceneAssembleBar)
+ * keys off this one flag — flip it to true to bring everything back.
+ */
+export const LOUDNORM_ENABLED = false
+
+/**
  * One clip's measured loudness (loudnorm pass 1): integrated LUFS, true peak,
  * loudness range, gating threshold, and the target offset — exactly what pass 2
  * feeds back as `measured_*`/`offset` to get a **linear** (constant-gain)
@@ -344,7 +356,7 @@ export function buildFfmpegCommand(
       // in at the start, out anchored at the clip's own end (clamped so a fade
       // never starts before 0), then pad+trim to the exact slot length.
       const fadeOut = Math.max(0, a.audioSeconds - FADE)
-      const norm = polish ? `${loudnormFor(opts.loudness?.[j - 1])},` : ''
+      const norm = polish && LOUDNORM_ENABLED ? `${loudnormFor(opts.loudness?.[j - 1])},` : ''
       const fade = polish ? `afade=t=in:st=0:d=${secs(FADE)},afade=t=out:st=${secs(fadeOut)}:d=${secs(FADE)},` : ''
       parts.push(
         `[${j}:a]${norm}aresample=${SAMPLE_RATE},aformat=sample_fmts=s16:channel_layouts=mono,` +
