@@ -222,15 +222,86 @@ const LOUDNORM = 'loudnorm=I=-16:TP=-1.5:LRA=11'
 const FADE = 0.01
 
 /**
+ * One clip's measured loudness (loudnorm pass 1): integrated LUFS, true peak,
+ * loudness range, gating threshold, and the target offset — exactly what pass 2
+ * feeds back as `measured_*`/`offset` to get a **linear** (constant-gain)
+ * correction instead of the single-pass dynamic one.
+ */
+export type LoudnormStats = {
+  i: number
+  tp: number
+  lra: number
+  thresh: number
+  offset: number
+}
+
+/**
+ * Pass 1 of two-pass loudnorm: decode one clip through `loudnorm` in
+ * measurement mode (`print_format=json`, null muxer — no output file). The
+ * stats land in ffmpeg's log; `parseLoudnorm` pulls them out.
+ */
+export function buildMeasureCommand(input: string): { args: string[]; input: string } {
+  return {
+    input,
+    args: ['-i', input, '-af', `${LOUDNORM}:print_format=json`, '-f', 'null', '-'],
+  }
+}
+
+/**
+ * Extract the measured loudness from a measure run's log lines. loudnorm prints
+ * a flat JSON block at the end; values are strings ("-27.61", or "-inf" for
+ * silence). Returns null when there's no parsable block or any value is
+ * non-finite — callers then keep that clip on the single-pass dynamic loudnorm,
+ * so a weird clip degrades to today's behavior instead of failing the render.
+ */
+export function parseLoudnorm(logLines: string[]): LoudnormStats | null {
+  const text = logLines.join('\n')
+  const blocks = text.match(/\{[^{}]*"input_i"[^{}]*\}/g)
+  if (!blocks) return null
+  try {
+    const raw = JSON.parse(blocks[blocks.length - 1]) as Record<string, string>
+    const stats = {
+      i: Number(raw.input_i),
+      tp: Number(raw.input_tp),
+      lra: Number(raw.input_lra),
+      thresh: Number(raw.input_thresh),
+      offset: Number(raw.target_offset),
+    }
+    return Object.values(stats).every(Number.isFinite) ? stats : null
+  } catch {
+    return null
+  }
+}
+
+/** Format a measured dB/LU value for the filter graph (trim trailing zeros). */
+const db = (v: number) => Number(v.toFixed(2)).toString()
+
+/** The pass-2 loudnorm filter: linear constant gain from pass-1 measurements. */
+function loudnormFor(stats: LoudnormStats | null | undefined): string {
+  if (!stats) return LOUDNORM
+  return (
+    `${LOUDNORM}:measured_I=${db(stats.i)}:measured_TP=${db(stats.tp)}` +
+    `:measured_LRA=${db(stats.lra)}:measured_thresh=${db(stats.thresh)}` +
+    `:offset=${db(stats.offset)}:linear=true`
+  )
+}
+
+/**
  * Build the ffmpeg invocation from a plan. The video track trims + concats the
  * kept footage; the audio track, per clip: normalizes loudness, resamples to a
  * common format, fades its edges, pads to its piece length (silence fills any tail
  * where the kept video runs longer than the narration), then concats those with
  * generated silence for dead space.
  *
- * **Audio polish (story 05 follow-up).** Single-pass `loudnorm` levels every clip
- * to one target so the `original` screen-rec audio and the mic/AI takes don't jump
- * in volume back-to-back (the most audible artifact). Short `afade` in/out on each
+ * **Audio polish (story 05 follow-up).** `loudnorm` levels every clip to one
+ * target so the `original` screen-rec audio and the mic/AI takes don't jump in
+ * volume back-to-back (the most audible artifact). Pass `opts.loudness` (pass-1
+ * measurements, aligned with the command's `audioInputs` order) to upgrade each
+ * clip to **two-pass linear** loudnorm — a single constant gain per clip. Without
+ * it, single-pass dynamic loudnorm varies its gain *within* a clip and is
+ * unreliable under ~3 s, which itself causes audible level steps between the
+ * short narration clips (the bug this fixes); a clip whose measurement failed
+ * (null entry) keeps the dynamic fallback. Short `afade` in/out on each
  * clip kills the clicks at concat joins. We deliberately do NOT use `acrossfade`:
  * a real crossfade overlaps (and shortens) the audio, which would break the
  * equal-length video/audio invariant the whole walk relies on; per-clip edge fades
@@ -242,7 +313,13 @@ const FADE = 0.01
  */
 export function buildFfmpegCommand(
   plan: AssemblePlan,
-  opts: { source?: string; output?: string; audioPolish?: boolean } = {},
+  opts: {
+    source?: string
+    output?: string
+    audioPolish?: boolean
+    /** Pass-1 loudness per extra audio input (same order as `audioInputs`). */
+    loudness?: (LoudnormStats | null)[]
+  } = {},
 ): FfmpegCommand {
   const source = opts.source ?? 'source.mp4'
   const output = opts.output ?? 'out.mp4'
@@ -267,7 +344,7 @@ export function buildFfmpegCommand(
       // in at the start, out anchored at the clip's own end (clamped so a fade
       // never starts before 0), then pad+trim to the exact slot length.
       const fadeOut = Math.max(0, a.audioSeconds - FADE)
-      const norm = polish ? `${LOUDNORM},` : ''
+      const norm = polish ? `${loudnormFor(opts.loudness?.[j - 1])},` : ''
       const fade = polish ? `afade=t=in:st=0:d=${secs(FADE)},afade=t=out:st=${secs(fadeOut)}:d=${secs(FADE)},` : ''
       parts.push(
         `[${j}:a]${norm}aresample=${SAMPLE_RATE},aformat=sample_fmts=s16:channel_layouts=mono,` +

@@ -3,6 +3,8 @@ import {
   buildSlices,
   planAssembly,
   buildFfmpegCommand,
+  buildMeasureCommand,
+  parseLoudnorm,
   planScene,
   buildConcatCommand,
   type AssembleInput,
@@ -212,6 +214,74 @@ describe('buildFfmpegCommand', () => {
     // An output option: after the inputs, before the output filename.
     expect(i).toBeGreaterThan(args.lastIndexOf('-i'))
     expect(i).toBeLessThan(args.length - 1)
+  })
+
+  it('applies measured loudness as linear (constant-gain) two-pass loudnorm per clip', () => {
+    const plan = planAssembly({ segments: [seg(0, 4), seg(6, 10)], cuts: [], duration: 10 })
+    const cmd = buildFfmpegCommand(plan, {
+      loudness: [
+        { i: -27.61, tp: -4.47, lra: 18.06, thresh: -39.2, offset: 0.58 },
+        null, // measurement failed → this clip keeps the dynamic single-pass
+      ],
+    })
+    expect(cmd.filterComplex).toContain(
+      '[1:a]loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-27.61:measured_TP=-4.47:measured_LRA=18.06:measured_thresh=-39.2:offset=0.58:linear=true,',
+    )
+    expect(cmd.filterComplex).toContain('[2:a]loudnorm=I=-16:TP=-1.5:LRA=11,')
+  })
+})
+
+describe('buildMeasureCommand (loudnorm pass 1)', () => {
+  it('decodes the clip through loudnorm print_format=json into the null muxer', () => {
+    const { args, input } = buildMeasureCommand('a3.wav')
+    expect(input).toBe('a3.wav')
+    expect(args).toEqual([
+      '-i',
+      'a3.wav',
+      '-af',
+      'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+      '-f',
+      'null',
+      '-',
+    ])
+  })
+})
+
+describe('parseLoudnorm (loudnorm pass 1 output)', () => {
+  const logs = [
+    'size=N/A time=00:00:02.04 bitrate=N/A speed= 296x',
+    '[Parsed_loudnorm_0 @ 0x55] ',
+    '{',
+    '\t"input_i" : "-27.61",',
+    '\t"input_tp" : "-4.47",',
+    '\t"input_lra" : "18.06",',
+    '\t"input_thresh" : "-39.20",',
+    '\t"output_i" : "-16.58",',
+    '\t"output_tp" : "-2.21",',
+    '\t"output_lra" : "10.00",',
+    '\t"output_thresh" : "-27.03",',
+    '\t"normalization_type" : "dynamic",',
+    '\t"target_offset" : "0.58"',
+    '}',
+  ]
+
+  it('pulls the measured values out of the JSON block in the log tail', () => {
+    expect(parseLoudnorm(logs)).toEqual({
+      i: -27.61,
+      tp: -4.47,
+      lra: 18.06,
+      thresh: -39.2,
+      offset: 0.58,
+    })
+  })
+
+  it('returns null when there is no JSON block (clip falls back to single-pass)', () => {
+    expect(parseLoudnorm(['frame=1 fps=0', 'no json here'])).toBeNull()
+  })
+
+  it('returns null on non-finite measurements (e.g. a silent clip measures -inf)', () => {
+    const silent = logs.map((l) => l.replace('"-27.61"', '"-inf"'))
+    expect(parseLoudnorm(silent)).toBeNull()
   })
 })
 
