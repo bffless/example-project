@@ -9,10 +9,13 @@
  *    never at module load — so its worker + glue stay out of the initial JS the
  *    page evaluates. The ~32 MB wasm core is a bundled asset (`?url` below) the
  *    browser only fetches when `load()` runs, not on page load.
- *  - **Single-threaded.** We load `@ffmpeg/core` (not `core-mt`), which needs no
- *    cross-origin-isolation (COOP/COEP) headers — so it works on `/studio` today.
- *    The multithreaded core would slot in here (swap to `@ffmpeg/core-mt`, add its
- *    `workerURL`, and set the isolation headers via a BFFless response-header rule).
+ *  - **Multithreaded when the page allows it.** On a cross-origin-isolated page
+ *    (COOP/COEP headers → `SharedArrayBuffer`) we load `@ffmpeg/core-mt`; anywhere
+ *    else (e.g. `npm run dev`) we fall back to single-threaded `@ffmpeg/core`.
+ *    Mind the heaps: the MT core's shared memory is FIXED at load (no growth) —
+ *    its build default of 1 GiB OOMed real scene assembles, so
+ *    `scripts/patch-core-mt.mjs` raises it to 3 GiB on postinstall. The ST core
+ *    grows on demand up to 2 GiB. Errors below name the core that ran.
  *
  * **Why the ESM core, served locally.** `@ffmpeg/ffmpeg` runs in a *module* worker
  * (`type: "module"`), where `importScripts` doesn't exist — so it loads the core
@@ -43,6 +46,10 @@ let loading: Promise<FFmpeg> | null = null
 /** Which core actually loaded, for diagnostics. */
 export let coreVariant: 'mt' | 'st' | null = null
 
+/** Human-readable core tag for error messages ("which build OOMed?"). */
+const coreLabel = () =>
+  coreVariant === 'mt' ? 'multithreaded core' : coreVariant === 'st' ? 'single-threaded core' : 'core not loaded'
+
 /**
  * Load the ffmpeg core, preferring the **multithreaded** build when the page is
  * cross-origin isolated (COOP/COEP set → `SharedArrayBuffer` available). The MT
@@ -70,6 +77,7 @@ async function getFFmpeg(): Promise<FFmpeg> {
         })
         instance = ff
         coreVariant = 'mt'
+        console.info('[studio] ffmpeg core: multithreaded (3 GiB fixed heap)')
         return ff
       } catch {
         // Fall through to the single-threaded core below.
@@ -80,6 +88,7 @@ async function getFFmpeg(): Promise<FFmpeg> {
     await ff.load({ coreURL: abs(coreUrl), wasmURL: abs(wasmUrl) })
     instance = ff
     coreVariant = 'st'
+    console.info('[studio] ffmpeg core: single-threaded (grows to 2 GiB)')
     return ff
   })()
   try {
@@ -141,7 +150,7 @@ export async function assemble({
 
     const code = await ff.exec(command.args)
     if (code !== 0) {
-      throw new Error(`ffmpeg exited ${code}\n${tail.slice(-12).join('\n')}`)
+      throw new Error(`ffmpeg exited ${code} (${coreLabel()})\n${tail.slice(-12).join('\n')}`)
     }
 
     const output = command.args[command.args.length - 1]
@@ -195,7 +204,7 @@ export async function slice({ source, command, onProgress, onLog }: SliceAssets)
 
     const code = await ff.exec(command.args)
     if (code !== 0) {
-      throw new Error(`ffmpeg exited ${code}\n${tail.slice(-12).join('\n')}`)
+      throw new Error(`ffmpeg exited ${code} (${coreLabel()})\n${tail.slice(-12).join('\n')}`)
     }
 
     const data = await ff.readFile(command.output)
@@ -243,7 +252,7 @@ export async function concat({ parts, command, onLog }: ConcatAssets): Promise<B
 
     const code = await ff.exec(command.args)
     if (code !== 0) {
-      throw new Error(`ffmpeg exited ${code}\n${tail.slice(-12).join('\n')}`)
+      throw new Error(`ffmpeg exited ${code} (${coreLabel()})\n${tail.slice(-12).join('\n')}`)
     }
 
     const data = await ff.readFile(command.output)

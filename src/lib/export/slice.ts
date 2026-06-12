@@ -71,6 +71,10 @@ export function buildSliceCommand(opts: {
     'libx264',
     '-preset',
     'ultrafast',
+    // Same 4-thread cap as assemble: bounds x264's per-thread full-res buffers
+    // inside the fixed-size wasm heap (see buildFfmpegCommand).
+    '-threads',
+    '4',
     '-pix_fmt',
     'yuv420p',
     '-c:a',
