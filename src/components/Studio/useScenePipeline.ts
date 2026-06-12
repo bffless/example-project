@@ -137,7 +137,7 @@ export type StepContext = { file: File; src: string; duration: number }
  *
  * Business state (stages, scenes, transcript, bucket serve URLs, contact sheets,
  * selection) lives in the persisted Redux `studio` slice, so a hard reload
- * resumes where you left off. Only transient UI flags (`running`, `voicingId`)
+ * resumes where you left off. Only transient UI flags (`running`)
  * are local React state — losing those on reload is fine. Network calls go
  * through RTK Query (`/store/studioApi`).
  *
@@ -197,7 +197,6 @@ export function useScenePipeline() {
   }, [signReq, sourceUrl])
 
   // Transient UI state — not persisted.
-  const [voicingId, setVoicingId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   // The export step (story 05): true while the assembled MP4 is uploading to the
   // bucket. The finished blob lives transiently in the AssembleBar (which also
@@ -558,8 +557,8 @@ export function useScenePipeline() {
 
   // Stages ⑤⑥ — the master director (story 03). One multimodal Gemini call gets
   // the timestamped transcript, the director contact sheets, and the user's
-  // optional direction, and returns the synopsis + scenes (tightened script,
-  // original-video span, and cut spans). Marks BOTH the shorten and segment
+  // optional direction, and returns the synopsis + scenes (per-scene refine
+  // prompt, original-video span, and cut spans). Marks BOTH the shorten and segment
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(
@@ -755,9 +754,9 @@ export function useScenePipeline() {
     [sheetingId, refiningId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
   )
 
-  // Button 2: hand the scene's transcript + the director's first-pass
-  // script/cuts + the dense sheets to /api/refine-scene, store the result in
-  // `scene.refined` (NON-destructive — `draftText`/`cuts` are never touched).
+  // Button 2: hand the scene's word timings + the director's refinePrompt +
+  // the dense sheets to /api/refine-scene, store the result in
+  // `scene.refined` (NON-destructive — the director's baseline cuts are untouched).
   const refineScene = useCallback(
     async (id: string) => {
       if (sheetingId || refiningId) return
@@ -1105,27 +1104,6 @@ export function useScenePipeline() {
 
   // ---- Scene build loop -----------------------------------------------------
 
-  const updateDraft = useCallback(
-    (id: string, draftText: string) => {
-      // Editing the text invalidates any previously generated voice.
-      patchScene(id, { draftText, narrationSeconds: null, status: 'pending' })
-    },
-    [patchScene],
-  )
-
-  // Mock TTS: estimate narration length from the text. Real version calls
-  // `/api/voice/say` with the cloned voice.
-  const generateVoice = useCallback(
-    async (id: string) => {
-      setVoicingId(id)
-      await delay(800)
-      const scene = scenes.find((s) => s.id === id)
-      if (scene) patchScene(id, { narrationSeconds: narrationSeconds(scene.draftText) })
-      setVoicingId(null)
-    },
-    [scenes, patchScene],
-  )
-
   const markBuilt = useCallback(
     (id: string) => {
       const next = scenes.map((s) =>
@@ -1220,7 +1198,6 @@ export function useScenePipeline() {
     finalCutUrl,
     savingFinalCut,
     savingSceneCutId,
-    voicingId,
     running,
     cloning,
     samplingVoice,
@@ -1261,8 +1238,6 @@ export function useScenePipeline() {
     forgetVoice,
     clearVoice,
     generateSample,
-    updateDraft,
-    generateVoice,
     toggleBuilt,
   }
 }

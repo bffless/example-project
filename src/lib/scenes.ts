@@ -23,7 +23,7 @@ export type Cut = { start: number; end: number }
 
 /**
  * One anchored run of the new narration, in original-video seconds. The master
- * director only hands us a flat `draftText` string with no placement; the
+ * director hands us no script — just a per-scene `refinePrompt` (story 03q); the
  * per-scene refiner (story 03c) returns these — where each run of the rewritten
  * script actually starts/ends, split into multiple segments when there's kept
  * dead air/pause between them.
@@ -50,9 +50,9 @@ export type NarrationSegment = {
 
 /**
  * The second-pass refiner's output for a scene (story 03c) — kept in a SEPARATE
- * field so the master director's first-pass `draftText`/`cuts` are never
- * overwritten and the producer can revert (`refined = null`). `source`
- * distinguishes the AI's refinement from later hand-edits in the diff viewer.
+ * field so the master director's first-pass `cuts` are never overwritten and the
+ * producer can revert (`refined = null`). `source` distinguishes the AI's
+ * refinement from later hand-edits in the diff viewer.
  */
 export type SceneRefinement = {
   segments: NarrationSegment[]
@@ -69,8 +69,6 @@ export type Scene = {
   end: number
   /** The words the AI heard in this scene (read-only reference). */
   transcript: string
-  /** The editable, tightened script you'll actually re-voice. */
-  draftText: string
   status: SceneStatus
   /** Length of the generated narration once voiced; null until voiced. */
   narrationSeconds: number | null
@@ -89,7 +87,7 @@ export type Scene = {
    *  base64 `dataUrl` is dropped after upload. */
   sheets?: ContactSheet[]
   /** Second-pass refiner output (story 03c). Absent/null = fall back to the
-   *  director baseline (`draftText` + `cuts`). */
+   *  baseline (the scene `transcript` + the director's `cuts`). */
   refined?: SceneRefinement | null
   /** Creator's per-scene instruction for the refiner (story 03l). An INPUT, not
    *  refiner output — it survives revert (`refined = null`) and seeds the next
@@ -125,9 +123,6 @@ export type Scene = {
   refineJobId?: string | null
   thumb?: string
 }
-
-/** How much the AI condenses each scene's words (mock). */
-export const SHORTEN_RATIO = 0.6
 
 /** Speaking rate used to estimate narration length from text. */
 export const WORDS_PER_SECOND = 2.5
@@ -186,11 +181,11 @@ function fillerText(words: number): string {
 }
 
 /**
- * Mock of the shorten + segment steps: break `duration` into a few logical
+ * Mock of the slice + direct steps: break `duration` into a few logical
  * 2–5 min scenes (≈3.5 min target), never fewer than one. Each scene maps to an
- * original-video span (`start`–`end`) and carries the full span `transcript`
- * plus an AI-shortened `draftText` — so the re-voiced narration is shorter than
- * the footage, the way it will be in practice.
+ * original-video span (`start`–`end`), carries the full span `transcript`, and a
+ * default `refinePrompt` — the director's per-scene instruction to the refiner
+ * (story 03q; the director no longer drafts a script).
  */
 export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[] {
   if (!Number.isFinite(duration) || duration <= 0) return []
@@ -202,8 +197,7 @@ export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[]
     const end = i === count - 1 ? duration : (i + 1) * each
     const spanWords = Math.round((end - start) * WORDS_PER_SECOND)
     const transcript = fillerText(spanWords)
-    const draftText = fillerText(Math.max(1, Math.round(spanWords * SHORTEN_RATIO)))
-    const firstWords = draftText.split(' ').slice(0, 4).join(' ')
+    const firstWords = transcript.split(' ').slice(0, 4).join(' ')
     return {
       id: `scene-${i + 1}`,
       index: i,
@@ -211,9 +205,9 @@ export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[]
       start,
       end,
       transcript,
-      draftText,
       status: 'pending' as const,
       narrationSeconds: null,
+      refinePrompt: `Tighten scene ${i + 1} to a crisp run; drop the dead air in the middle.`,
     }
   })
 }

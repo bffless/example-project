@@ -66,7 +66,6 @@ function scene(over: Partial<Scene> = {}): Scene {
     start: 0,
     end: 10,
     transcript: 'hello there',
-    draftText: 'hello',
     status: 'pending',
     narrationSeconds: null,
     cuts: [],

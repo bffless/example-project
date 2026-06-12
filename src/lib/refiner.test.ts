@@ -33,8 +33,7 @@ function scene(partial: Partial<Scene> = {}): Scene {
     title: 'Scene 1',
     start: 0,
     end: 100,
-    transcript: '',
-    draftText: 'the director first pass script',
+    transcript: 'the director first pass script',
     status: 'pending',
     narrationSeconds: null,
     cuts: [{ start: 40, end: 50 }],
@@ -158,8 +157,8 @@ describe('effectiveSegments / effectiveCuts', () => {
     expect(effectiveCuts(s)).toBe(refined.cuts)
   })
 
-  it('falls back to one draftText segment + director cuts when not refined', () => {
-    const s = scene({ start: 0, end: 100, draftText: 'fallback', cuts: [{ start: 40, end: 50 }] })
+  it('falls back to one transcript segment + director cuts when not refined', () => {
+    const s = scene({ start: 0, end: 100, transcript: 'fallback', cuts: [{ start: 40, end: 50 }] })
     expect(effectiveSegments(s)).toEqual([{ text: 'fallback', start: 0, end: 100 }])
     expect(effectiveCuts(s)).toEqual([{ start: 40, end: 50 }])
   })

@@ -222,7 +222,7 @@ export function Studio() {
   // The shortened script laid back on the timeline, for the diff's right pane.
   // Uses the refiner's anchored segments when a scene has been refined (words
   // flow at the speaking rate from each segment's start, leaving the kept pauses
-  // empty); falls back to a single draftText segment for un-refined scenes.
+  // empty); falls back to a single transcript segment for un-refined scenes.
   const editedWords = useMemo(
     () => (selected ? segmentsToTimedWords(effectiveSegments(selected)) : []),
     [selected],

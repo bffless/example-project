@@ -1,13 +1,12 @@
 /**
  * The per-scene refiner — the second pass (story 03c).
  *
- * The master director (story 03) sees the whole talk and returns a flat
- * `draftText` + `cuts` per scene with **no placement** for the new words. The
- * refiner zooms into ONE scene: it spends the whole image budget on that scene
- * (a much denser contact sheet) and *refines* the first-pass suggestion, handing
- * back where the new script actually lands — `segments` anchored on the
- * original-video timeline (more than one when there's kept dead air between
- * runs) — plus better `cuts`.
+ * The master director (story 03) sees the whole talk and returns a per-scene
+ * `refinePrompt` + coarse `cuts` (no script — story 03q). The refiner zooms into
+ * ONE scene: it spends the whole image budget on that scene (a much denser contact
+ * sheet) and writes the new script from scratch, handing back where it actually
+ * lands — `segments` anchored on the original-video timeline (more than one when
+ * there's kept dead air between runs) — plus better `cuts`.
  *
  * Like `director.ts`, this is the *pure* half: request shaping + response
  * coercion, shared by the MSW mock and the real `/api/refine-scene` pipeline (the
@@ -15,7 +14,7 @@
  * authoritative prompt/system-instruction live in the BFFless pipeline.
  *
  * **Non-destructive:** `toRefinement` produces a `SceneRefinement` that lives in
- * `scene.refined` — it never touches the director's `draftText`/`cuts`, so the
+ * `scene.refined` — it never touches the director's baseline `cuts`, so the
  * producer can always revert by clearing `refined`.
  */
 
@@ -314,12 +313,13 @@ export function removeSegment(segments: NarrationSegment[], index: number): Narr
 
 /**
  * The narration segments to render for a scene: the refiner's if present, else a
- * single segment spanning the whole scene from the director's `draftText` (the
- * old even-spread fallback). Lets the diff viewer read one shape regardless.
+ * single placeholder segment spanning the whole scene built from the scene's
+ * original `transcript` (story 03q — the director no longer drafts a script).
+ * Lets the diff viewer read one shape regardless.
  */
 export function effectiveSegments(scene: Scene): NarrationSegment[] {
   if (scene.refined?.segments?.length) return scene.refined.segments
-  const text = str(scene.draftText).trim()
+  const text = str(scene.transcript).trim()
   return text ? [{ text, start: scene.start, end: scene.end }] : []
 }
 

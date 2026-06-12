@@ -36,19 +36,19 @@ describe('buildScenes', () => {
     }
   })
 
-  it('opens each scene with an AI-shortened draft shorter than the footage', () => {
+  it('carries the full-span transcript and a default refine prompt', () => {
     const [scene] = buildScenes(120)
-    // full-span transcript ≈ footage length; draft is condensed below it
+    // full-span transcript ≈ footage length
     expect(narrationSeconds(scene.transcript)).toBeCloseTo(sceneVideoSeconds(scene), 0)
-    expect(narrationSeconds(scene.draftText)).toBeLessThan(sceneVideoSeconds(scene))
-    expect(narrationSeconds(scene.draftText)).toBeGreaterThan(0)
+    expect(scene.refinePrompt).toBeTruthy()
+    expect(typeof scene.refinePrompt).toBe('string')
   })
 })
 
 describe('alignment', () => {
   const base: Scene = {
     id: 's', index: 0, title: 't', start: 0, end: 20,
-    transcript: '', draftText: '', status: 'pending', narrationSeconds: null,
+    transcript: '', status: 'pending', narrationSeconds: null,
   }
 
   it('is null until the scene is voiced', () => {

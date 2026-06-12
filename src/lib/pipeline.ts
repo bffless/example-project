@@ -98,11 +98,12 @@ export const STAGE_DEFS: StageDef[] = [
   {
     id: 'director',
     title: 'Send to the AI director',
-    note: 'Hand the timestamped transcript and the director contact sheets to the AI master director (Gemini), with any direction of your own. One call shortens the script AND groups it into logical 2–5 min scenes — each with its original-video timestamps and the footage to cut. You get back a one-line synopsis plus your chapters.',
+    note: 'Hand the timestamped transcript and the director contact sheets to the AI master director (Gemini), with any direction of your own. One call groups the talk into logical 2–5 min scenes — each with its original-video timestamps, the footage to cut, and a starting prompt to steer its refine. You get back a one-line synopsis plus your chapters.',
     where: 'pipeline',
-    // The master director (story 03): a single Gemini call does the shortening
-    // AND the scene grouping — so it's one step. The action lives in the richer
-    // DirectorPanel (see panelStageId), not an inline board button.
+    // The master director (story 03): a single Gemini call does the scene
+    // grouping AND writes each scene's refine prompt (story 03q) — so it's one
+    // step. The action lives in the richer DirectorPanel (see panelStageId), not
+    // an inline board button.
     actionLabel: 'Send to the AI director',
   },
   {
