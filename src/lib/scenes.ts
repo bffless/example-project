@@ -214,6 +214,7 @@ export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[]
       draftText,
       status: 'pending' as const,
       narrationSeconds: null,
+      refinePrompt: `Tighten scene ${i + 1} to a crisp run; drop the dead air in the middle.`,
     }
   })
 }
