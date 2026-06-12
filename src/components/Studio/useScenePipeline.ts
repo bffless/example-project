@@ -754,9 +754,9 @@ export function useScenePipeline() {
     [sheetingId, refiningId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
   )
 
-  // Button 2: hand the scene's transcript + the director's first-pass
-  // script/cuts + the dense sheets to /api/refine-scene, store the result in
-  // `scene.refined` (NON-destructive — `draftText`/`cuts` are never touched).
+  // Button 2: hand the scene's word timings + the director's refinePrompt +
+  // the dense sheets to /api/refine-scene, store the result in
+  // `scene.refined` (NON-destructive — the director's baseline cuts are untouched).
   const refineScene = useCallback(
     async (id: string) => {
       if (sheetingId || refiningId) return

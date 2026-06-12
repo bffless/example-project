@@ -115,11 +115,11 @@ const studioHandlers = [
   http.post('/api/transcribe', () => HttpResponse.json(TRANSCRIBE_FIXTURE)),
 
   // Master director: enqueue a job and return its id (story 03f Part 0). The
-  // canned synopsis + scenes (tightened script + cut spans, derived from the
+  // canned synopsis + scenes (per-scene refinePrompt + cut spans, derived from the
   // posted `duration` so they fit any clip) are stashed as the job's `result` for
   // the poll endpoint to hand back. Mirrors the real enqueue shape: { jobId,
   // status }; the result blob mirrors { synopsis, scenes:[{ title, start, end,
-  // transcript, draftText, cuts }] }.
+  // transcript, refinePrompt, voicing, cuts }] }.
   http.post('/api/scenes', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { duration?: number; direction?: string }
     const jobId = enqueueJob(
@@ -132,8 +132,8 @@ const studioHandlers = [
   }),
 
   // Per-scene refiner (story 03c): enqueue a job (story 03f Part 0). The canned
-  // anchored segments + refined cuts — the first-pass `draftText` split into two
-  // runs around the kept pause/cut — are stashed as the job's `result`. Mirrors
+  // anchored segments + refined cuts — split into two runs around the kept
+  // pause/cut — are stashed as the job's `result`. Mirrors
   // the enqueue shape { jobId, status }; the result blob mirrors { segments:
   // [{ text, start, end }], cuts: [{ start, end }] }.
   http.post('/api/refine-scene', async ({ request }) => {
