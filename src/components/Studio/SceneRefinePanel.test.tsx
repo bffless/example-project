@@ -13,7 +13,6 @@ function makeScene(overrides: Partial<Scene> = {}): Scene {
     start: 0,
     end: 10,
     transcript: 'hello there',
-    draftText: 'hello there',
     cuts: [],
     sheets: [{ index: 0, dataUrl: '', url: '/api/uploads/thumbnails/sheet-01.jpg', times: [0, 5] }],
     ...overrides,

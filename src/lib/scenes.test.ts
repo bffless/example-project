@@ -48,7 +48,7 @@ describe('buildScenes', () => {
 describe('alignment', () => {
   const base: Scene = {
     id: 's', index: 0, title: 't', start: 0, end: 20,
-    transcript: '', draftText: '', status: 'pending', narrationSeconds: null,
+    transcript: '', status: 'pending', narrationSeconds: null,
   }
 
   it('is null until the scene is voiced', () => {

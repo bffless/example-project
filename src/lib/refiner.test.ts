@@ -34,7 +34,6 @@ function scene(partial: Partial<Scene> = {}): Scene {
     start: 0,
     end: 100,
     transcript: 'the director first pass script',
-    draftText: '',
     status: 'pending',
     narrationSeconds: null,
     cuts: [{ start: 40, end: 50 }],

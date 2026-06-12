@@ -22,7 +22,6 @@ const scene = (id: string, over: Partial<Scene> = {}): Scene => ({
   start: 0,
   end: 10,
   transcript: 't',
-  draftText: 'd',
   status: 'pending',
   narrationSeconds: null,
   ...over,

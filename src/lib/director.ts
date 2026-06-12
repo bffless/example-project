@@ -10,10 +10,10 @@
  *      demo at 12:30", …).
  *
  * It returns, as strict JSON, a one-line **synopsis** of the whole talk plus the
- * **scenes**: each a logical chapter with a tightened script (`draftText`), the
- * original-video span it maps to (`start`–`end`), and the footage spans to drop
- * (`cuts`). The new script is shorter than the footage, so Build fits the footage
- * to the narration using these cuts.
+ * **scenes**: each a logical chapter with a default `refinePrompt` (the director's
+ * per-scene instruction to the second-pass refiner — story 03q; it no longer
+ * drafts a script), the original-video span it maps to (`start`–`end`), and the
+ * footage spans to drop (`cuts`).
  *
  * This module is the *pure* half — request shaping + response coercion — so it's
  * unit-tested and shared by the MSW mock and the real `/api/scenes` pipeline (the
@@ -33,8 +33,6 @@ export type DirectorScene = {
   end: number
   /** The words the AI heard across this span (reference). */
   transcript?: string
-  /** The tightened, re-voiceable script for this scene. */
-  draftText?: string
   /** Footage spans to drop, in original-video seconds, inside this scene. */
   cuts?: Cut[]
   /** The director's voicing plan for this scene (story 03j): keep the creator's
@@ -134,7 +132,6 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
     if (end <= start) end = Math.min(start + 0.05, bound) // never zero-length
     cursor = end
 
-    const draftText = str(s?.draftText).trim()
     const transcript = str(s?.transcript).trim()
     const refinePrompt = str(s?.refinePrompt).trim()
     const title = str(s?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
@@ -152,7 +149,6 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
       start,
       end,
       transcript,
-      draftText,
       status: 'pending',
       narrationSeconds: null,
       cuts,
@@ -161,26 +157,4 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
     })
   })
   return scenes
-}
-
-/**
- * Lay each scene's tightened script back onto the timeline as word-level
- * `TWord`s, spread evenly across the scene span — so the transcript editor's
- * right pane (02b) can show the *new* script against the original on the same
- * time grid. Approximate by design: real per-word timing only exists once the
- * scene is voiced (story 04).
- */
-export function scenesToTimedWords(scenes: Scene[]): TWord[] {
-  const out: TWord[] = []
-  for (const scene of scenes) {
-    const words = str(scene.draftText).trim().split(/\s+/).filter(Boolean)
-    if (!words.length) continue
-    const span = Math.max(0, scene.end - scene.start)
-    const step = span / words.length
-    words.forEach((text, i) => {
-      const start = scene.start + i * step
-      out.push({ text, start, end: start + step })
-    })
-  }
-  return out
 }

@@ -361,7 +361,6 @@ function mockDirector(duration: number, direction: string) {
       end,
       voicing: keepOriginal ? 'original' : VOICINGS[i % VOICINGS.length],
       transcript: `(${Math.round(end - start)}s of original footage for this scene)`,
-      draftText: direction ? `${beat.draft} (${direction})` : beat.draft,
       refinePrompt: `Tighten this beat${direction ? `, ${direction}` : ''}; drop the dead air in the middle, keep the on-screen action visible.`,
       cuts: [{ start: cutStart, end: cutEnd }],
     }

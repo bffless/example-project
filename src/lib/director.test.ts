@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   timedTranscript,
   toScenes,
-  scenesToTimedWords,
   type DirectorScene,
 } from './director'
 
@@ -93,21 +92,5 @@ describe('toScenes', () => {
       120,
     )
     expect(scenes.map((s) => s.voicing)).toEqual(['original', 'mixed', undefined, undefined])
-  })
-})
-
-describe('scenesToTimedWords', () => {
-  it('spreads each scene script across its span', () => {
-    const scenes = toScenes([{ start: 0, end: 4, draftText: 'a b c d' }], 4)
-    const words = scenesToTimedWords(scenes)
-    expect(words).toHaveLength(4)
-    expect(words[0]).toMatchObject({ text: 'a', start: 0 })
-    expect(words[1].start).toBeCloseTo(1, 5)
-    expect(words[3].start).toBeCloseTo(3, 5)
-  })
-
-  it('skips scenes with no script', () => {
-    const scenes = toScenes([{ start: 0, end: 4, draftText: '' }], 4)
-    expect(scenesToTimedWords(scenes)).toEqual([])
   })
 })

@@ -10,7 +10,6 @@ const base: Scene = {
   start: 0,
   end: 100,
   transcript: 'one two three four five six seven eight nine ten',
-  draftText: '',
   status: 'pending',
   narrationSeconds: null,
 }
