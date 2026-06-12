@@ -81,6 +81,13 @@ describe('SceneRefinePanel scene prompts (story 03l)', () => {
     expect(onChange).toHaveBeenCalledWith('trim the pause')
   })
 
+  it('prefills the direction textarea with the director\'s per-scene prompt (story 03q)', () => {
+    renderPanel(makeScene({ refinePrompt: 'Tighten the intro to a 15s hook.' }))
+    expect(screen.getByLabelText(/direction for this scene/i)).toHaveValue(
+      'Tighten the intro to a 15s hook.',
+    )
+  })
+
   it('hides the director-prompt row when there is no director prompt', () => {
     renderPanel(makeScene(), { direction: '   ' })
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()

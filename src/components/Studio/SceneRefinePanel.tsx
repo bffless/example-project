@@ -54,7 +54,6 @@ export function SceneRefinePanel({
         below (and the preview above) works on that clip, not the whole film. After
         that it's a zoomed-in second pass: capture a dense contact sheet for just
         this scene, then ask the AI to place the new script and tighten the cuts.
-        Your original draft is kept — refining never overwrites it.
       </p>
 
       <div className="mt-4 flex flex-col gap-3">
@@ -99,11 +98,13 @@ export function SceneRefinePanel({
           </button>
         </div>
 
-        {/* Creator steering for the refine call (story 03l). Both are inputs —
-            they survive Revert and seed the next re-refine. The director prompt
-            itself isn't editable here: include it as context, or don't. */}
+        {/* Creator steering for the refine call (stories 03l/03q). Both are
+            inputs — they survive Revert and seed the next re-refine. The textarea
+            is prepopulated with the master director's per-scene suggestion (03q);
+            edit it freely. The global director prompt itself isn't editable here:
+            include it as context, or don't. */}
         <label className="flex flex-col gap-1.5">
-          <span className="meta-label">Direction for this scene · optional</span>
+          <span className="meta-label">Direction for this scene — the director&apos;s suggestion, edit freely</span>
           <textarea
             value={scene.refinePrompt ?? ''}
             onChange={(e) => onRefinePromptChange(e.target.value)}
