@@ -38,11 +38,15 @@ export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
   // The director's voicing plan pre-refine; the real segment mix after (03j).
   const voicing = voicingSummary(scene)
 
+  // The effective narration text (refined script over the transcript fallback) —
+  // the director no longer drafts a script (story 03q), so derive the word
+  // counts from what will actually be voiced, not a dead `draftText` baseline.
+  const draftScript = segments.map((s) => s.text).join(' ')
   const origWords = wordCount(scene.transcript)
-  const draftWords = wordCount(scene.draftText)
+  const draftWords = wordCount(draftScript)
   const reduction = origWords > 0 ? Math.round((1 - draftWords / origWords) * 100) : 0
 
-  const estNarration = narrationSeconds(scene.draftText)
+  const estNarration = narrationSeconds(draftScript)
   // Compare the voiced narration to the FINAL clip length (footage minus cuts), not
   // the raw footage span — that's the length it actually plays over in the export.
   const align: Alignment | null =
