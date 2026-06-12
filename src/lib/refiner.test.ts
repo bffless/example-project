@@ -18,6 +18,7 @@ import {
   suggestedOriginalIndices,
   applyOriginalClips,
   refineDirections,
+  sceneWordTimings,
   type RefineSceneRaw,
   type RefineSegment,
 } from './refiner'
@@ -100,42 +101,22 @@ describe('toRefinement', () => {
   })
 })
 
-describe('toRefinement voicing source (story 03j)', () => {
-  const words = [
-    { text: 'So', start: 10, end: 10.3 },
-    { text: 'the', start: 10.4, end: 10.6 },
-    { text: 'idea', start: 10.7, end: 11.2 },
-    { text: 'is', start: 11.3, end: 11.5 },
-    { text: "isn't,", start: 11.6, end: 12.1 },
-  ]
-
-  it('keeps an original tag when the text matches the span words verbatim', () => {
+describe('toRefinement voicing source (story 03j, trust-the-tag 03o)', () => {
+  it("trusts an 'original' tag — the text is a label, never re-checked against the transcript", () => {
+    // The model's echo can differ from WhisperX (a colloquial spelling like
+    // "gonna" vs "going to", a dropped filler) yet still describe the same audio.
+    // 03o stopped second-guessing the tag: 'original' passes straight through
+    // with the model's own span; no verbatim gate, no snap, no downgrade.
     const r = toRefinement(
-      { segments: [{ text: `so the idea is isn’t`, start: 10, end: 12.5, source: 'original' }] },
+      { segments: [{ text: "In this session I'm gonna be going over onboarding rules.", start: 11.5, end: 15, source: 'original' }] },
       scene(),
-      words,
     )
     expect(r.segments[0].suggestedSource).toBe('original')
+    expect(r.segments[0].start).toBe(11.5)
+    expect(r.segments[0].end).toBe(15)
   })
 
-  it('downgrades an original tag whose text was rewritten', () => {
-    const r = toRefinement(
-      { segments: [{ text: 'the idea is straightforward', start: 10, end: 12.5, source: 'original' }] },
-      scene(),
-      words,
-    )
-    expect(r.segments[0].suggestedSource).toBe('revoice')
-  })
-
-  it('downgrades an original tag when no transcript words are provided', () => {
-    const r = toRefinement(
-      { segments: [{ text: 'so the idea is simple', start: 10, end: 12.5, source: 'original' }] },
-      scene(),
-    )
-    expect(r.segments[0].suggestedSource).toBe('revoice')
-  })
-
-  it('passes revoice through and drops junk source values', () => {
+  it("passes 'revoice' through and drops junk source values", () => {
     const r = toRefinement(
       {
         segments: [
@@ -151,20 +132,21 @@ describe('toRefinement voicing source (story 03j)', () => {
     expect(r.segments.map((s) => 'suggestedSource' in s)).toEqual([true, false])
   })
 
-  it('downgrades when the cursor clamp shifts the span past some of the words', () => {
+  it("keeps the 'original' tag even when the cursor clamp shifts the span (no downgrade)", () => {
     // The first segment ends at 10.6, so the second is cursor-clamped to start
-    // there — its slice no longer plays 'So the', but its text still claims them.
+    // there. We no longer downgrade on the resulting span drift — the tag stands
+    // and the clamped span is what plays.
     const r = toRefinement(
       {
         segments: [
           { text: 'So', start: 10, end: 10.6 },
-          { text: `so the idea is isn't`, start: 10, end: 12.5, source: 'original' },
+          { text: 'so the idea is', start: 10, end: 12.5, source: 'original' },
         ],
       },
       scene(),
-      words,
     )
-    expect(r.segments[1].suggestedSource).toBe('revoice')
+    expect(r.segments[1].suggestedSource).toBe('original')
+    expect(r.segments[1].start).toBe(10.6)
   })
 })
 
@@ -564,113 +546,29 @@ describe('refineDirections (story 03l)', () => {
   })
 })
 
-describe('toRefinement snap-to-verbatim (story 03n)', () => {
-  // Words shaped like the real 03l bug report: false starts of the SAME words
-  // right before the clean take, so a slightly-early model boundary changes
-  // the span's word set entirely.
-  const w = (text: string, start: number, end: number) => ({ text, start, end })
-  const takeWords = [
-    // false start #1
-    w('onboarding', 16, 16.5),
-    w('rules', 16.6, 17),
-    w('allow', 17.1, 17.5),
-    w('you', 17.6, 17.9),
-    w('to', 18, 18.3),
-    w('either', 18.4, 19),
-    // false start #2
-    w('onboarding', 19.5, 20),
-    w('rules', 20.1, 20.5),
-    w('allow', 20.6, 21),
-    w('you', 21.1, 21.4),
-    w('to', 21.5, 21.9),
-    // the clean take
-    w('onboarding', 23.9, 24.4),
-    w('rules', 24.5, 24.9),
-    w('allow', 25, 25.4),
-    w('you', 25.5, 25.8),
-    w('to', 25.9, 26.2),
-    w('promote', 26.3, 26.8),
-    w('users', 26.9, 27.4),
-  ]
-  const claim = {
-    segments: [
-      { text: 'onboarding rules allow you to promote users', start: 21.2, end: 30, source: 'original' as const },
-    ],
-    cuts: [{ start: 15, end: 21.2 }],
-  }
-
-  it('snaps an original tag to the real word run instead of downgrading', () => {
-    const r = toRefinement(claim, scene({ start: 15, end: 34 }), takeWords)
-    expect(r.segments[0].suggestedSource).toBe('original')
-    expect(r.segments[0].start).toBeCloseTo(23.9, 5)
-    expect(r.segments[0].end).toBeCloseTo(27.4, 5)
+describe('sceneWordTimings (story 03p)', () => {
+  it('emits one `start end word` line per word, 2 decimals, in order', () => {
+    const out = sceneWordTimings([
+      { text: 'In', start: 11.5, end: 11.7 },
+      { text: 'this', start: 11.8, end: 12.04 },
+      { text: 'session', start: 12.1, end: 12.5 },
+    ])
+    expect(out).toBe('11.50 11.70 In\n11.80 12.04 this\n12.10 12.50 session')
   })
 
-  it('turns the displaced junk-word sliver into a cut, leaves wordless slivers as gaps', () => {
-    const r = toRefinement(claim, scene({ start: 15, end: 34 }), takeWords)
-    // [21.2, 23.9] holds the false-start words the model believed it had cut →
-    // merged into the adjacent cut. [27.4, 30] is wordless → stays a kept gap.
-    expect(r.cuts).toEqual([{ start: 15, end: 23.9 }])
+  it('skips words with no finite start and trims the text', () => {
+    const out = sceneWordTimings([
+      { text: '  hello ', start: 1, end: 1.3 },
+      { text: 'dropped', start: NaN as unknown as number, end: 2 },
+      { text: 'world', start: 3.2, end: 3.9 },
+    ])
+    expect(out).toBe('1.00 1.30 hello\n3.20 3.90 world')
   })
 
-  it('snaps to the occurrence nearest the claimed span when the words repeat', () => {
-    const twice = [
-      w('hello', 2, 2.4),
-      w('there', 2.5, 2.9),
-      w('friend', 3, 3.5),
-      w('um', 10.85, 10.95), // junk just inside the sloppy boundary → mismatch
-      w('hello', 11, 11.4),
-      w('there', 11.5, 11.9),
-      w('friend', 12, 12.5),
-    ]
-    const r = toRefinement(
-      { segments: [{ text: 'hello there friend', start: 10.8, end: 13.5, source: 'original' }] },
-      scene({ start: 0, end: 20 }),
-      twice,
+  it('falls back to start for a missing end and returns "" for no words', () => {
+    expect(sceneWordTimings([{ text: 'x', start: 5 } as unknown as { text: string; start: number; end: number }])).toBe(
+      '5.00 5.00 x',
     )
-    expect(r.segments[0].suggestedSource).toBe('original')
-    expect(r.segments[0].start).toBeCloseTo(11, 5)
-    expect(r.segments[0].end).toBeCloseTo(12.5, 5)
-  })
-
-  it('shrinks a cut that the snapped span expands into', () => {
-    const lead = [w('or', 34.7, 34.9), w('they', 35, 35.3), w('also', 35.4, 35.8)]
-    const r = toRefinement(
-      {
-        segments: [{ text: 'or they also', start: 35, end: 36, source: 'original' }],
-        cuts: [{ start: 34, end: 35 }],
-      },
-      scene({ start: 30, end: 40 }),
-      lead,
-    )
-    expect(r.segments[0].suggestedSource).toBe('original')
-    expect(r.segments[0].start).toBeCloseTo(34.7, 5)
-    expect(r.cuts).toEqual([{ start: 34, end: 34.7 }])
-  })
-
-  it('still downgrades when the text exists nowhere as a contiguous run', () => {
-    const r = toRefinement(
-      { segments: [{ text: 'onboarding rules simplified entirely', start: 21, end: 30, source: 'original' }] },
-      scene({ start: 15, end: 34 }),
-      takeWords,
-    )
-    expect(r.segments[0].suggestedSource).toBe('revoice')
-  })
-
-  it('never snaps into the previous segment', () => {
-    const single = [w('so', 10, 10.3), w('the', 10.4, 10.6), w('idea', 10.7, 11.2), w('is', 11.3, 11.5)]
-    const r = toRefinement(
-      {
-        segments: [
-          { text: 'so the', start: 10, end: 10.6, source: 'original' },
-          { text: 'so the idea is', start: 10.5, end: 12.5, source: 'original' },
-        ],
-      },
-      scene({ start: 10, end: 20 }),
-      single,
-    )
-    // the only run matching segment 2 starts inside segment 1 — downgrade
-    expect(r.segments[0].suggestedSource).toBe('original')
-    expect(r.segments[1].suggestedSource).toBe('revoice')
+    expect(sceneWordTimings([])).toBe('')
   })
 })

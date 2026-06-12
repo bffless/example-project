@@ -5,6 +5,7 @@ import { timedTranscript, toScenes, type DirectorScene } from '../../lib/directo
 import {
   toRefinement,
   refineDirections,
+  sceneWordTimings,
   effectiveSegments,
   addCut,
   removeCut,
@@ -398,7 +399,7 @@ export function useScenePipeline() {
           patchScene(sceneId, { refineJobId: null })
           return
         }
-        const refinement = toRefinement(result as RefineSceneRaw, scene, words)
+        const refinement = toRefinement(result as RefineSceneRaw, scene)
 
         const idx = suggestedOriginalIndices(refinement.segments)
         let segments = refinement.segments
@@ -436,7 +437,7 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [pollJob, scenes, words, patchScene, sliceAndUploadSpans],
+    [pollJob, scenes, patchScene, sliceAndUploadSpans],
   )
 
   // Resume any in-flight job after a hard reload (redux-persist brings back the
@@ -777,9 +778,7 @@ export function useScenePipeline() {
         const { jobId } = await refineSceneReq({
           start: scene.start,
           end: scene.end,
-          transcript: timedTranscript(scoped),
-          draftText: scene.draftText,
-          cuts: scene.cuts ?? [],
+          wordTimings: sceneWordTimings(scoped),
           sheetUrls,
           audioUrl: scene.clipAudioUrl,
           // Creator steering (story 03l): the scene's own prompt + the global

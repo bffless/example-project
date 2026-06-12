@@ -140,9 +140,7 @@ const studioHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       start?: number
       end?: number
-      transcript?: string
-      draftText?: string
-      cuts?: { start: number; end: number }[]
+      wordTimings?: string
       audioUrl?: string
       // Creator steering (story 03l): the scene's own prompt + the global
       // director prompt (empty when the scene's include-checkbox is off).
@@ -249,71 +247,56 @@ const studioHandlers = [
 ]
 
 /**
- * A deterministic canned refiner response for one scene, now with voicing
- * sources (story 03j): the first half of the scene's spoken lines keep the
- * creator's own audio (`source: 'original'` — text VERBATIM from the posted
- * timed transcript, span snapped to the 8s line boundaries, so it survives
- * `toRefinement`'s word-sequence guard and auto-adopts), and the second half is
- * re-voiced from the draft (`source: 'revoice'`). The gap between them is the
- * refined cut. Falls back to the old draft-split when the transcript is too
- * short to halve.
+ * A deterministic canned refiner response for one scene, rebuilt FROM SCRATCH off
+ * the posted per-word timings (story 03p — no more first-pass `draftText`). The
+ * scene's words are split into two runs around a dropped beat: the first run keeps
+ * the creator's own audio (`source: 'original'`, copying the words' exact
+ * start/end so auto-adopt slices the real take), the second is re-voiced
+ * (`source: 'revoice'`), and the gap between them is the refined cut. Falls back
+ * to one original run when there are too few words to split.
  */
-function mockRefiner(body: {
-  start?: number
-  end?: number
-  transcript?: string
-  draftText?: string
-  cuts?: { start: number; end: number }[]
-}) {
+function mockRefiner(body: { start?: number; end?: number; wordTimings?: string }) {
   const start = Number.isFinite(body.start) ? (body.start as number) : 0
   const end =
     Number.isFinite(body.end) && (body.end as number) > start ? (body.end as number) : start + 1
 
-  // Parse the `[m:ss] words` lines back into (lineStart, words) pairs.
-  const lines = (body.transcript ?? '')
+  // Parse the `start end word` lines into timed words within the scene span.
+  const words = (body.wordTimings ?? '')
     .split('\n')
-    .map((l) => /^\[(\d+):(\d{2})\]\s*(.+)$/.exec(l))
+    .map((l) => /^\s*([\d.]+)\s+([\d.]+)\s+(.+?)\s*$/.exec(l))
     .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => ({ start: Number(m[1]) * 60 + Number(m[2]), text: m[3] }))
+    .map((m) => ({ start: Number(m[1]), end: Number(m[2]), text: m[3] }))
+    .filter(
+      (w) =>
+        Number.isFinite(w.start) && Number.isFinite(w.end) && w.start >= start && w.start < end,
+    )
 
-  if (lines.length >= 2) {
-    const mid = Math.ceil(lines.length / 2)
-    const splitAt = lines[mid].start // a line boundary — the halves' words split cleanly
-    // Out-of-range timestamps (transcription jitter) would make a zero-length
-    // second half — fall through to the draft-split below instead.
-    if (splitAt < end) {
-      const pauseEnd = Math.min(splitAt + 2, end)
-      const segments = [
-        {
-          text: lines.slice(0, mid).map((l) => l.text).join(' '),
-          start,
-          end: splitAt,
-          source: 'original',
-        },
-        {
-          text: (body.draftText ?? '').trim() || lines.slice(mid).map((l) => l.text).join(' '),
-          start: pauseEnd,
-          end,
-          source: 'revoice',
-        },
-      ]
-      return { segments, cuts: [{ start: splitAt, end: pauseEnd }] }
-    }
+  if (words.length >= 4) {
+    const mid = Math.floor(words.length / 2)
+    const firstRun = words.slice(0, mid)
+    const secondRun = words.slice(mid + 1) // drop one word as the removed beat
+    const cutStart = firstRun[firstRun.length - 1].end
+    const cutEnd = secondRun[0].start
+    const segments = [
+      {
+        text: firstRun.map((w) => w.text).join(' '),
+        start: firstRun[0].start,
+        end: cutStart,
+        source: 'original',
+      },
+      {
+        text: secondRun.map((w) => w.text).join(' '),
+        start: cutEnd,
+        end: secondRun[secondRun.length - 1].end,
+        source: 'revoice',
+      },
+    ]
+    return { segments, cuts: cutEnd - cutStart > 0.05 ? [{ start: cutStart, end: cutEnd }] : [] }
   }
 
-  // Transcript too short to halve — the old draft-split, now tagged revoice.
-  const span = end - start
-  const first = body.cuts?.[0]
-  const pauseStart = first ? first.start : start + span * 0.45
-  const pauseEnd = first ? first.end : start + span * 0.62
-  const words = (body.draftText ?? '').trim().split(/\s+/).filter(Boolean)
-  const mid = Math.ceil(words.length / 2)
-  const segments = [
-    { text: words.slice(0, mid).join(' '), start, end: pauseStart, source: 'revoice' },
-    { text: words.slice(mid).join(' '), start: pauseEnd, end, source: 'revoice' },
-  ].filter((s) => s.text)
-  const cuts = [{ start: pauseStart + 0.3, end: Math.max(pauseStart + 0.4, pauseEnd - 0.3) }]
-  return { segments, cuts }
+  // Too few words to split — one original run across the whole span.
+  const text = words.map((w) => w.text).join(' ') || 'mock refined narration'
+  return { segments: [{ text, start, end, source: 'original' }], cuts: [] }
 }
 
 /** A tiny mono 440 Hz tone encoded as a base64 WAV data URL — a stand-in clip. */

@@ -42,12 +42,11 @@ export type RefineSceneRequest = {
   /** The scene's original-video span — the bounds the model works within. */
   start: number
   end: number
-  /** Timestamped transcript for just this scene (see `director.timedTranscript`). */
-  transcript: string
-  /** The master director's first-pass script — passed in to refine, not regen. */
-  draftText: string
-  /** The master director's first-pass cuts — the suggestion to refine. */
-  cuts: Cut[]
+  /** Per-word timing for just this scene's words (see `sceneWordTimings`) — the
+   *  exact boundaries the refiner rebuilds the cut from (story 03p). Replaced the
+   *  8s-bucketed transcript AND the director's first-pass script/cuts: the refiner
+   *  now refines from scratch off precise word times + the creator direction. */
+  wordTimings: string
   /** Bucket serve paths of the scene's dense contact sheets, in order. */
   sheetUrls: string[]
   /** Serve path of the scene's cut soundtrack (`scene.clipAudioUrl`) — required;
@@ -81,16 +80,25 @@ export function refineDirections(
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
-/** Lowercase + strip punctuation → the word sequence both sides of the
- *  verbatim check are compared in (tolerant of case/punctuation drift between
- *  the model's echo and the WhisperX words, strict about the words themselves). */
-function normWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[\u2018\u2019]/g, "'") // curly → straight apostrophe
-    .replace(/[^\p{L}\p{N}']+/gu, ' ')
-    .split(' ')
-    .filter(Boolean)
+/**
+ * Per-word timing for the scene's words, in seconds on the shared (whole-talk)
+ * timeline — the exact boundaries the 8s-bucketed `timedTranscript` throws away.
+ * The refiner reads this to rebuild the tightened cut FROM SCRATCH (story 03p):
+ * pick which words to keep and copy their precise start/end, instead of eyeballing
+ * a time inside an 8-second line. One `start end word` triple per line, fixed to
+ * 2 decimals (WhisperX resolution). Words missing a finite start are skipped.
+ */
+export function sceneWordTimings(words: TWord[]): string {
+  return words
+    .map((w) => {
+      const text = str(w?.text).trim()
+      const start = w?.start
+      if (!text || typeof start !== 'number' || !Number.isFinite(start)) return null
+      const end = typeof w?.end === 'number' && Number.isFinite(w.end) ? w.end : start
+      return `${start.toFixed(2)} ${end.toFixed(2)} ${text}`
+    })
+    .filter((l): l is string => l !== null)
+    .join('\n')
 }
 
 /** Clamp a cut span to `[lo, hi]`, returning null if it collapses to nothing. */
@@ -101,45 +109,6 @@ function clampSpan(start: number, end: number, lo: number, hi: number): { start:
   return { start: s, end: e }
 }
 
-/** One normalized token of a scene word, pointing back at its word — the
- *  search space for verbatim matching and boundary snapping (story 03n). */
-type WordToken = { token: string; wi: number }
-
-/**
- * Find where `targetTokens` occurs as a CONTIGUOUS word-run in the scene's
- * words, returning the matched words' REAL span. Among multiple occurrences
- * (repeated takes say the same words) the one whose start is closest to
- * `claimedStart` wins; runs that would overlap the previous segment
- * (start < minStart) are skipped. Null = the text exists nowhere verbatim.
- */
-function findVerbatimRun(
-  tokens: WordToken[],
-  sceneWords: TWord[],
-  targetTokens: string[],
-  minStart: number,
-  claimedStart: number,
-): Cut | null {
-  if (!targetTokens.length) return null
-  let best: Cut | null = null
-  for (let i = 0; i + targetTokens.length <= tokens.length; i++) {
-    let ok = true
-    for (let k = 0; k < targetTokens.length; k++) {
-      if (tokens[i + k].token !== targetTokens[k]) {
-        ok = false
-        break
-      }
-    }
-    if (!ok) continue
-    const start = sceneWords[tokens[i].wi].start
-    const end = sceneWords[tokens[i + targetTokens.length - 1].wi].end
-    if (start < minStart - 0.05 || end - start <= 0.05) continue
-    if (!best || Math.abs(start - claimedStart) < Math.abs(best.start - claimedStart)) {
-      best = { start, end }
-    }
-  }
-  return best
-}
-
 /**
  * Coerce the refiner's raw response into a `SceneRefinement`, clamped to the
  * scene: every segment and cut snapped into `[scene.start, scene.end]`, segments
@@ -148,90 +117,46 @@ function findVerbatimRun(
  * guarantees the UI never sees a segment or cut outside the scene even if the
  * model slips. `source` is always `'ai'` here — hand-edits set `'manual'`.
  *
- * `words` is the WhisperX transcript for the whole talk. An `'original'` tag
- * means the span's raw audio plays AS-IS, so the segment's text must be exactly
- * the span's words. The model's tag is authoritative; its CLOCK POSITIONS are
- * not (it only sees line-granular times) — so on a mismatch we SNAP the span to
- * the contiguous word-run that actually says the text (story 03n), instead of
- * the old 03j downgrade. Snapping keeps the model's intent and fixes the
- * numbers: displaced junk-word slivers become cuts, cuts a snapped span expands
- * into are shrunk, and segments never overlap. Only when the text exists
- * nowhere verbatim (a genuine rewrite/omission) — or no `words` are passed —
- * does the tag still downgrade to `'revoice'`.
+ * The per-segment `source` ('original' plays the span's raw audio AS-IS;
+ * 'revoice' speaks it in the cloned voice) is the model's call and we TRUST it —
+ * it passes straight through to `suggestedSource`, with the model's own
+ * `start`/`end` (only clamped + forced non-overlapping). The text is a LABEL,
+ * not a gate: we do NOT re-check it against the WhisperX words. Story 03o
+ * reversed the 03j/03n approach, where a text-vs-transcript mismatch downgraded
+ * 'original' to 'revoice' (or snapped its span). That guard demanded word-level
+ * precision the model never has — it only sees 8s-bucketed transcript lines
+ * (`timedTranscript`) — so colloquial echoes ("gonna" vs WhisperX's "going to")
+ * and near-repetition boundaries silently overrode a correct 'original' tag. The
+ * cost we accept: a coarse span may include a false start; the fix for THAT is
+ * finer timing in the prompt (deferred follow-up), not second-guessing the tag.
  */
-export function toRefinement(raw: RefineSceneRaw, scene: Scene, words: TWord[] = []): SceneRefinement {
+export function toRefinement(raw: RefineSceneRaw, scene: Scene): SceneRefinement {
   const lo = scene.start
   const hi = scene.end
-
-  // The scene's words flattened to normalized tokens (one entry per token,
-  // pointing back at its word) — shared by the verbatim check and the snap.
-  const sceneWords = words.filter(
-    (w) => typeof w.start === 'number' && w.start >= lo && w.start < hi,
-  )
-  const tokens: WordToken[] = []
-  sceneWords.forEach((w, wi) => {
-    for (const token of normWords(w.text)) tokens.push({ token, wi })
-  })
 
   const rawSegments = Array.isArray(raw?.segments) ? raw.segments : []
   const sorted = [...rawSegments].sort((a, b) => num(a?.start) - num(b?.start))
   const segments: NarrationSegment[] = []
-  // Cut fixups from snapped boundaries, applied after the cuts are clamped:
-  // the kept span must not stay under a cut (assemble's cut-wins rule would
-  // silence it), and displaced junk words must not survive as kept footage.
-  const snapFixups: { span: Cut; slivers: Cut[] }[] = []
   let cursor = lo
   for (const seg of sorted) {
     const text = str(seg?.text).trim()
     if (!text) continue
     const span = clampSpan(Math.max(num(seg?.start), cursor), num(seg?.end), lo, hi)
     if (!span) continue
-    let suggestedSource =
+    const suggestedSource =
       seg?.source === 'original' || seg?.source === 'revoice' ? seg.source : undefined
-    let finalSpan = span
-    if (suggestedSource === 'original') {
-      const targetTokens = normWords(text)
-      const spanText = sceneWords
-        .filter((w) => w.start >= span.start && w.start < span.end)
-        .map((w) => w.text)
-        .join(' ')
-      if (targetTokens.join(' ') !== normWords(spanText).join(' ')) {
-        const snapped = findVerbatimRun(tokens, sceneWords, targetTokens, cursor, span.start)
-        if (snapped) {
-          finalSpan = snapped
-          // Slivers the snap displaced: cut them ONLY when they hold words (the
-          // junk the model believed it had excluded); wordless slivers stay as
-          // kept dead air, matching the model's gaps-are-intentional semantics.
-          const slivers = [
-            { start: span.start, end: snapped.start },
-            { start: snapped.end, end: span.end },
-          ].filter(
-            (s) =>
-              s.end - s.start > 0.05 &&
-              sceneWords.some((w) => w.start >= s.start && w.start < s.end),
-          )
-          snapFixups.push({ span: snapped, slivers })
-        } else {
-          suggestedSource = 'revoice'
-        }
-      }
-    }
     segments.push({
       text,
-      start: finalSpan.start,
-      end: finalSpan.end,
+      start: span.start,
+      end: span.end,
       ...(suggestedSource ? { suggestedSource } : {}),
     })
-    cursor = finalSpan.end
+    cursor = span.end
   }
 
-  let cuts: Cut[] = (Array.isArray(raw?.cuts) ? raw.cuts : [])
+  const cuts: Cut[] = (Array.isArray(raw?.cuts) ? raw.cuts : [])
     .map((c) => clampSpan(num(c?.start), num(c?.end), lo, hi))
     .filter((c): c is Cut => c !== null)
-  for (const fixup of snapFixups) {
-    cuts = removeCut(cuts, fixup.span)
-    for (const sliver of fixup.slivers) cuts = addCut(cuts, sliver, scene)
-  }
 
   return { segments, cuts, source: 'ai' }
 }
