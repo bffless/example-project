@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { presignedUpload, toSignedUrl } from './upload'
+import { presignedUpload, toSignedUrl, isUploadServePath } from './upload'
+
+describe('isUploadServePath', () => {
+  it('matches persisted relative /api/uploads/ serve paths', () => {
+    expect(isUploadServePath('/api/uploads/voice/2026-06-12/x-original-77-79.wav')).toBe(true)
+    expect(isUploadServePath('/api/uploads/scene-clip/2026-06-12/clip.mp4')).toBe(true)
+  })
+
+  it('passes through everything that is not a serve path', () => {
+    expect(isUploadServePath('https://storage.googleapis.com/bucket/x.wav?X-Goog-Signature=abc')).toBe(false)
+    expect(isUploadServePath('data:audio/wav;base64,UklGRg==')).toBe(false)
+    expect(isUploadServePath('blob:http://localhost:5173/123-abc')).toBe(false)
+    expect(isUploadServePath('/api/scenes')).toBe(false)
+  })
+})
 
 const ok = (body: unknown) =>
   ({ ok: true, status: 200, json: async () => body }) as Response

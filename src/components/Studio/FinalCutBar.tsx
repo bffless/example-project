@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
 import { buildConcatCommand } from '../../lib/export/assemble'
 import { concat } from '../../lib/export/ffmpeg'
+import { useSignedBytes } from './useSignedBytes'
 
 type Props = {
   scenes: Scene[]
@@ -13,12 +14,6 @@ type Props = {
   onSave: (blob: Blob) => Promise<string>
 }
 
-async function fetchBytes(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { credentials: 'include' })
-  if (!res.ok) throw new Error(`Couldn't load ${url} (${res.status})`)
-  return new Uint8Array(await res.arrayBuffer())
-}
-
 /**
  * The **master assemble** (story 03g phase 2): stitch every scene's already-saved
  * assembled cut (`scene.assembledUrl`) into the whole video. Pure stream-copy
@@ -27,6 +22,9 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
  * only once every scene has been assembled & saved.
  */
 export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
+  // Serve-path-aware fetch: each assembled scene is tens of MB — sign them to
+  // the bucket instead of streaming every one through the BFFless backend.
+  const fetchBytes = useSignedBytes()
   const [running, setRunning] = useState(false)
   const [stage, setStage] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -88,7 +86,7 @@ export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
     } finally {
       setRunning(false)
     }
-  }, [running, allAssembled, scenes, resultUrl])
+  }, [running, allAssembled, scenes, resultUrl, fetchBytes])
 
   const save = useCallback(async () => {
     if (!resultBlob || saving) return
