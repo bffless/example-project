@@ -32,8 +32,8 @@ describe('timedTranscript', () => {
 
 describe('toScenes', () => {
   const raw: DirectorScene[] = [
-    { title: 'Intro', start: 0, end: 60, draftText: 'Welcome to the talk', cuts: [{ start: 10, end: 20 }] },
-    { title: 'Demo', start: 60, end: 130, draftText: 'Here is the demo', cuts: [] },
+    { title: 'Intro', start: 0, end: 60, transcript: 'Welcome to the talk', refinePrompt: 'Tighten the intro to a 15s hook.', cuts: [{ start: 10, end: 20 }] },
+    { title: 'Demo', start: 60, end: 130, transcript: 'Here is the demo', refinePrompt: 'Cut the dead air; keep the screen-share.', cuts: [] },
   ]
 
   it('coerces to the Scene shape with ids, index, and defaults', () => {
@@ -47,15 +47,16 @@ describe('toScenes', () => {
       end: 60,
       status: 'pending',
       narrationSeconds: null,
-      draftText: 'Welcome to the talk',
+      transcript: 'Welcome to the talk',
+      refinePrompt: 'Tighten the intro to a 15s hook.',
     })
     expect(scenes[0].cuts).toEqual([{ start: 10, end: 20 }])
   })
 
   it('clamps spans into [0, duration] and forces them ascending + non-overlapping', () => {
     const messy: DirectorScene[] = [
-      { start: -5, end: 40, draftText: 'one' },
-      { start: 30, end: 200, draftText: 'two' }, // overlaps prev, runs past clip
+      { start: -5, end: 40, transcript: 'one' },
+      { start: 30, end: 200, transcript: 'two' }, // overlaps prev, runs past clip
     ]
     const scenes = toScenes(messy, 120)
     expect(scenes[0].start).toBe(0)
@@ -65,15 +66,15 @@ describe('toScenes', () => {
 
   it('drops cuts outside their scene span and clamps the rest', () => {
     const s: DirectorScene[] = [
-      { start: 0, end: 100, draftText: 'x', cuts: [{ start: 50, end: 200 }, { start: 5, end: 5 }] },
+      { start: 0, end: 100, transcript: 'x', cuts: [{ start: 50, end: 200 }, { start: 5, end: 5 }] },
     ]
     const [scene] = toScenes(s, 100)
     // 50–200 clamped to 50–100; the 5–5 zero-length cut dropped
     expect(scene.cuts).toEqual([{ start: 50, end: 100 }])
   })
 
-  it('falls back to a title derived from the script', () => {
-    const [scene] = toScenes([{ start: 0, end: 10, draftText: 'the quick brown fox jumps over' }], 10)
+  it('falls back to a title derived from the transcript', () => {
+    const [scene] = toScenes([{ start: 0, end: 10, transcript: 'the quick brown fox jumps over' }], 10)
     expect(scene.title).toBe('the quick brown fox jumps…')
   })
 
@@ -84,10 +85,10 @@ describe('toScenes', () => {
   it('keeps a valid voicing plan and drops junk values (story 03j)', () => {
     const scenes = toScenes(
       [
-        { start: 0, end: 30, draftText: 'a', voicing: 'original' },
-        { start: 30, end: 60, draftText: 'b', voicing: 'mixed' },
-        { start: 60, end: 90, draftText: 'c', voicing: 'shout it' as unknown as DirectorScene['voicing'] },
-        { start: 90, end: 120, draftText: 'd' },
+        { start: 0, end: 30, transcript: 'a', voicing: 'original' },
+        { start: 30, end: 60, transcript: 'b', voicing: 'mixed' },
+        { start: 60, end: 90, transcript: 'c', voicing: 'shout it' as unknown as DirectorScene['voicing'] },
+        { start: 90, end: 120, transcript: 'd' },
       ],
       120,
     )

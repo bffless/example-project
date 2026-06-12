@@ -40,6 +40,9 @@ export type DirectorScene = {
   /** The director's voicing plan for this scene (story 03j): keep the creator's
    *  original audio, re-voice the tightened script, or some of both. */
   voicing?: 'original' | 'revoice' | 'mixed'
+  /** The director's default refine prompt for this scene (story 03q) — a short
+   *  instruction the per-scene refiner follows; seeds `scene.refinePrompt`. */
+  refinePrompt?: string
 }
 
 /** The director's full response: a logline plus the scene breakdown. */
@@ -133,7 +136,8 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
 
     const draftText = str(s?.draftText).trim()
     const transcript = str(s?.transcript).trim()
-    const title = str(s?.title).trim() || (leadWords(draftText) ? `${leadWords(draftText)}…` : `Scene ${i + 1}`)
+    const refinePrompt = str(s?.refinePrompt).trim()
+    const title = str(s?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
 
     const cuts = (Array.isArray(s?.cuts) ? s.cuts : [])
       .map((c) => clampCut(c, start, end))
@@ -153,6 +157,7 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
       narrationSeconds: null,
       cuts,
       ...(voicing ? { voicing } : {}),
+      ...(refinePrompt ? { refinePrompt } : {}),
     })
   })
   return scenes
