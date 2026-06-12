@@ -557,8 +557,8 @@ export function useScenePipeline() {
 
   // Stages ⑤⑥ — the master director (story 03). One multimodal Gemini call gets
   // the timestamped transcript, the director contact sheets, and the user's
-  // optional direction, and returns the synopsis + scenes (tightened script,
-  // original-video span, and cut spans). Marks BOTH the shorten and segment
+  // optional direction, and returns the synopsis + scenes (per-scene refine
+  // prompt, original-video span, and cut spans). Marks BOTH the shorten and segment
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(

@@ -36,7 +36,7 @@ export type DirectorScene = {
   /** Footage spans to drop, in original-video seconds, inside this scene. */
   cuts?: Cut[]
   /** The director's voicing plan for this scene (story 03j): keep the creator's
-   *  original audio, re-voice the tightened script, or some of both. */
+   *  original audio, re-voice the tightened narration, or some of both. */
   voicing?: 'original' | 'revoice' | 'mixed'
   /** The director's default refine prompt for this scene (story 03q) — a short
    *  instruction the per-scene refiner follows; seeds `scene.refinePrompt`. */
