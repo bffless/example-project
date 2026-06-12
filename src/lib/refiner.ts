@@ -314,12 +314,13 @@ export function removeSegment(segments: NarrationSegment[], index: number): Narr
 
 /**
  * The narration segments to render for a scene: the refiner's if present, else a
- * single segment spanning the whole scene from the director's `draftText` (the
- * old even-spread fallback). Lets the diff viewer read one shape regardless.
+ * single placeholder segment spanning the whole scene built from the scene's
+ * original `transcript` (story 03q — the director no longer drafts a script).
+ * Lets the diff viewer read one shape regardless.
  */
 export function effectiveSegments(scene: Scene): NarrationSegment[] {
   if (scene.refined?.segments?.length) return scene.refined.segments
-  const text = str(scene.draftText).trim()
+  const text = str(scene.transcript).trim()
   return text ? [{ text, start: scene.start, end: scene.end }] : []
 }
 
