@@ -101,6 +101,45 @@ function clampSpan(start: number, end: number, lo: number, hi: number): { start:
   return { start: s, end: e }
 }
 
+/** One normalized token of a scene word, pointing back at its word — the
+ *  search space for verbatim matching and boundary snapping (story 03n). */
+type WordToken = { token: string; wi: number }
+
+/**
+ * Find where `targetTokens` occurs as a CONTIGUOUS word-run in the scene's
+ * words, returning the matched words' REAL span. Among multiple occurrences
+ * (repeated takes say the same words) the one whose start is closest to
+ * `claimedStart` wins; runs that would overlap the previous segment
+ * (start < minStart) are skipped. Null = the text exists nowhere verbatim.
+ */
+function findVerbatimRun(
+  tokens: WordToken[],
+  sceneWords: TWord[],
+  targetTokens: string[],
+  minStart: number,
+  claimedStart: number,
+): Cut | null {
+  if (!targetTokens.length) return null
+  let best: Cut | null = null
+  for (let i = 0; i + targetTokens.length <= tokens.length; i++) {
+    let ok = true
+    for (let k = 0; k < targetTokens.length; k++) {
+      if (tokens[i + k].token !== targetTokens[k]) {
+        ok = false
+        break
+      }
+    }
+    if (!ok) continue
+    const start = sceneWords[tokens[i].wi].start
+    const end = sceneWords[tokens[i + targetTokens.length - 1].wi].end
+    if (start < minStart - 0.05 || end - start <= 0.05) continue
+    if (!best || Math.abs(start - claimedStart) < Math.abs(best.start - claimedStart)) {
+      best = { start, end }
+    }
+  }
+  return best
+}
+
 /**
  * Coerce the refiner's raw response into a `SceneRefinement`, clamped to the
  * scene: every segment and cut snapped into `[scene.start, scene.end]`, segments
@@ -109,19 +148,38 @@ function clampSpan(start: number, end: number, lo: number, hi: number): { start:
  * guarantees the UI never sees a segment or cut outside the scene even if the
  * model slips. `source` is always `'ai'` here — hand-edits set `'manual'`.
  *
- * `words` is the WhisperX transcript for the whole talk. An `'original'` tag on a
- * segment survives only when the segment's text matches the span's transcript words
- * verbatim (case/punctuation-normalised) — a mismatch means the model rewrote the
- * line, so the tag is downgraded to `'revoice'`. Passing no `words` (or `[]`)
- * conservatively downgrades every `'original'` tag. (story 03j)
+ * `words` is the WhisperX transcript for the whole talk. An `'original'` tag
+ * means the span's raw audio plays AS-IS, so the segment's text must be exactly
+ * the span's words. The model's tag is authoritative; its CLOCK POSITIONS are
+ * not (it only sees line-granular times) — so on a mismatch we SNAP the span to
+ * the contiguous word-run that actually says the text (story 03n), instead of
+ * the old 03j downgrade. Snapping keeps the model's intent and fixes the
+ * numbers: displaced junk-word slivers become cuts, cuts a snapped span expands
+ * into are shrunk, and segments never overlap. Only when the text exists
+ * nowhere verbatim (a genuine rewrite/omission) — or no `words` are passed —
+ * does the tag still downgrade to `'revoice'`.
  */
 export function toRefinement(raw: RefineSceneRaw, scene: Scene, words: TWord[] = []): SceneRefinement {
   const lo = scene.start
   const hi = scene.end
 
+  // The scene's words flattened to normalized tokens (one entry per token,
+  // pointing back at its word) — shared by the verbatim check and the snap.
+  const sceneWords = words.filter(
+    (w) => typeof w.start === 'number' && w.start >= lo && w.start < hi,
+  )
+  const tokens: WordToken[] = []
+  sceneWords.forEach((w, wi) => {
+    for (const token of normWords(w.text)) tokens.push({ token, wi })
+  })
+
   const rawSegments = Array.isArray(raw?.segments) ? raw.segments : []
   const sorted = [...rawSegments].sort((a, b) => num(a?.start) - num(b?.start))
   const segments: NarrationSegment[] = []
+  // Cut fixups from snapped boundaries, applied after the cuts are clamped:
+  // the kept span must not stay under a cut (assemble's cut-wins rule would
+  // silence it), and displaced junk words must not survive as kept footage.
+  const snapFixups: { span: Cut; slivers: Cut[] }[] = []
   let cursor = lo
   for (const seg of sorted) {
     const text = str(seg?.text).trim()
@@ -130,30 +188,50 @@ export function toRefinement(raw: RefineSceneRaw, scene: Scene, words: TWord[] =
     if (!span) continue
     let suggestedSource =
       seg?.source === 'original' || seg?.source === 'revoice' ? seg.source : undefined
+    let finalSpan = span
     if (suggestedSource === 'original') {
-      // The slice plays EVERYTHING spoken in the span — the tag survives only if
-      // the text is exactly the span's words. The model drops words by SPLITTING
-      // segments around them (the gap carries the removal), never by omitting
-      // them from the text; a mismatch here means a rewrite or an omission, so
-      // downgrade rather than auto-slice the wrong audio (story 03j).
-      const spanText = words
-        .filter((w) => typeof w.start === 'number' && w.start >= span.start && w.start < span.end)
+      const targetTokens = normWords(text)
+      const spanText = sceneWords
+        .filter((w) => w.start >= span.start && w.start < span.end)
         .map((w) => w.text)
         .join(' ')
-      if (normWords(text).join(' ') !== normWords(spanText).join(' ')) suggestedSource = 'revoice'
+      if (targetTokens.join(' ') !== normWords(spanText).join(' ')) {
+        const snapped = findVerbatimRun(tokens, sceneWords, targetTokens, cursor, span.start)
+        if (snapped) {
+          finalSpan = snapped
+          // Slivers the snap displaced: cut them ONLY when they hold words (the
+          // junk the model believed it had excluded); wordless slivers stay as
+          // kept dead air, matching the model's gaps-are-intentional semantics.
+          const slivers = [
+            { start: span.start, end: snapped.start },
+            { start: snapped.end, end: span.end },
+          ].filter(
+            (s) =>
+              s.end - s.start > 0.05 &&
+              sceneWords.some((w) => w.start >= s.start && w.start < s.end),
+          )
+          snapFixups.push({ span: snapped, slivers })
+        } else {
+          suggestedSource = 'revoice'
+        }
+      }
     }
     segments.push({
       text,
-      start: span.start,
-      end: span.end,
+      start: finalSpan.start,
+      end: finalSpan.end,
       ...(suggestedSource ? { suggestedSource } : {}),
     })
-    cursor = span.end
+    cursor = finalSpan.end
   }
 
-  const cuts: Cut[] = (Array.isArray(raw?.cuts) ? raw.cuts : [])
+  let cuts: Cut[] = (Array.isArray(raw?.cuts) ? raw.cuts : [])
     .map((c) => clampSpan(num(c?.start), num(c?.end), lo, hi))
     .filter((c): c is Cut => c !== null)
+  for (const fixup of snapFixups) {
+    cuts = removeCut(cuts, fixup.span)
+    for (const sliver of fixup.slivers) cuts = addCut(cuts, sliver, scene)
+  }
 
   return { segments, cuts, source: 'ai' }
 }
