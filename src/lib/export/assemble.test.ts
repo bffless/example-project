@@ -178,10 +178,11 @@ describe('buildFfmpegCommand', () => {
     expect(cmd.audioInputs).toEqual([0, 1])
     expect(cmd.args.slice(0, 6)).toEqual(['-i', 'source.mp4', '-i', 'a0.wav', '-i', 'a1.wav'])
     // The silence piece is generated, clips reference inputs 1 and 2 and are
-    // polished (loudnorm + fades) by default.
+    // polished (fades; loudnorm is disabled for now — see LOUDNORM_ENABLED).
     expect(cmd.filterComplex).toContain('anullsrc=r=48000:cl=mono,atrim=0:2')
-    expect(cmd.filterComplex).toContain('[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000')
-    expect(cmd.filterComplex).toContain('[2:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000')
+    expect(cmd.filterComplex).toContain('[1:a]aresample=48000')
+    expect(cmd.filterComplex).toContain('[2:a]aresample=48000')
+    expect(cmd.filterComplex).not.toContain('loudnorm')
     expect(cmd.filterComplex).toContain('afade=t=in:st=0:d=0.01')
     expect(cmd.filterComplex).toContain('afade=t=out:st=')
     // Concats both tracks and maps them out.
@@ -216,18 +217,16 @@ describe('buildFfmpegCommand', () => {
     expect(i).toBeLessThan(args.length - 1)
   })
 
-  it('applies measured loudness as linear (constant-gain) two-pass loudnorm per clip', () => {
+  it('ignores loudness measurements while normalization is disabled', () => {
+    // LOUDNORM_ENABLED=false: clips pass through at their recorded level even
+    // when pass-1 measurements are supplied. Re-enabling the flag restores the
+    // two-pass linear loudnorm
+    // (`loudnorm=I=-16:...:measured_I=…:offset=…:linear=true` per clip).
     const plan = planAssembly({ segments: [seg(0, 4), seg(6, 10)], cuts: [], duration: 10 })
     const cmd = buildFfmpegCommand(plan, {
-      loudness: [
-        { i: -27.61, tp: -4.47, lra: 18.06, thresh: -39.2, offset: 0.58 },
-        null, // measurement failed → this clip keeps the dynamic single-pass
-      ],
+      loudness: [{ i: -27.61, tp: -4.47, lra: 18.06, thresh: -39.2, offset: 0.58 }, null],
     })
-    expect(cmd.filterComplex).toContain(
-      '[1:a]loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-27.61:measured_TP=-4.47:measured_LRA=18.06:measured_thresh=-39.2:offset=0.58:linear=true,',
-    )
-    expect(cmd.filterComplex).toContain('[2:a]loudnorm=I=-16:TP=-1.5:LRA=11,')
+    expect(cmd.filterComplex).not.toContain('loudnorm')
   })
 })
 
