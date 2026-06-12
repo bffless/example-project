@@ -79,8 +79,12 @@ async function getFFmpeg(): Promise<FFmpeg> {
         coreVariant = 'mt'
         console.info('[studio] ffmpeg core: multithreaded (3 GiB fixed heap)')
         return ff
-      } catch {
-        // Fall through to the single-threaded core below.
+      } catch (e) {
+        // Fall through to the single-threaded core below — but say why, loudly.
+        // A silent fallback here once masked the real story: an isolated page
+        // quietly running single-threaded because the MT load threw (e.g. the
+        // browser refusing the big up-front SharedArrayBuffer allocation).
+        console.warn('[studio] multithreaded ffmpeg core failed to load; falling back to single-threaded:', e)
       }
     }
 
