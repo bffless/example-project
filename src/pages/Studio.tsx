@@ -206,6 +206,13 @@ export function Studio() {
 
   const selected = pipe.scenes.find((s) => s.id === pipe.selectedId) ?? null
 
+  // The selected scene's cut clip, SIGNED into a direct bucket URL — same rule
+  // as the source above: a big MP4 must never stream through file_serve (it
+  // buffers/OOMs the backend; bffless/ce#317). While the signature is in
+  // flight (cached 45 min, so usually instant) the player stays on previewSrc.
+  const { data: signedClip } = useSignDownloadQuery(selected?.clipUrl ?? skipToken)
+  const clipSrc = selected?.clipUrl ? (signedClip?.url ?? null) : null
+
   // The diff viewer is scoped to the SELECTED scene only (story 03c "per-scene
   // scope"): every input below is derived from `selected`, not flatMapped across
   // the whole talk, and the grid is windowed to `[selected.start, selected.end]`.
@@ -592,10 +599,10 @@ export function Studio() {
                         instead of the whole film — and don't let it overwrite the
                         full-source `duration` the grid relies on (see noLoaded). */}
                     <PreviewPlayer
-                      src={selected?.clipUrl ?? previewSrc}
+                      src={clipSrc ?? previewSrc}
                       videoRef={videoRef}
                       cuts={[]}
-                      onLoaded={selected?.clipUrl ? noLoaded : onLoaded}
+                      onLoaded={clipSrc ? noLoaded : onLoaded}
                     />
                   </div>
                   {selected && (
