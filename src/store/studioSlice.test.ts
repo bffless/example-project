@@ -18,6 +18,7 @@ import type { Scene } from '../lib/scenes'
 const scene = (id: string, over: Partial<Scene> = {}): Scene => ({
   id,
   index: 0,
+  sourceId: 'source-1',
   title: id,
   start: 0,
   end: 10,

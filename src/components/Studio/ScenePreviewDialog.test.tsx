@@ -62,6 +62,7 @@ function scene(over: Partial<Scene> = {}): Scene {
   return {
     id: 's1',
     index: 0,
+    sourceId: 'source-1',
     title: 'Intro',
     start: 0,
     end: 10,

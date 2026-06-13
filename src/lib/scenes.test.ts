@@ -43,11 +43,17 @@ describe('buildScenes', () => {
     expect(scene.refinePrompt).toBeTruthy()
     expect(typeof scene.refinePrompt).toBe('string')
   })
+
+  it('buildScenes stamps every scene with a sourceId', () => {
+    const scenes = buildScenes(420, 210, 'vid-1')
+    expect(scenes.length).toBeGreaterThan(0)
+    expect(scenes.every((s) => s.sourceId === 'vid-1')).toBe(true)
+  })
 })
 
 describe('alignment', () => {
   const base: Scene = {
-    id: 's', index: 0, title: 't', start: 0, end: 20,
+    id: 's', index: 0, sourceId: 'source-1', title: 't', start: 0, end: 20,
     transcript: '', status: 'pending', narrationSeconds: null,
   }
 

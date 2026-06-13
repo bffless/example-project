@@ -63,6 +63,10 @@ export type SceneRefinement = {
 export type Scene = {
   id: string
   index: number
+  /** The source video this chapter belongs to (story 09a). `start`/`end` are
+   *  LOCAL to this source's timeline. Every scene belongs to exactly one source;
+   *  a chapter never spans a video boundary (the director coercion splits it). */
+  sourceId: string
   title: string
   /** Original-timeline bounds, in seconds. */
   start: number
@@ -187,7 +191,7 @@ function fillerText(words: number): string {
  * default `refinePrompt` — the director's per-scene instruction to the refiner
  * (story 03q; the director no longer drafts a script).
  */
-export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[] {
+export function buildScenes(duration: number, targetSceneSeconds = 210, sourceId = 'source-1'): Scene[] {
   if (!Number.isFinite(duration) || duration <= 0) return []
   const count = Math.max(1, Math.round(duration / targetSceneSeconds))
   const each = duration / count
@@ -201,6 +205,7 @@ export function buildScenes(duration: number, targetSceneSeconds = 210): Scene[]
     return {
       id: `scene-${i + 1}`,
       index: i,
+      sourceId,
       title: `Scene ${i + 1} — ${firstWords}…`,
       start,
       end,

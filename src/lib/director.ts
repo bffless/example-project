@@ -145,6 +145,7 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
     scenes.push({
       id: `scene-${i + 1}`,
       index: i,
+      sourceId: 'source-1',
       title,
       start,
       end,

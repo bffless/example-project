@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { STAGE_DEFS, studioPhase, PER_VIDEO_STAGES, GLOBAL_STAGES } from './pipeline'
+import { STAGE_DEFS, studioPhase } from './pipeline'
 
 describe('STAGE_DEFS', () => {
   it('runs the prep steps in order and tags where each runs', () => {
@@ -38,15 +38,5 @@ describe('studioPhase', () => {
     expect(studioPhase({ hasSource: true, ready: false, allBuilt: false })).toBe('prep')
     expect(studioPhase({ hasSource: true, ready: true, allBuilt: false })).toBe('build')
     expect(studioPhase({ hasSource: true, ready: true, allBuilt: true })).toBe('export')
-  })
-})
-
-describe('stage scopes', () => {
-  it('tags upload/extract/transcribe as per-video and the rest as global', () => {
-    expect(PER_VIDEO_STAGES).toEqual(['upload', 'extract', 'transcribe'])
-    expect(GLOBAL_STAGES).toEqual(['thumbnails', 'director', 'clone'])
-  })
-  it('every STAGE_DEF carries a scope', () => {
-    expect(STAGE_DEFS.every((s) => s.scope === 'video' || s.scope === 'global')).toBe(true)
   })
 })

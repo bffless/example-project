@@ -31,6 +31,7 @@ function scene(partial: Partial<Scene> = {}): Scene {
   return {
     id: 'scene-1',
     index: 0,
+    sourceId: 'source-1',
     title: 'Scene 1',
     start: 0,
     end: 100,
