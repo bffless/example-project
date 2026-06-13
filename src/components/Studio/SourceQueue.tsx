@@ -36,7 +36,6 @@ type RowProps = {
   onDragLeave: () => void
   onDrop: (e: React.DragEvent<HTMLLIElement>) => void
   onDragEnd: () => void
-  onReorder: (from: number, to: number) => void
   onRemove: (id: string) => void
   onProcess: (id: string) => void
 }
@@ -155,13 +154,15 @@ function SourceRow({
         {/* Expanded per-source detail: preview player + waveform + transcript */}
         {expanded && (
           <div className="mt-4 border rule bg-paper-deep/30 p-4 flex flex-col gap-4">
-            {signed?.url && (
+            {signed?.url ? (
               <PreviewPlayer
                 src={signed.url}
                 videoRef={previewRef}
                 cuts={[]}
                 onLoaded={() => {}}
               />
+            ) : (
+              <span className="font-mono text-[12px] text-ink-faint">Loading preview&hellip;</span>
             )}
             {source.audioUrl && (
               <AudioArtifact peaks={source.audioPeaks} audioUrl={source.audioUrl} />
@@ -233,7 +234,6 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
               onDragEnd={() => {
                 setDragOverIndex(null)
               }}
-              onReorder={onReorder}
               onRemove={onRemove}
               onProcess={onProcess}
             />
