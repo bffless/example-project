@@ -136,8 +136,12 @@ export function Studio() {
   // duplicates every source (4 picked → 8 in the queue). Event handlers run once.
   function onImport(picked: File[]) {
     setRestoreError(null)
+    // Default the queue to earliest-first by the file's last-modified time (the
+    // only creation-ish metadata the browser exposes on a File — a good proxy for
+    // when a screen recording was saved). The producer can still drag to reorder.
+    const ordered = [...picked].sort((a, b) => a.lastModified - b.lastModified)
     const added: { id: string; file: File }[] = []
-    for (const f of picked) {
+    for (const f of ordered) {
       const id = `source-${Date.now()}-${Math.round(Math.random() * 1e6)}`
       dispatch(addSource({ id, fileName: f.name, duration: 0 }))
       added.push({ id, file: f })
