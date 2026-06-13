@@ -144,6 +144,7 @@ export function Studio() {
 
   function startOver() {
     setFile(null)
+    setFiles(new Map())
     setRestoreError(null)
     // pipe.reset() dispatches resetStudio, which already clears revisitPrep.
     pipe.reset()
