@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { STAGE_DEFS, type Stage, type StageId } from '../../lib/pipeline'
+import { STAGE_DEFS, PER_VIDEO_STAGES, type Stage, type StageId } from '../../lib/pipeline'
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { timedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import {
@@ -60,6 +60,7 @@ import {
   setFinalCutUrl,
   addSource,
   patchSource,
+  patchSourceStage,
   resetStudio,
   type TranscriptWord,
 } from '../../store/studioSlice'
@@ -93,6 +94,19 @@ function measureAudioDuration(url: string): Promise<number> {
     audio.addEventListener('loadedmetadata', () => done(audio.duration))
     audio.addEventListener('error', () => done(0))
     audio.src = url
+  })
+}
+
+/** Measure a video clip's real length by loading just its metadata off an object
+ *  URL — mirrors `measureAudioDuration` but for <video>. Resolves 0 on error. */
+function measureVideoDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    const done = (v: number) => resolve(Number.isFinite(v) && v > 0 ? v : 0)
+    video.addEventListener('loadedmetadata', () => done(video.duration))
+    video.addEventListener('error', () => done(0))
+    video.src = url
   })
 }
 
@@ -229,6 +243,9 @@ export function useScenePipeline() {
   // the post-selection preview sample. Transient — fine to lose on reload.
   const [cloning, setCloning] = useState(false)
   const [samplingVoice, setSamplingVoice] = useState(false)
+  // Per-source processing (story 09b): which source id is currently running its
+  // upload → extract → transcribe pipeline. Transient — fine to lose on reload.
+  const [processingId, setProcessingId] = useState<string | null>(null)
   // The just-captured contact sheets, shown immediately while they upload. They
   // carry the heavy base64 `dataUrl`, so they live here (transient) and NEVER in
   // Redux/localStorage — only the uploaded sheets (bucket URL, empty dataUrl) are
@@ -698,6 +715,72 @@ export function useScenePipeline() {
       setSamplingVoice(false)
     }
   }, [voice, samplingVoice, voiceSayReq])
+
+  // ---- Per-source processing (story 09b) --------------------------------------
+
+  // Process ONE source video through its three per-video prep stages (story 09b):
+  // upload → extract+upload audio → transcribe, writing results into that source
+  // in `sources[]` (NOT the legacy top-level fields). `stepInFlight` (module-level)
+  // guards re-entrancy across StrictMode/instances, same as `next()`. The audioUrl
+  // is threaded straight into transcribe — the selector value is stale within this run.
+  const processSource = useCallback(
+    async (id: string, file: File) => {
+      if (processingId || stepInFlight) return
+      stepInFlight = true
+      setProcessingId(id)
+      const objectUrl = URL.createObjectURL(file)
+      let stage: StageId = 'upload'
+      try {
+        const duration = await measureVideoDuration(objectUrl)
+        dispatch(patchSource({ id, patch: { fileName: file.name, duration } }))
+
+        stage = 'upload'
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
+        const { url: srcUrl } = await uploadReq({ file, kind: 'source' }).unwrap()
+        dispatch(patchSource({ id, patch: { sourceUrl: srcUrl } }))
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${mb(file.size)} → bucket` } }))
+
+        stage = 'extract'
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
+        const { wav, peaks } = await extractAudio(file)
+        const wavFile = new File([wav], `${file.name.replace(/\.[^.]+$/, '')}.wav`, { type: 'audio/wav' })
+        const { url: aUrl } = await uploadReq({ file: wavFile, kind: 'audio' }).unwrap()
+        dispatch(patchSource({ id, patch: { audioUrl: aUrl, audioPeaks: peaks } }))
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `16 kHz mono WAV · ${mb(wav.size)}` } }))
+
+        stage = 'transcribe'
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
+        const data = await transcribeReq({ audioUrl: aUrl }).unwrap()
+        const got = data.words ?? []
+        dispatch(patchSource({ id, patch: { words: got } }))
+        const count = got.length || Math.round((duration / 60) * 150)
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${count.toLocaleString()} words` } }))
+      } catch (e) {
+        dispatch(patchSourceStage({ id, stage, patch: { status: 'error', detail: stageError(e) } }))
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+        stepInFlight = false
+        setProcessingId(null)
+      }
+    },
+    [processingId, dispatch, uploadReq, transcribeReq],
+  )
+
+  // Walk the source queue in order and process each that isn't already fully
+  // prepped, one at a time (sequential — parallel uploads trip the dev proxy's
+  // keep-alive sockets). `files` maps each source id to its in-memory File (held
+  // transiently by the page; a source with no File in the map is skipped).
+  const processAll = useCallback(
+    async (files: Map<string, File>) => {
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      for (const s of ordered) {
+        if (PER_VIDEO_STAGES.every((st) => s.stageProgress[st]?.status === 'done')) continue
+        const f = files.get(s.id)
+        if (f) await processSource(s.id, f)
+      }
+    },
+    [sources, processSource],
+  )
 
   /** Run the current prep step. Marks the active stage `error` if it throws. */
   const next = useCallback(
@@ -1274,5 +1357,9 @@ export function useScenePipeline() {
     clearVoice,
     generateSample,
     toggleBuilt,
+    sources,
+    processingId,
+    processSource,
+    processAll,
   }
 }
