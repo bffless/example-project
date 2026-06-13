@@ -65,12 +65,18 @@ export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelP
     return 'ready'
   }, [rawStatus])
 
+  // useChat assigns an id when a fresh conversation starts; mirror it into our
+  // persisted conversationId *during render* (React's sanctioned "adjust state
+  // when a value changes" pattern) rather than in an effect that would cascade.
+  if (chatId && chatId !== conversationId) {
+    setConversationId(chatId)
+  }
+
+  // Persisting the active id so a reload resumes is a real external-system sync,
+  // which is exactly what an effect is for — no setState here.
   useEffect(() => {
-    if (chatId && chatId !== conversationId) {
-      setConversationId(chatId)
-      localStorage.setItem(STORAGE_KEY, chatId)
-    }
-  }, [chatId, conversationId])
+    if (chatId) localStorage.setItem(STORAGE_KEY, chatId)
+  }, [chatId])
 
   useEffect(() => {
     const loadHistory = async () => {
@@ -136,12 +142,17 @@ export function ChatPanel({ onClose, onNewChat, containerClassName }: ChatPanelP
     return null
   }, [])
 
-  useEffect(() => {
+  // When useChat surfaces a *new* error, seed the countdown from it during render
+  // (adjust-on-change pattern) instead of in an effect; the timer effect below
+  // then ticks it down.
+  const [prevError, setPrevError] = useState(error)
+  if (error !== prevError) {
+    setPrevError(error)
     const rateLimitInfo = parseRateLimitError(error)
     if (rateLimitInfo) {
       setRateLimitCountdown(rateLimitInfo.retryAfter)
     }
-  }, [error, parseRateLimitError])
+  }
 
   useEffect(() => {
     if (rateLimitCountdown > 0) {

@@ -50,6 +50,35 @@ export function isUploadServePath(url: string): boolean {
   return url.startsWith('/api/uploads/') && !url.startsWith('/api/uploads/sign')
 }
 
+/**
+ * Hard ceiling for a source video. The binding limit is the **browser**, not the
+ * bucket: `extractAudio` (src/lib/audio.ts) decodes the whole file with the Web
+ * Audio API, and `decodeAudioData` hard-rejects any buffer over ~2 GB ("Argument
+ * 1 can't be an ArrayBuffer or an ArrayBufferView larger than 2 GB"). So we cap
+ * here — before the multi-GB upload even starts — and keep the
+ * `/api/uploads/source/{prepare,register}` rule `maxFileSize` in sync. Longer
+ * recordings are meant to be split into multiple clips, not handled by lifting
+ * this limit (the planned multi-video flow).
+ */
+export const MAX_SOURCE_BYTES = 2 * 1024 ** 3 // 2 GiB — the Web Audio decode ceiling
+
+const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(2)} GB`
+
+/**
+ * Validate a picked source file before any upload starts. Returns a
+ * human-readable reason it can't be used, or `null` when it's good to go. Pure +
+ * unit-tested; the import UI just renders the returned string.
+ */
+export function sourceFileError(file: { type: string; size: number }): string | null {
+  if (!file.type.startsWith('video/')) {
+    return 'That doesn’t look like a video file.'
+  }
+  if (file.size > MAX_SOURCE_BYTES) {
+    return `That clip is ${gib(file.size)} — the limit is ${gib(MAX_SOURCE_BYTES)}. Trim or compress it and try again.`
+  }
+  return null
+}
+
 type PrepareResponse = {
   uploadUrl?: string
   storageKey?: string
