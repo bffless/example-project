@@ -439,10 +439,12 @@ export type ConcatCommand = {
  * Build the final **stream-copy concat** of the per-scene MP4s (story 03g phase 2).
  *
  * Every scene clip is encoded with the same profile (`libx264`/`yuv420p`/aac, same
- * resolution — they're slices of one source), so the concat demuxer can join them
- * with `-c copy`: no re-encode, near-instant, and almost no memory (it just rewrites
- * the container). `-fflags +genpts` regenerates presentation timestamps so the
- * boundary between scenes is clean.
+ * resolution), so the concat demuxer can join them with `-c copy`: no re-encode,
+ * near-instant, and almost no memory (it just rewrites the container). Scenes may
+ * be slices of DIFFERENT source videos (multi-video, story 09d) — the concat is
+ * purely positional, so it stitches them in the order given (scene order) with no
+ * source/timeline coordinate involved. `-fflags +genpts` regenerates presentation
+ * timestamps so the boundary between scenes is clean.
  */
 export function buildConcatCommand(parts: string[], output = 'final.mp4'): ConcatCommand {
   const listName = 'concat.txt'

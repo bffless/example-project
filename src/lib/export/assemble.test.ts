@@ -335,4 +335,24 @@ describe('buildConcatCommand (story 03g phase 2)', () => {
     expect(cmd.output).toBe('out.mp4')
     expect(cmd.args[cmd.args.length - 1]).toBe('out.mp4')
   })
+
+  // Multi-video (story 09d): the final cut is the in-order concat of each scene's
+  // own assembled clip. Scenes can come from DIFFERENT source videos, but the
+  // concat is purely positional — it lists the parts exactly as given (scene
+  // order), with no source/timeline coordinate involved. So a project whose scenes
+  // span several sources stitches correctly as long as the parts are passed in
+  // scene order. (Per-scene assemble already works on each scene's LOCAL bounds —
+  // `planAssembly`/`buildSlices` take only {segments, cuts, duration}, never a
+  // sourceId — so the export path is source-agnostic by construction.)
+  it('concats scene clips from multiple sources in scene order, unchanged', () => {
+    // e.g. scenes 0-1 from video A, scenes 2-3 from video B — assembledUrl order
+    // is scene order; the source they came from never enters the concat.
+    const parts = ['scene-0.mp4', 'scene-1.mp4', 'scene-2.mp4', 'scene-3.mp4']
+    const cmd = buildConcatCommand(parts)
+    expect(cmd.listContent).toBe(parts.map((p) => `file '${p}'`).join('\n') + '\n')
+    // Order is preserved verbatim — reversing the parts reverses the list.
+    expect(buildConcatCommand([...parts].reverse()).listContent).toBe(
+      [...parts].reverse().map((p) => `file '${p}'`).join('\n') + '\n',
+    )
+  })
 })
