@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { presignedUpload, toSignedUrl, isUploadServePath } from './upload'
+import {
+  presignedUpload,
+  toSignedUrl,
+  isUploadServePath,
+  sourceFileError,
+  MAX_SOURCE_BYTES,
+} from './upload'
 
 describe('isUploadServePath', () => {
   it('matches persisted relative /api/uploads/ serve paths', () => {
@@ -12,6 +18,26 @@ describe('isUploadServePath', () => {
     expect(isUploadServePath('data:audio/wav;base64,UklGRg==')).toBe(false)
     expect(isUploadServePath('blob:http://localhost:5173/123-abc')).toBe(false)
     expect(isUploadServePath('/api/scenes')).toBe(false)
+  })
+})
+
+describe('sourceFileError', () => {
+  it('accepts a video within the size limit', () => {
+    expect(sourceFileError({ type: 'video/mp4', size: 500_000_000 })).toBeNull()
+    expect(sourceFileError({ type: 'video/quicktime', size: MAX_SOURCE_BYTES })).toBeNull()
+  })
+
+  it('rejects non-video files', () => {
+    expect(sourceFileError({ type: 'image/png', size: 1000 })).toMatch(/video file/)
+    expect(sourceFileError({ type: '', size: 1000 })).toMatch(/video file/)
+  })
+
+  it('rejects a video over the 2 GiB Web Audio limit before it uploads', () => {
+    const err = sourceFileError({ type: 'video/mp4', size: MAX_SOURCE_BYTES + 1 })
+    expect(err).toMatch(/limit is 2\.00 GB/)
+    // The 2.35 GB file from the bug report is over the limit and now rejected,
+    // before it can blow up decodeAudioData in the extract step.
+    expect(sourceFileError({ type: 'video/mp4', size: 2_346_036_326 })).toMatch(/2\.18 GB/)
   })
 })
 

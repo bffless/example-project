@@ -1,4 +1,5 @@
 import { useRef, useState, type DragEvent } from 'react'
+import { sourceFileError } from '../../lib/upload'
 
 type Props = {
   onSelect: (file: File) => void
@@ -16,8 +17,9 @@ export function MediaImport({ onSelect }: Props) {
 
   function accept(file: File | undefined) {
     if (!file) return
-    if (!file.type.startsWith('video/')) {
-      setError('That doesn’t look like a video file.')
+    const err = sourceFileError(file)
+    if (err) {
+      setError(err)
       return
     }
     setError(null)
