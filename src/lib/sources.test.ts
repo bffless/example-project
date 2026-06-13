@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sourceOffsets, totalDuration, globalToLocal, localToGlobal } from './sources'
+import { sourceOffsets, totalDuration, globalToLocal, localToGlobal, sourceForScene } from './sources'
 
 const SOURCES = [
   { id: 'a', duration: 100 },
@@ -42,4 +42,10 @@ describe('sources timeline math', () => {
     expect(localToGlobal(SOURCES, 'a', 0)).toBe(0)
     expect(localToGlobal(SOURCES, 'missing', 5)).toBeNull()
   })
+})
+
+it('finds the VideoSource a scene belongs to', () => {
+  const sources = [{ id: 'a', duration: 1 }, { id: 'b', duration: 1 }]
+  expect(sourceForScene(sources, { sourceId: 'b' })?.id).toBe('b')
+  expect(sourceForScene(sources, { sourceId: 'z' })).toBeNull()
 })

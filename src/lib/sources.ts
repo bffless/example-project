@@ -59,3 +59,13 @@ export function localToGlobal(
   const span = sourceOffsets(sources).find((s) => s.id === sourceId)
   return span ? span.start + localTime : null
 }
+
+/** The source a scene belongs to (story 09d), by `sourceId`. Generic over the
+ *  source shape so callers can pass the full `VideoSource[]` from the slice or a
+ *  lightweight `{id}` list. Null if the id isn't found. */
+export function sourceForScene<T extends { id: string }>(
+  sources: T[],
+  scene: { sourceId: string },
+): T | null {
+  return sources.find((s) => s.id === scene.sourceId) ?? null
+}
