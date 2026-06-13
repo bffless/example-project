@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { STAGE_DEFS, PER_VIDEO_STAGES, type Stage, type StageId } from '../../lib/pipeline'
+import { STAGE_DEFS, PER_VIDEO_STAGES, GLOBAL_STAGES, type Stage, type StageId } from '../../lib/pipeline'
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
-import { timedTranscript, toScenes, type DirectorScene } from '../../lib/director'
+import { combinedTimedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import {
   toRefinement,
   refineDirections,
@@ -18,6 +18,7 @@ import {
   applyOriginalClips,
   type RefineSceneRaw,
 } from '../../lib/refiner'
+import { totalDuration } from '../../lib/sources'
 import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
@@ -277,11 +278,23 @@ export function useScenePipeline() {
     dispatch(resetStudio())
   }, [dispatch])
 
-  // The next prep step to run: the first stage that isn't done. Null once ready.
-  const currentStageId = useMemo<StageId | null>(
-    () => stages.find((s) => s.status !== 'done')?.id ?? null,
-    [stages],
+  // Prep is "done" when EVERY source has finished its per-video stages AND the
+  // global stages (thumbnails/director/clone) are done (story 09c). The per-video
+  // stages are tracked per source now, not in the top-level stageProgress.
+  const sourcesReady = useMemo(
+    () =>
+      sources.length > 0 &&
+      sources.every((s) => PER_VIDEO_STAGES.every((id) => s.stageProgress[id]?.status === 'done')),
+    [sources],
   )
+
+  // The next GLOBAL step to run (thumbnails → director → clone), shown on the prep
+  // board. Null while sources are still being prepped (the per-video stages live in
+  // the queue, not the board) or once every global stage is done.
+  const currentStageId = useMemo<StageId | null>(() => {
+    if (!sourcesReady) return null
+    return GLOBAL_STAGES.find((id) => (stageProgress[id]?.status ?? 'pending') !== 'done') ?? null
+  }, [sourcesReady, stageProgress])
 
   // ---- Async fire-and-poll (story 03f Part 0) -------------------------------
 
@@ -637,23 +650,22 @@ export function useScenePipeline() {
   // notes done (one call does both), then captures a midpoint thumb per scene
   // for the scene-card art. Replaces the old mocked `buildScenes`.
   const runDirector = useCallback(
-    async ({ src, duration: clipDuration }: StepContext) => {
+    async ({ src }: StepContext) => {
       patch('director', { status: 'active' })
-      const transcript = timedTranscript(words)
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const transcript = combinedTimedTranscript(
+        ordered.map((s) => ({ id: s.id, fileName: s.fileName, duration: s.duration, words: s.words })),
+      )
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
+      const duration = totalDuration(ordered.map((s) => ({ id: s.id, duration: s.duration })))
       // Enqueue-only: the start endpoint records a job and returns its id; the
       // Gemini call runs in the pipeline's postSteps (story 03f Part 0). Persist
       // the id so a hard reload resumes polling, then drive it to completion.
-      const { jobId } = await scenesReq({
-        transcript,
-        sheetUrls,
-        direction,
-        duration: clipDuration,
-      }).unwrap()
+      const { jobId } = await scenesReq({ transcript, sheetUrls, direction, duration }).unwrap()
       dispatch(setScenesJobId(jobId))
       await completeDirectorJob(jobId, src)
     },
-    [patch, dispatch, words, persistedSheets, direction, scenesReq, completeDirectorJob],
+    [patch, sources, persistedSheets, direction, scenesReq, dispatch, completeDirectorJob],
   )
 
   // Re-run the master director after it's already done (story 03m). `next()`
@@ -1364,7 +1376,11 @@ export function useScenePipeline() {
     () => scenes.length > 0 && scenes.every((s) => s.status === 'built'),
     [scenes],
   )
-  const ready = useMemo(() => stages.every((s) => s.status === 'done'), [stages])
+  const globalReady = useMemo(
+    () => GLOBAL_STAGES.every((id) => stageProgress[id]?.status === 'done'),
+    [stageProgress],
+  )
+  const ready = useMemo(() => sourcesReady && globalReady, [sourcesReady, globalReady])
 
   return {
     stages,
