@@ -596,10 +596,14 @@ export function useScenePipeline() {
       const perSheet = cellsPerSheet(frames.length)
       const frameTiles = chunk(frames, perSheet)
       const timeTiles = chunk(times, perSheet)
+      // Global sampling spacing (seconds between frames) — evenly spaced across the
+      // combined timeline, so consecutive captures differ by a constant interval.
+      // composeContactSheet can't infer it, so stamp it (the preview reads it).
+      const interval = times.length > 1 ? times[1] - times[0] : 0
       const sheets: ContactSheet[] = []
       for (let t = 0; t < frameTiles.length; t++) {
         const sheet = await composeContactSheet(frameTiles[t], timeTiles[t], CONTACT_SHEET_CELL)
-        if (sheet.dataUrl) sheets.push({ ...sheet, index: sheets.length, total: frameTiles.length })
+        if (sheet.dataUrl) sheets.push({ ...sheet, interval, index: sheets.length, total: frameTiles.length })
       }
 
       // ===== keep the EXISTING upload + dispatch logic below, verbatim =====
