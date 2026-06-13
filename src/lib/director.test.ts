@@ -37,7 +37,7 @@ describe('toScenes', () => {
   ]
 
   it('coerces to the Scene shape with ids, index, and defaults', () => {
-    const scenes = toScenes(raw, 130)
+    const scenes = toScenes(raw, [{ id: 'source-1', duration: 130 }])
     expect(scenes).toHaveLength(2)
     expect(scenes[0]).toMatchObject({
       id: 'scene-1',
@@ -58,7 +58,7 @@ describe('toScenes', () => {
       { start: -5, end: 40, transcript: 'one' },
       { start: 30, end: 200, transcript: 'two' }, // overlaps prev, runs past clip
     ]
-    const scenes = toScenes(messy, 120)
+    const scenes = toScenes(messy, [{ id: 'source-1', duration: 120 }])
     expect(scenes[0].start).toBe(0)
     expect(scenes[1].start).toBe(40) // snapped to prev end
     expect(scenes[1].end).toBe(120) // clamped to duration
@@ -68,18 +68,18 @@ describe('toScenes', () => {
     const s: DirectorScene[] = [
       { start: 0, end: 100, transcript: 'x', cuts: [{ start: 50, end: 200 }, { start: 5, end: 5 }] },
     ]
-    const [scene] = toScenes(s, 100)
+    const [scene] = toScenes(s, [{ id: 'source-1', duration: 100 }])
     // 50–200 clamped to 50–100; the 5–5 zero-length cut dropped
     expect(scene.cuts).toEqual([{ start: 50, end: 100 }])
   })
 
   it('falls back to a title derived from the transcript', () => {
-    const [scene] = toScenes([{ start: 0, end: 10, transcript: 'the quick brown fox jumps over' }], 10)
+    const [scene] = toScenes([{ start: 0, end: 10, transcript: 'the quick brown fox jumps over' }], [{ id: 'source-1', duration: 10 }])
     expect(scene.title).toBe('the quick brown fox jumps…')
   })
 
   it('returns [] for non-array input', () => {
-    expect(toScenes(undefined as unknown as DirectorScene[], 10)).toEqual([])
+    expect(toScenes(undefined as unknown as DirectorScene[], [{ id: 'source-1', duration: 10 }])).toEqual([])
   })
 
   it('keeps a valid voicing plan and drops junk values (story 03j)', () => {
@@ -90,9 +90,37 @@ describe('toScenes', () => {
         { start: 60, end: 90, transcript: 'c', voicing: 'shout it' as unknown as DirectorScene['voicing'] },
         { start: 90, end: 120, transcript: 'd' },
       ],
-      120,
+      [{ id: 'source-1', duration: 120 }],
     )
     expect(scenes.map((s) => s.voicing)).toEqual(['original', 'mixed', undefined, undefined])
+  })
+})
+
+describe('toScenes — multi-source (09c)', () => {
+  const SOURCES = [{ id: 'a', duration: 100 }, { id: 'b', duration: 100 }] // global [0,100),[100,200)
+
+  it('maps a scene fully inside one source to local coords + sourceId', () => {
+    const [s] = toScenes([{ start: 120, end: 160, title: 'X' }], SOURCES)
+    expect(s).toMatchObject({ sourceId: 'b', start: 20, end: 60 })
+  })
+
+  it('auto-splits a scene that crosses a boundary into one scene per source', () => {
+    const out = toScenes([{ start: 80, end: 140, title: 'Crosser' }], SOURCES)
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({ sourceId: 'a', start: 80, end: 100 })
+    expect(out[1]).toMatchObject({ sourceId: 'b', start: 0, end: 40 })
+  })
+
+  it('clamps cuts into the (local) scene span', () => {
+    const [s] = toScenes([{ start: 100, end: 160, title: 'X', cuts: [{ start: 110, end: 130 }] }], SOURCES)
+    expect(s.sourceId).toBe('b')
+    expect(s.cuts).toEqual([{ start: 10, end: 30 }])
+  })
+
+  it('single-source projects behave like before (local == global, one sourceId)', () => {
+    const out = toScenes([{ start: 0, end: 50 }, { start: 50, end: 100 }], [{ id: 'a', duration: 100 }])
+    expect(out.every((s) => s.sourceId === 'a')).toBe(true)
+    expect(out[1]).toMatchObject({ start: 50, end: 100 })
   })
 })
 

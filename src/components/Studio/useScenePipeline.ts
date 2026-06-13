@@ -190,7 +190,6 @@ export function useScenePipeline() {
   const direction = useAppSelector((s) => s.studio.direction)
   const directorPromptJobId = useAppSelector((s) => s.studio.directorPromptJobId)
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
-  const duration = useAppSelector((s) => s.studio.duration)
   const voice = useAppSelector((s) => s.studio.voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
@@ -352,7 +351,7 @@ export function useScenePipeline() {
    * The `pollsInFlight` guard makes the live path and the resume effect idempotent.
    */
   const completeDirectorJob = useCallback(
-    async (jobId: string, videoSrc: string | null, clipDuration: number) => {
+    async (jobId: string, videoSrc: string | null) => {
       if (pollsInFlight.has(jobId)) return
       pollsInFlight.add(jobId)
       setRunning(true)
@@ -360,7 +359,7 @@ export function useScenePipeline() {
       try {
         const { result } = await pollJob(jobId)
         const data = (result ?? {}) as { synopsis?: string; scenes?: DirectorScene[] }
-        const built = toScenes(data.scenes ?? [], clipDuration)
+        const built = toScenes(data.scenes ?? [], sources.map((s) => ({ id: s.id, duration: s.duration })))
         dispatch(setSynopsis(data.synopsis ?? null))
 
         // Scene-card art: capture one midpoint frame per scene if we can seek the
@@ -396,7 +395,7 @@ export function useScenePipeline() {
         setRunning(false)
       }
     },
-    [pollJob, dispatch, patch],
+    [pollJob, dispatch, patch, sources],
   )
 
   /**
@@ -476,12 +475,12 @@ export function useScenePipeline() {
     // spinner state synchronously (fine in the live event-handler path), so we
     // defer them out of the effect body to avoid a synchronous setState-in-effect.
     queueMicrotask(() => {
-      if (scenesJobId) void completeDirectorJob(scenesJobId, sourceUrl, duration)
+      if (scenesJobId) void completeDirectorJob(scenesJobId, sourceUrl)
       for (const scene of scenes) {
         if (scene.refineJobId) void completeRefineJob(scene.id, scene.refineJobId)
       }
     })
-  }, [scenesJobId, sourceUrl, duration, scenes, completeDirectorJob, completeRefineJob])
+  }, [scenesJobId, sourceUrl, scenes, completeDirectorJob, completeRefineJob])
 
   // ---- Individual steps -----------------------------------------------------
 
@@ -608,7 +607,7 @@ export function useScenePipeline() {
         duration: clipDuration,
       }).unwrap()
       dispatch(setScenesJobId(jobId))
-      await completeDirectorJob(jobId, src, clipDuration)
+      await completeDirectorJob(jobId, src)
     },
     [patch, dispatch, words, persistedSheets, direction, scenesReq, completeDirectorJob],
   )

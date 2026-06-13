@@ -22,7 +22,7 @@
  */
 
 import { clockLabel } from './contactSheet'
-import { sourceOffsets } from './sources'
+import { sourceOffsets, type SourceLike } from './sources'
 import type { Scene, Cut } from './scenes'
 import type { TWord } from './transcriptGrid'
 
@@ -113,52 +113,65 @@ function clampCut(cut: Cut, lo: number, hi: number): Cut | null {
 }
 
 /**
- * Coerce the director's raw scenes into the app's `Scene[]`: assign ids/index,
- * default the editable + status fields, and **defensively clamp** timestamps —
- * snap each span into `[0, duration]`, force the scenes ascending and
- * non-overlapping (so the chapter list is monotonic), and keep every cut inside
- * its own scene. The server validates too; this guarantees the UI never sees a
- * scene running past the clip or a cut outside its span even if the model slips.
+ * Coerce the director's raw scenes into the app's `Scene[]`, mapping from the
+ * **global** (concatenated) timeline the director reasons over back to
+ * **per-source local** coordinates. Each returned scene carries a `sourceId`
+ * and local `start`/`end` within that source.
+ *
+ * Any scene whose global span crosses a source boundary is **auto-split** into
+ * one scene per source it overlaps — so callers never see a scene that spans
+ * two videos. Within each split/segment the cuts are re-expressed in local
+ * coordinates and clamped to the (local) scene span.
+ *
+ * The global timeline is clamped and forced monotonic first (same defensive
+ * logic as before), then each global span is intersected with every source's
+ * `[start, end)` window; intersections shorter than 0.05 s are dropped.
+ * Single-source projects behave identically to the old signature: local time
+ * equals global time and every scene gets `sourceId = sources[0].id`.
  */
-export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
-  if (!Array.isArray(raw)) return []
-  const bound = Number.isFinite(duration) && duration > 0 ? duration : Infinity
+export function toScenes(raw: DirectorScene[], sources: SourceLike[]): Scene[] {
+  if (!Array.isArray(raw) || sources.length === 0) return []
+  const spans = sourceOffsets(sources)
+  const bound = spans[spans.length - 1].end
   const sorted = [...raw].sort((a, b) => num(a?.start) - num(b?.start))
 
-  const scenes: Scene[] = []
+  // 1) clamp + monotonic on the GLOBAL timeline (the existing logic)
+  const global: { start: number; end: number; raw: DirectorScene }[] = []
   let cursor = 0
-  sorted.forEach((s, i) => {
+  for (const s of sorted) {
     const start = Math.min(Math.max(num(s?.start), cursor), bound)
     let end = Math.min(Math.max(num(s?.end), start), bound)
-    if (end <= start) end = Math.min(start + 0.05, bound) // never zero-length
+    if (end <= start) end = Math.min(start + 0.05, bound)
     cursor = end
+    global.push({ start, end, raw: s })
+  }
 
-    const transcript = str(s?.transcript).trim()
-    const refinePrompt = str(s?.refinePrompt).trim()
-    const title = str(s?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
-
-    const cuts = (Array.isArray(s?.cuts) ? s.cuts : [])
-      .map((c) => clampCut(c, start, end))
-      .filter((c): c is Cut => c !== null)
-
-    const voicing = toVoicing(s?.voicing)
-
-    scenes.push({
-      id: `scene-${i + 1}`,
-      index: i,
-      sourceId: 'source-1',
-      title,
-      start,
-      end,
-      transcript,
-      status: 'pending',
-      narrationSeconds: null,
-      cuts,
-      ...(voicing ? { voicing } : {}),
-      ...(refinePrompt ? { refinePrompt } : {}),
-    })
-  })
-  return scenes
+  // 2) split each global scene at every boundary it crosses, convert to local
+  const out: Scene[] = []
+  for (const g of global) {
+    for (const span of spans) {
+      const segStart = Math.max(g.start, span.start)
+      const segEnd = Math.min(g.end, span.end)
+      if (segEnd - segStart <= 0.05) continue
+      const localStart = segStart - span.start
+      const localEnd = segEnd - span.start
+      const i = out.length
+      const transcript = str(g.raw?.transcript).trim()
+      const refinePrompt = str(g.raw?.refinePrompt).trim()
+      const title = str(g.raw?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
+      const cuts = (Array.isArray(g.raw?.cuts) ? g.raw.cuts : [])
+        .map((c) => clampCut({ start: num(c?.start) - span.start, end: num(c?.end) - span.start }, localStart, localEnd))
+        .filter((c): c is Cut => c !== null)
+      const voicing = toVoicing(g.raw?.voicing)
+      out.push({
+        id: `scene-${i + 1}`, index: i, sourceId: span.id, title,
+        start: localStart, end: localEnd, transcript, status: 'pending', narrationSeconds: null, cuts,
+        ...(voicing ? { voicing } : {}),
+        ...(refinePrompt ? { refinePrompt } : {}),
+      })
+    }
+  }
+  return out.map((s, i) => ({ ...s, index: i, id: `scene-${i + 1}` }))
 }
 
 /** One source's transcript for the combined director request (story 09c). */
