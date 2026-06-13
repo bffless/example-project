@@ -622,7 +622,7 @@ export function Studio() {
                     direction={direction}
                     error={pipe.sceneError}
                     onSlice={() => pipe.sliceScene(selected.id, file)}
-                    onGenerateSheets={() => pipe.generateSceneSheets(selected.id)}
+                    onGenerateSheets={() => pipe.generateSceneSheets(selected.id, file)}
                     onRefine={() => pipe.refineScene(selected.id)}
                     onClear={() => pipe.clearRefinement(selected.id)}
                     onRefinePromptChange={(text) => pipe.setRefinePrompt(selected.id, text)}
