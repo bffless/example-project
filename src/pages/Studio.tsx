@@ -21,8 +21,6 @@ import { DirectorPanel } from '../components/Studio/DirectorPanel'
 import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
 import { VoiceStudio } from '../components/Studio/VoiceStudio'
 import { StudioStepper } from '../components/Studio/StudioStepper'
-import { AudioArtifact } from '../components/Studio/AudioArtifact'
-import { TranscriptText } from '../components/Studio/TranscriptText'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
@@ -504,24 +502,6 @@ export function Studio() {
                       <p className="meta-label">&nbsp;</p>
                       <p className="font-mono text-[12px]">&nbsp;</p>
                     </div>
-                    {previewSrc && (
-                      <PreviewPlayer
-                        src={previewSrc}
-                        videoRef={videoRef}
-                        cuts={[]}
-                        onLoaded={onLoaded}
-                      />
-                    )}
-                    {pipe.audioUrl && (
-                      <div className="mt-4">
-                        <AudioArtifact peaks={pipe.audioPeaks} audioUrl={pipe.audioUrl} />
-                      </div>
-                    )}
-                    {pipe.words.length > 0 && (
-                      <div className="mt-4">
-                        <TranscriptText words={pipe.words} />
-                      </div>
-                    )}
                     {pipe.contactSheets.length > 0 && (
                       <div className="mt-6">
                         <ContactSheetPreview sheets={pipe.contactSheets} />
