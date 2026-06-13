@@ -13,7 +13,7 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { STAGE_DEFS, type StageId, type StageStatus } from '../lib/pipeline'
+import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
 import type { ContactSheet } from '../lib/frames'
 
@@ -59,6 +59,46 @@ export const freshProgress = (): StageProgressMap => {
   for (const s of STAGE_DEFS) out[s.id] = { status: 'pending' }
   return out
 }
+
+/**
+ * One source video in a multi-video project (story 09a). Everything that used to
+ * be a single top-level field (the bucket serve paths, the waveform, the
+ * transcript words, the clip duration, the per-video prep progress) now lives
+ * here, one per uploaded clip. Whole-project state (global contact sheets,
+ * synopsis, direction, scenes, voice, final cut) stays top-level.
+ */
+export type VideoSource = {
+  id: string
+  /** Sequence in the final cut + the global-timeline offset. Drag reorders it. */
+  order: number
+  fileName: string
+  duration: number
+  sourceUrl: string | null
+  audioUrl: string | null
+  audioPeaks: number[]
+  words: TranscriptWord[]
+  /** Per-video prep progress: only the per-video stages (upload/extract/transcribe). */
+  stageProgress: StageProgressMap
+}
+
+/** Fresh per-video progress: every per-video stage pending. */
+export const freshSourceProgress = (): StageProgressMap => {
+  const out: StageProgressMap = {}
+  for (const id of PER_VIDEO_STAGES) out[id] = { status: 'pending' }
+  return out
+}
+
+const makeSource = (p: { id: string; fileName: string; duration: number; order: number }): VideoSource => ({
+  id: p.id,
+  order: p.order,
+  fileName: p.fileName,
+  duration: p.duration,
+  sourceUrl: null,
+  audioUrl: null,
+  audioPeaks: [],
+  words: [],
+  stageProgress: freshSourceProgress(),
+})
 
 export type StudioState = {
   stageProgress: StageProgressMap
@@ -120,6 +160,13 @@ export type StudioState = {
    * the saved cut back to play/download. Null until saved; re-saving overwrites it.
    */
   finalCutUrl: string | null
+  /**
+   * All source videos in the project (story 09a). Each holds its own per-video
+   * prep state (sourceUrl, audioUrl, words, stageProgress, etc.). The single
+   * top-level fields (sourceUrl, audioUrl, etc.) remain for backward compat
+   * and are retired in a later task.
+   */
+  sources: VideoSource[]
 }
 
 const initialState: StudioState = {
@@ -141,6 +188,7 @@ const initialState: StudioState = {
   duration: 0,
   fileName: null,
   finalCutUrl: null,
+  sources: [],
 }
 
 const studioSlice = createSlice({
@@ -230,6 +278,34 @@ const studioSlice = createSlice({
     setFinalCutUrl(state, action: PayloadAction<string | null>) {
       state.finalCutUrl = action.payload
     },
+    /** Append a new source video with fresh per-video prep progress (story 09a). */
+    addSource(state, action: PayloadAction<{ id: string; fileName: string; duration: number }>) {
+      state.sources.push(makeSource({ ...action.payload, order: state.sources.length }))
+    },
+    /** Shallow-merge `patch` into the source identified by `id`. */
+    patchSource(state, action: PayloadAction<{ id: string; patch: Partial<VideoSource> }>) {
+      const src = state.sources.find((s) => s.id === action.payload.id)
+      if (src) Object.assign(src, action.payload.patch)
+    },
+    /** Merge `patch` into one prep stage on a specific source. */
+    patchSourceStage(state, action: PayloadAction<{ id: string; stage: StageId; patch: Partial<StageProgress> }>) {
+      const src = state.sources.find((s) => s.id === action.payload.id)
+      if (!src) return
+      const prev = src.stageProgress[action.payload.stage] ?? { status: 'pending' }
+      src.stageProgress[action.payload.stage] = { ...prev, ...action.payload.patch }
+    },
+    /** Remove a source by id and renumber `order` on the remaining entries. */
+    removeSource(state, action: PayloadAction<string>) {
+      state.sources = state.sources.filter((s) => s.id !== action.payload).map((s, i) => ({ ...s, order: i }))
+    },
+    /** Move a source from index `from` to index `to` and renumber `order`. */
+    reorderSources(state, action: PayloadAction<{ from: number; to: number }>) {
+      const { from, to } = action.payload
+      if (from < 0 || to < 0 || from >= state.sources.length || to >= state.sources.length) return
+      const [moved] = state.sources.splice(from, 1)
+      state.sources.splice(to, 0, moved)
+      state.sources = state.sources.map((s, i) => ({ ...s, order: i }))
+    },
     /**
      * Wipe everything back to a clean import — used by "Start over". Keeps the
      * `savedVoices` library: those cloned ids cost real money and are reusable
@@ -263,6 +339,11 @@ export const {
   setDuration,
   setFileName,
   setFinalCutUrl,
+  addSource,
+  patchSource,
+  patchSourceStage,
+  removeSource,
+  reorderSources,
   resetStudio,
 } = studioSlice.actions
 

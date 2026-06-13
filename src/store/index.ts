@@ -51,7 +51,7 @@ const storage: WebStorage =
  * from pre-v2 localStorage so nothing stale lingers (a sessions's progress is
  * preserved if it already had `stageProgress`, else reset to fresh).
  */
-const migrations = {
+export const migrations = {
   2: (state: Record<string, unknown> | undefined) => {
     if (!state) return state
     const next = { ...state }
@@ -59,11 +59,46 @@ const migrations = {
     if (!next.stageProgress) next.stageProgress = freshProgress()
     return next
   },
+
+  // v3: single-video fields → sources[] (story 09a). A pre-09a session has flat
+  // sourceUrl/audioUrl/words/duration/fileName; wrap them into one VideoSource and
+  // stamp the existing scenes with that source's id. Idempotent: a session that
+  // already has `sources` is returned unchanged.
+  3: (state: Record<string, unknown> | undefined) => {
+    if (!state) return state
+    if (Array.isArray(state.sources)) return state
+    const next = { ...state } as Record<string, unknown>
+    const hasSource = typeof state.sourceUrl === 'string' || typeof state.fileName === 'string'
+    if (!hasSource) {
+      next.sources = []
+      return next
+    }
+    const sp = state.stageProgress as Record<string, unknown> | undefined
+    const id = 'source-1'
+    next.sources = [{
+      id, order: 0,
+      fileName: (state.fileName as string) ?? 'source.mp4',
+      duration: (state.duration as number) ?? 0,
+      sourceUrl: (state.sourceUrl as string) ?? null,
+      audioUrl: (state.audioUrl as string) ?? null,
+      audioPeaks: (state.audioPeaks as number[]) ?? [],
+      words: (state.words as unknown[]) ?? [],
+      stageProgress: {
+        upload: (sp?.upload as object) ?? { status: 'pending' },
+        extract: (sp?.extract as object) ?? { status: 'pending' },
+        transcribe: (sp?.transcribe as object) ?? { status: 'pending' },
+      },
+    }]
+    if (Array.isArray(state.scenes)) {
+      next.scenes = (state.scenes as Record<string, unknown>[]).map((s) => ({ ...s, sourceId: s.sourceId ?? id }))
+    }
+    return next
+  },
 }
 
 const persistConfig = {
   key: 'studio',
-  version: 2,
+  version: 3,
   storage,
   migrate: createMigrate(migrations as never),
 }

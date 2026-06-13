@@ -11,6 +11,7 @@ import reducer, {
   setDirection,
   setDirectorPromptJobId,
   resetStudio,
+  addSource, patchSource, removeSource, reorderSources, patchSourceStage,
   type StudioState,
 } from './studioSlice'
 import type { Scene } from '../lib/scenes'
@@ -18,6 +19,7 @@ import type { Scene } from '../lib/scenes'
 const scene = (id: string, over: Partial<Scene> = {}): Scene => ({
   id,
   index: 0,
+  sourceId: 'source-1',
   title: id,
   start: 0,
   end: 10,
@@ -84,5 +86,44 @@ describe('studioSlice', () => {
     expect(s.scenes).toEqual([])
     expect(s.selectedId).toBeNull()
     expect(s.stageProgress).toEqual(freshProgress())
+  })
+})
+
+const initialSourcesState = reducer(undefined, { type: '@@INIT' })
+
+describe('sources reducers', () => {
+  it('addSource appends a fresh source with pending per-video progress', () => {
+    const s = reducer(initialSourcesState, addSource({ id: 'v1', fileName: 'a.mp4', duration: 100 }))
+    expect(s.sources).toHaveLength(1)
+    expect(s.sources[0]).toMatchObject({ id: 'v1', fileName: 'a.mp4', duration: 100, order: 0 })
+    expect(s.sources[0].stageProgress.upload?.status).toBe('pending')
+  })
+
+  it('patchSource updates one source by id', () => {
+    let s = reducer(initialSourcesState, addSource({ id: 'v1', fileName: 'a.mp4', duration: 100 }))
+    s = reducer(s, patchSource({ id: 'v1', patch: { sourceUrl: '/api/uploads/source/x' } }))
+    expect(s.sources[0].sourceUrl).toBe('/api/uploads/source/x')
+  })
+
+  it('patchSourceStage updates one source-stage status', () => {
+    let s = reducer(initialSourcesState, addSource({ id: 'v1', fileName: 'a.mp4', duration: 100 }))
+    s = reducer(s, patchSourceStage({ id: 'v1', stage: 'upload', patch: { status: 'done' } }))
+    expect(s.sources[0].stageProgress.upload?.status).toBe('done')
+  })
+
+  it('reorderSources moves and renumbers order', () => {
+    let s = reducer(initialSourcesState, addSource({ id: 'v1', fileName: 'a', duration: 1 }))
+    s = reducer(s, addSource({ id: 'v2', fileName: 'b', duration: 1 }))
+    s = reducer(s, reorderSources({ from: 1, to: 0 }))
+    expect(s.sources.map((x) => x.id)).toEqual(['v2', 'v1'])
+    expect(s.sources.map((x) => x.order)).toEqual([0, 1])
+  })
+
+  it('removeSource drops it and renumbers', () => {
+    let s = reducer(initialSourcesState, addSource({ id: 'v1', fileName: 'a', duration: 1 }))
+    s = reducer(s, addSource({ id: 'v2', fileName: 'b', duration: 1 }))
+    s = reducer(s, removeSource('v1'))
+    expect(s.sources.map((x) => x.id)).toEqual(['v2'])
+    expect(s.sources[0].order).toBe(0)
   })
 })

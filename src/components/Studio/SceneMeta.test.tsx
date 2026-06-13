@@ -6,6 +6,7 @@ import type { Scene } from '../../lib/scenes'
 const base: Scene = {
   id: 'scene-1',
   index: 0,
+  sourceId: 'source-1',
   title: 'Intro',
   start: 0,
   end: 100,

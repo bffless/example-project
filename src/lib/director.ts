@@ -22,6 +22,7 @@
  */
 
 import { clockLabel } from './contactSheet'
+import { sourceOffsets, type SourceLike } from './sources'
 import type { Scene, Cut } from './scenes'
 import type { TWord } from './transcriptGrid'
 
@@ -112,49 +113,102 @@ function clampCut(cut: Cut, lo: number, hi: number): Cut | null {
 }
 
 /**
- * Coerce the director's raw scenes into the app's `Scene[]`: assign ids/index,
- * default the editable + status fields, and **defensively clamp** timestamps —
- * snap each span into `[0, duration]`, force the scenes ascending and
- * non-overlapping (so the chapter list is monotonic), and keep every cut inside
- * its own scene. The server validates too; this guarantees the UI never sees a
- * scene running past the clip or a cut outside its span even if the model slips.
+ * Coerce the director's raw scenes into the app's `Scene[]`, mapping from the
+ * **global** (concatenated) timeline the director reasons over back to
+ * **per-source local** coordinates. Each returned scene carries a `sourceId`
+ * and local `start`/`end` within that source.
+ *
+ * A chapter belongs to exactly ONE video, so each scene is assigned to the single
+ * source it **overlaps most**, then clamped to that source's local `[start, end)`
+ * window (its cuts re-expressed in local coordinates). We deliberately do NOT
+ * split a scene into one fragment per source it touches: the director's spans are
+ * rounded (e.g. `0–23`), so they routinely overflow the real fractional source
+ * durations by a fraction of a second, and splitting turned every such overflow
+ * into a duplicate-titled sliver scene. Dominant-source assignment is robust to
+ * that — one director scene maps to exactly one stored scene.
+ *
+ * The global timeline is clamped and forced monotonic first (defensive). A scene
+ * with no real overlap (≤ 0.05 s) against any source is dropped. Single-source
+ * projects behave identically to the old signature: local time equals global time
+ * and every scene gets `sourceId = sources[0].id`.
  */
-export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
-  if (!Array.isArray(raw)) return []
-  const bound = Number.isFinite(duration) && duration > 0 ? duration : Infinity
+export function toScenes(raw: DirectorScene[], sources: SourceLike[]): Scene[] {
+  if (!Array.isArray(raw) || sources.length === 0) return []
+  const spans = sourceOffsets(sources)
+  const bound = spans[spans.length - 1].end
   const sorted = [...raw].sort((a, b) => num(a?.start) - num(b?.start))
 
-  const scenes: Scene[] = []
+  // 1) clamp + monotonic on the GLOBAL timeline (the existing logic)
+  const global: { start: number; end: number; raw: DirectorScene }[] = []
   let cursor = 0
-  sorted.forEach((s, i) => {
+  for (const s of sorted) {
     const start = Math.min(Math.max(num(s?.start), cursor), bound)
     let end = Math.min(Math.max(num(s?.end), start), bound)
-    if (end <= start) end = Math.min(start + 0.05, bound) // never zero-length
+    if (end <= start) end = Math.min(start + 0.05, bound)
     cursor = end
+    global.push({ start, end, raw: s })
+  }
 
-    const transcript = str(s?.transcript).trim()
-    const refinePrompt = str(s?.refinePrompt).trim()
-    const title = str(s?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
-
-    const cuts = (Array.isArray(s?.cuts) ? s.cuts : [])
-      .map((c) => clampCut(c, start, end))
+  // 2) assign each global scene to the source it overlaps most; convert to local
+  const out: Scene[] = []
+  for (const g of global) {
+    let best: { id: string; start: number; end: number } | null = null
+    let bestOverlap = 0
+    for (const span of spans) {
+      const overlap = Math.min(g.end, span.end) - Math.max(g.start, span.start)
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap
+        best = span
+      }
+    }
+    if (!best || bestOverlap <= 0.05) continue
+    const span = best
+    const localStart = Math.max(g.start, span.start) - span.start
+    const localEnd = Math.min(g.end, span.end) - span.start
+    const i = out.length
+    const transcript = str(g.raw?.transcript).trim()
+    const refinePrompt = str(g.raw?.refinePrompt).trim()
+    const title = str(g.raw?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
+    const cuts = (Array.isArray(g.raw?.cuts) ? g.raw.cuts : [])
+      .map((c) => clampCut({ start: num(c?.start) - span.start, end: num(c?.end) - span.start }, localStart, localEnd))
       .filter((c): c is Cut => c !== null)
-
-    const voicing = toVoicing(s?.voicing)
-
-    scenes.push({
-      id: `scene-${i + 1}`,
-      index: i,
-      title,
-      start,
-      end,
-      transcript,
-      status: 'pending',
-      narrationSeconds: null,
-      cuts,
+    const voicing = toVoicing(g.raw?.voicing)
+    out.push({
+      id: `scene-${i + 1}`, index: i, sourceId: span.id, title,
+      start: localStart, end: localEnd, transcript, status: 'pending', narrationSeconds: null, cuts,
       ...(voicing ? { voicing } : {}),
       ...(refinePrompt ? { refinePrompt } : {}),
     })
-  })
-  return scenes
+  }
+  return out.map((s, i) => ({ ...s, index: i, id: `scene-${i + 1}` }))
+}
+
+/** One source's transcript for the combined director request (story 09c). */
+export type TranscriptSource = { id: string; fileName: string; duration: number; words: TWord[] }
+
+/**
+ * Build ONE timestamped transcript across all source videos for the master
+ * director (story 09c): each source's words are offset onto the global timeline
+ * (video A at [0,durA), B at [durA, ...], ...) via `sourceOffsets`, run through the
+ * existing `timedTranscript`, and joined with a labeled boundary marker naming
+ * the next video and its global start -- so the director sees one continuous talk
+ * but knows where each video begins (and must not start a chapter in one video
+ * and end it in another; if one does, `toScenes` assigns it to the source it
+ * overlaps most rather than splitting it).
+ */
+export function combinedTimedTranscript(sources: TranscriptSource[]): string {
+  const spans = sourceOffsets(sources)
+  return sources
+    .map((s, i) => {
+      const offset = spans[i].start
+      const shifted: TWord[] = s.words.map((w) => ({
+        ...w,
+        start: typeof w.start === 'number' ? w.start + offset : w.start,
+        end: typeof w.end === 'number' ? w.end + offset : w.end,
+      }))
+      const body = timedTranscript(shifted)
+      const header = `--- VIDEO ${i + 1}: ${s.fileName} (starts ${clockLabel(offset)}) ---`
+      return i === 0 ? `${header}\n${body}` : `\n${header}\n${body}`
+    })
+    .join('\n')
 }
