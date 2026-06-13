@@ -118,16 +118,19 @@ function clampCut(cut: Cut, lo: number, hi: number): Cut | null {
  * **per-source local** coordinates. Each returned scene carries a `sourceId`
  * and local `start`/`end` within that source.
  *
- * Any scene whose global span crosses a source boundary is **auto-split** into
- * one scene per source it overlaps — so callers never see a scene that spans
- * two videos. Within each split/segment the cuts are re-expressed in local
- * coordinates and clamped to the (local) scene span.
+ * A chapter belongs to exactly ONE video, so each scene is assigned to the single
+ * source it **overlaps most**, then clamped to that source's local `[start, end)`
+ * window (its cuts re-expressed in local coordinates). We deliberately do NOT
+ * split a scene into one fragment per source it touches: the director's spans are
+ * rounded (e.g. `0–23`), so they routinely overflow the real fractional source
+ * durations by a fraction of a second, and splitting turned every such overflow
+ * into a duplicate-titled sliver scene. Dominant-source assignment is robust to
+ * that — one director scene maps to exactly one stored scene.
  *
- * The global timeline is clamped and forced monotonic first (same defensive
- * logic as before), then each global span is intersected with every source's
- * `[start, end)` window; intersections shorter than 0.05 s are dropped.
- * Single-source projects behave identically to the old signature: local time
- * equals global time and every scene gets `sourceId = sources[0].id`.
+ * The global timeline is clamped and forced monotonic first (defensive). A scene
+ * with no real overlap (≤ 0.05 s) against any source is dropped. Single-source
+ * projects behave identically to the old signature: local time equals global time
+ * and every scene gets `sourceId = sources[0].id`.
  */
 export function toScenes(raw: DirectorScene[], sources: SourceLike[]): Scene[] {
   if (!Array.isArray(raw) || sources.length === 0) return []
@@ -146,30 +149,36 @@ export function toScenes(raw: DirectorScene[], sources: SourceLike[]): Scene[] {
     global.push({ start, end, raw: s })
   }
 
-  // 2) split each global scene at every boundary it crosses, convert to local
+  // 2) assign each global scene to the source it overlaps most; convert to local
   const out: Scene[] = []
   for (const g of global) {
+    let best: { id: string; start: number; end: number } | null = null
+    let bestOverlap = 0
     for (const span of spans) {
-      const segStart = Math.max(g.start, span.start)
-      const segEnd = Math.min(g.end, span.end)
-      if (segEnd - segStart <= 0.05) continue
-      const localStart = segStart - span.start
-      const localEnd = segEnd - span.start
-      const i = out.length
-      const transcript = str(g.raw?.transcript).trim()
-      const refinePrompt = str(g.raw?.refinePrompt).trim()
-      const title = str(g.raw?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
-      const cuts = (Array.isArray(g.raw?.cuts) ? g.raw.cuts : [])
-        .map((c) => clampCut({ start: num(c?.start) - span.start, end: num(c?.end) - span.start }, localStart, localEnd))
-        .filter((c): c is Cut => c !== null)
-      const voicing = toVoicing(g.raw?.voicing)
-      out.push({
-        id: `scene-${i + 1}`, index: i, sourceId: span.id, title,
-        start: localStart, end: localEnd, transcript, status: 'pending', narrationSeconds: null, cuts,
-        ...(voicing ? { voicing } : {}),
-        ...(refinePrompt ? { refinePrompt } : {}),
-      })
+      const overlap = Math.min(g.end, span.end) - Math.max(g.start, span.start)
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap
+        best = span
+      }
     }
+    if (!best || bestOverlap <= 0.05) continue
+    const span = best
+    const localStart = Math.max(g.start, span.start) - span.start
+    const localEnd = Math.min(g.end, span.end) - span.start
+    const i = out.length
+    const transcript = str(g.raw?.transcript).trim()
+    const refinePrompt = str(g.raw?.refinePrompt).trim()
+    const title = str(g.raw?.title).trim() || (leadWords(transcript) ? `${leadWords(transcript)}…` : `Scene ${i + 1}`)
+    const cuts = (Array.isArray(g.raw?.cuts) ? g.raw.cuts : [])
+      .map((c) => clampCut({ start: num(c?.start) - span.start, end: num(c?.end) - span.start }, localStart, localEnd))
+      .filter((c): c is Cut => c !== null)
+    const voicing = toVoicing(g.raw?.voicing)
+    out.push({
+      id: `scene-${i + 1}`, index: i, sourceId: span.id, title,
+      start: localStart, end: localEnd, transcript, status: 'pending', narrationSeconds: null, cuts,
+      ...(voicing ? { voicing } : {}),
+      ...(refinePrompt ? { refinePrompt } : {}),
+    })
   }
   return out.map((s, i) => ({ ...s, index: i, id: `scene-${i + 1}` }))
 }

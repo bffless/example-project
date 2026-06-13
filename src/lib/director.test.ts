@@ -104,11 +104,42 @@ describe('toScenes — multi-source (09c)', () => {
     expect(s).toMatchObject({ sourceId: 'b', start: 20, end: 60 })
   })
 
-  it('auto-splits a scene that crosses a boundary into one scene per source', () => {
+  it('assigns a boundary-crossing scene to the source it overlaps most (no split/duplication)', () => {
+    // [80,140] overlaps a by 20 (80–100) and b by 40 (100–140) → dominant = b.
     const out = toScenes([{ start: 80, end: 140, title: 'Crosser' }], SOURCES)
-    expect(out).toHaveLength(2)
-    expect(out[0]).toMatchObject({ sourceId: 'a', start: 80, end: 100 })
-    expect(out[1]).toMatchObject({ sourceId: 'b', start: 0, end: 40 })
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ sourceId: 'b', start: 0, end: 40, title: 'Crosser' })
+  })
+
+  it('does NOT create a sliver duplicate when a rounded span overflows a source by a fraction (the multi-video dup bug)', () => {
+    // Director returns a rounded 0–23 span; the real source is 22.8 s, so the old
+    // split made a 0.2 s "Video One" sliver on the next source. Dominant-source
+    // assignment keeps it as ONE scene on source a.
+    const out = toScenes([{ start: 0, end: 23, title: 'Video One' }], [
+      { id: 'a', duration: 22.8 },
+      { id: 'b', duration: 13 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ sourceId: 'a', title: 'Video One' })
+  })
+
+  it('one director scene per video yields exactly one stored scene each (no fragments)', () => {
+    const out = toScenes(
+      [
+        { start: 0, end: 23, title: 'One' },
+        { start: 23, end: 36, title: 'Two' },
+        { start: 36, end: 54, title: 'Three' },
+        { start: 54, end: 66, title: 'Four' },
+      ],
+      [
+        { id: 'a', duration: 23 },
+        { id: 'b', duration: 13 },
+        { id: 'c', duration: 18 },
+        { id: 'd', duration: 12 },
+      ],
+    )
+    expect(out.map((s) => s.title)).toEqual(['One', 'Two', 'Three', 'Four'])
+    expect(out.map((s) => s.sourceId)).toEqual(['a', 'b', 'c', 'd'])
   })
 
   it('clamps cuts into the (local) scene span', () => {
