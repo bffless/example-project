@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   timedTranscript,
   toScenes,
+  combinedTimedTranscript,
   type DirectorScene,
 } from './director'
 
@@ -93,4 +94,14 @@ describe('toScenes', () => {
     )
     expect(scenes.map((s) => s.voicing)).toEqual(['original', 'mixed', undefined, undefined])
   })
+})
+
+it('combinedTimedTranscript offsets each source to global time with boundary markers', () => {
+  const out = combinedTimedTranscript([
+    { id: 'a', fileName: 'one.mp4', duration: 16, words: [{ text: 'hello', start: 0, end: 1 }] },
+    { id: 'b', fileName: 'two.mp4', duration: 16, words: [{ text: 'world', start: 0, end: 1 }] },
+  ])
+  expect(out).toMatch(/\[0:00\] hello/)
+  expect(out).toMatch(/--- VIDEO 2: two\.mp4 \(starts 0:16\) ---/)
+  expect(out).toMatch(/\[0:16\] world/)
 })

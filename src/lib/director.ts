@@ -22,6 +22,7 @@
  */
 
 import { clockLabel } from './contactSheet'
+import { sourceOffsets } from './sources'
 import type { Scene, Cut } from './scenes'
 import type { TWord } from './transcriptGrid'
 
@@ -158,4 +159,33 @@ export function toScenes(raw: DirectorScene[], duration: number): Scene[] {
     })
   })
   return scenes
+}
+
+/** One source's transcript for the combined director request (story 09c). */
+export type TranscriptSource = { id: string; fileName: string; duration: number; words: TWord[] }
+
+/**
+ * Build ONE timestamped transcript across all source videos for the master
+ * director (story 09c): each source's words are offset onto the global timeline
+ * (video A at [0,durA), B at [durA, ...], ...) via `sourceOffsets`, run through the
+ * existing `timedTranscript`, and joined with a labeled boundary marker naming
+ * the next video and its global start -- so the director sees one continuous talk
+ * but knows where each video begins (and must not start a chapter in one video
+ * and end it in another; the response coercion splits any that do).
+ */
+export function combinedTimedTranscript(sources: TranscriptSource[]): string {
+  const spans = sourceOffsets(sources)
+  return sources
+    .map((s, i) => {
+      const offset = spans[i].start
+      const shifted: TWord[] = s.words.map((w) => ({
+        ...w,
+        start: typeof w.start === 'number' ? w.start + offset : w.start,
+        end: typeof w.end === 'number' ? w.end + offset : w.end,
+      }))
+      const body = timedTranscript(shifted)
+      const header = `--- VIDEO ${i + 1}: ${s.fileName} (starts ${clockLabel(offset)}) ---`
+      return i === 0 ? `${header}\n${body}` : `\n${header}\n${body}`
+    })
+    .join('\n')
 }
