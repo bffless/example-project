@@ -17,4 +17,11 @@ describe('planGlobalSheetCaptures', () => {
     const caps = planGlobalSheetCaptures(sources)
     expect(caps.length).toBeLessThanOrEqual(120) // MAX_FRAMES; composed into ≤10 sheets
   })
+
+  it('fills the budget densely for short totals (1s floor, not the 5s clip-wide floor)', () => {
+    // A short multi-video project should sample at ~1s, using lots of the budget —
+    // NOT the sparse 5s clip-wide default that left only ~2 of 10 sheets used.
+    const caps = planGlobalSheetCaptures([{ id: 'a', duration: 30 }, { id: 'b', duration: 36 }]) // 66s
+    expect(caps.length).toBe(66) // 1s apart across the 66s total, well under the 120 cap
+  })
 })
