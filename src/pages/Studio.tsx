@@ -129,15 +129,22 @@ export function Studio() {
   // Multi-video import (story 09b): each picked file becomes a source in the queue
   // + is held in memory under its id for processing. Math.random for a unique id is
   // fine here (a component event handler, not a workflow).
+  //
+  // The `addSource` dispatches and id generation MUST happen in the handler body,
+  // NOT inside the `setFiles` updater: React StrictMode double-invokes state
+  // updaters in dev to surface impurity, so a dispatch in there fires twice and
+  // duplicates every source (4 picked → 8 in the queue). Event handlers run once.
   function onImport(picked: File[]) {
     setRestoreError(null)
+    const added: { id: string; file: File }[] = []
+    for (const f of picked) {
+      const id = `source-${Date.now()}-${Math.round(Math.random() * 1e6)}`
+      dispatch(addSource({ id, fileName: f.name, duration: 0 }))
+      added.push({ id, file: f })
+    }
     setFiles((prev) => {
       const next = new Map(prev)
-      for (const f of picked) {
-        const id = `source-${Date.now()}-${Math.round(Math.random() * 1e6)}`
-        dispatch(addSource({ id, fileName: f.name, duration: 0 }))
-        next.set(id, f)
-      }
+      for (const { id, file } of added) next.set(id, file)
       return next
     })
   }
