@@ -58,6 +58,8 @@ import {
   removeSavedVoice,
   setSelected,
   setFinalCutUrl,
+  setDuration,
+  setFileName,
   addSource,
   patchSource,
   patchSourceStage,
@@ -730,6 +732,11 @@ export function useScenePipeline() {
       setProcessingId(id)
       const objectUrl = URL.createObjectURL(file)
       let stage: StageId = 'upload'
+      // Determine whether this is the primary (first-by-order) source so we can
+      // mirror its results into the legacy top-level slice fields that the existing
+      // board/director/preview all still read (09b bridge; retired in 09d).
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const isPrimary = ordered.length === 0 || ordered[0].id === id
       try {
         const duration = await measureVideoDuration(objectUrl)
         dispatch(patchSource({ id, patch: { fileName: file.name, duration } }))
@@ -739,6 +746,12 @@ export function useScenePipeline() {
         const { url: srcUrl } = await uploadReq({ file, kind: 'source' }).unwrap()
         dispatch(patchSource({ id, patch: { sourceUrl: srcUrl } }))
         dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${mb(file.size)} → bucket` } }))
+        if (isPrimary) {
+          dispatch(setSourceUrl(srcUrl))
+          dispatch(setDuration(duration))
+          dispatch(setFileName(file.name))
+          patch('upload', { status: 'done', detail: `${mb(file.size)} → bucket` })
+        }
 
         stage = 'extract'
         dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
@@ -747,6 +760,11 @@ export function useScenePipeline() {
         const { url: aUrl } = await uploadReq({ file: wavFile, kind: 'audio' }).unwrap()
         dispatch(patchSource({ id, patch: { audioUrl: aUrl, audioPeaks: peaks } }))
         dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `16 kHz mono WAV · ${mb(wav.size)}` } }))
+        if (isPrimary) {
+          dispatch(setAudioUrl(aUrl))
+          dispatch(setAudioPeaks(peaks))
+          patch('extract', { status: 'done', detail: `16 kHz mono WAV · ${mb(wav.size)}` })
+        }
 
         stage = 'transcribe'
         dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
@@ -755,6 +773,10 @@ export function useScenePipeline() {
         dispatch(patchSource({ id, patch: { words: got } }))
         const count = got.length || Math.round((duration / 60) * 150)
         dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${count.toLocaleString()} words` } }))
+        if (isPrimary) {
+          dispatch(setWords(got))
+          patch('transcribe', { status: 'done', detail: `${count.toLocaleString()} words` })
+        }
       } catch (e) {
         dispatch(patchSourceStage({ id, stage, patch: { status: 'error', detail: stageError(e) } }))
       } finally {
@@ -763,7 +785,7 @@ export function useScenePipeline() {
         setProcessingId(null)
       }
     },
-    [processingId, dispatch, uploadReq, transcribeReq],
+    [processingId, sources, dispatch, uploadReq, transcribeReq, patch],
   )
 
   // Walk the source queue in order and process each that isn't already fully
