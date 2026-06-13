@@ -148,6 +148,13 @@ const studioHandlers = [
       // fixture ignores the content.
       direction?: string
       directorDirection?: string
+      // Seam-aware context (story 03r): where this scene sits in the arc + the
+      // tail of the previous scene's narration. Accepted so mock and real share
+      // the request shape; the deterministic fixture ignores the content but
+      // surfaces it in the prompt label below (prompt transparency, story 03m).
+      sceneNumber?: number
+      sceneCount?: number
+      previousContext?: string
     }
     // Mirrors the real rule's schema (story 03k): the scene's cut audio is
     // required — refine without ears is the old cough-blind behavior.
@@ -157,7 +164,7 @@ const studioHandlers = [
     const jobId = enqueueJob(
       'refine',
       mockRefiner(body),
-      `[mock] refine prompt — scene [${body.start ?? 0}, ${body.end ?? 0}] · scene direction: ${body.direction || '(none)'} · director context: ${body.directorDirection || '(none)'}`,
+      `[mock] refine prompt — scene ${body.sceneNumber ?? 1} of ${body.sceneCount ?? 1} [${body.start ?? 0}, ${body.end ?? 0}] · scene direction: ${body.direction || '(none)'} · director context: ${body.directorDirection || '(none)'} · previous scene ended with: ${body.previousContext || '(none — first scene)'}`,
       '[mock] refiner system instruction — the standing rules the real pipeline sends Gemini.',
     )
     return HttpResponse.json({ jobId, status: 'pending' })

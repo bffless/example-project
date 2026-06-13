@@ -3,6 +3,7 @@ import {
   toRefinement,
   effectiveSegments,
   effectiveCuts,
+  sceneTail,
   segmentsToTimedWords,
   normalizeCuts,
   addCut,
@@ -167,6 +168,49 @@ describe('effectiveSegments / effectiveCuts', () => {
     const s = scene({ refined: null })
     expect(effectiveSegments(s)).toEqual([{ text: 'the director first pass script', start: 0, end: 100 }])
     expect(effectiveCuts(s)).toEqual([{ start: 40, end: 50 }])
+  })
+})
+
+describe('sceneTail (story 03r)', () => {
+  it('returns the last words of the refined narration when refined', () => {
+    const refined = {
+      segments: [
+        { text: 'first run here', start: 0, end: 5 },
+        { text: 'and the second run ends the scene', start: 6, end: 12 },
+      ],
+      cuts: [],
+      source: 'ai' as const,
+    }
+    const s = scene({ refined })
+    expect(sceneTail(s, 4)).toBe('run ends the scene')
+  })
+
+  it('falls back to the transcript tail when not refined', () => {
+    const s = scene({ transcript: 'one two three four five six' })
+    expect(sceneTail(s, 3)).toBe('four five six')
+  })
+
+  it('returns the whole text when it is shorter than maxWords', () => {
+    const s = scene({ transcript: 'just three words' })
+    expect(sceneTail(s, 30)).toBe('just three words')
+  })
+
+  it('joins multiple refined segments before taking the tail', () => {
+    const refined = {
+      segments: [
+        { text: 'alpha beta', start: 0, end: 3 },
+        { text: 'gamma delta epsilon', start: 4, end: 8 },
+      ],
+      cuts: [],
+      source: 'ai' as const,
+    }
+    const s = scene({ refined })
+    expect(sceneTail(s, 4)).toBe('beta gamma delta epsilon')
+  })
+
+  it('returns empty string for an empty scene', () => {
+    const s = scene({ transcript: '   ', refined: null })
+    expect(sceneTail(s)).toBe('')
   })
 })
 

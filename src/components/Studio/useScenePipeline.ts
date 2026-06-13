@@ -6,6 +6,7 @@ import {
   toRefinement,
   refineDirections,
   sceneWordTimings,
+  sceneTail,
   effectiveSegments,
   addCut,
   removeCut,
@@ -783,6 +784,12 @@ export function useScenePipeline() {
         if (!scene.clipAudioUrl) throw new Error('Cut this scene first — the refiner needs its audio.')
         const scoped = words.filter((w) => w.start >= scene.start && w.start < scene.end)
         const sheetUrls = (scene.sheets ?? []).map((s) => s.url).filter((u): u is string => !!u)
+        // Seam-aware context (story 03r): hand the refiner the tail of the
+        // PREVIOUS scene's effective narration so this scene opens in flow with
+        // it, instead of being written blind. Snapshot at refine time — re-refine
+        // a neighbor and this goes stale until you re-refine here.
+        const sceneIndex = scenes.findIndex((s) => s.id === id)
+        const prevScene = sceneIndex > 0 ? scenes[sceneIndex - 1] : null
         // Enqueue-only (story 03f Part 0): returns a job id; the Gemini refine runs
         // in the pipeline's postSteps. Persist the id on the scene so a reload
         // resumes polling, then drive it to completion (writes `scene.refined`).
@@ -795,6 +802,10 @@ export function useScenePipeline() {
           // Creator steering (story 03l): the scene's own prompt + the global
           // director prompt (subject to the scene's include-checkbox).
           ...refineDirections(scene, direction),
+          // Where this scene sits in the arc + the prior scene's lead-in (03r).
+          sceneNumber: sceneIndex + 1,
+          sceneCount: scenes.length,
+          previousContext: prevScene ? sceneTail(prevScene) : '',
         }).unwrap()
         patchScene(id, { refineJobId: jobId })
         await completeRefineJob(id, jobId)

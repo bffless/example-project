@@ -58,6 +58,17 @@ export type RefineSceneRequest = {
    *  while the scene's include-checkbox is on (story 03l); `''` when the
    *  checkbox is off or the prompt is empty. */
   directorDirection: string
+  /** This scene's 1-based position and the total scene count, so the refiner can
+   *  place the scene in the arc ("scene 3 of 7") — story 03r. */
+  sceneNumber: number
+  sceneCount: number
+  /** The tail of the PREVIOUS scene's effective narration (`sceneTail`) — the
+   *  lead-in the refiner opens this scene from, so stitched seams flow instead of
+   *  being written independently (story 03r). `''` for the first scene. Distinct
+   *  from `direction`/`directorDirection`: that's the creator's intent, this is
+   *  machine context — the pipeline labels it so, and it's not surfaced as the
+   *  creator's prompt in the disclosure (story 03m). */
+  previousContext: string
 }
 
 /**
@@ -326,6 +337,27 @@ export function effectiveSegments(scene: Scene): NarrationSegment[] {
 /** The cuts to apply for a scene: the refiner's if refined, else the director's. */
 export function effectiveCuts(scene: Scene): Cut[] {
   return scene.refined ? scene.refined.cuts : (scene.cuts ?? [])
+}
+
+/**
+ * The tail of a scene's effective narration — the last `maxWords` words of what
+ * the viewer actually hears (the refiner's segments if present, else the
+ * original-transcript fallback via `effectiveSegments`). Fed to the refiner as
+ * the PREVIOUS scene's lead-in context (story 03r) so scene N's narration picks
+ * up the thread and matches cadence at the seam, instead of being written blind
+ * to its neighbor. Just the tail, not the whole prior narration — the flow
+ * problem lives at the seam, and the fallback would otherwise be the entire raw
+ * transcript blob. Returns `''` for an empty scene (and for the first scene the
+ * caller passes nothing at all).
+ */
+export function sceneTail(scene: Scene, maxWords = 30): string {
+  const words = effectiveSegments(scene)
+    .map((s) => str(s.text).trim())
+    .filter(Boolean)
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  return words.slice(Math.max(0, words.length - maxWords)).join(' ')
 }
 
 /**

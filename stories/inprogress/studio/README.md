@@ -96,6 +96,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
              ✅ 03n snap-to-verbatim (original tags drive; boundaries snapped to the real word run instead of demoting)
              ✅ 03o trust-the-tag (model's original/revoice tag + its timestamps are authoritative; verbatim gate + snap removed)
              ✅ 03p word timings + refine-from-scratch (send per-word times, drop the first pass; rule afacb572 prompt rewritten)
+             ✅ 03r seam-aware context (refiner gets the previous scene's lead-in + position in the talk; rule afacb572 prep)
              ·  06 · 07                                (queued)
 ```
 
@@ -126,6 +127,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03o | `03o-trust-the-tag.md` | `toRefinement` trusts the model's `source` tag + its own `start`/`end`; the 03j verbatim gate, the 03n snap, and the contraction map are all removed — text is a label, not a gate (fixes the "asked for original, got revoice" bug at the root) | ✅ done |
 | 03p | `03p-word-timings-from-scratch.md` | refine request sends per-word `wordTimings` (drops `transcript`/`draftText`/first-pass `cuts`); rule `afacb572` prompt rewritten to build the cut FROM SCRATCH off exact word times — so the trusted timestamps are accurate | ✅ done |
 | 03q | `03q-director-scene-prompts.md` | master director stops drafting `draftText`, instead authors a **default per-scene refine prompt** that prepopulates 03l's `scene.refinePrompt`; `draftText` removed (refiner already ignored it since 03p) + orphaned code cleaned; rule `138f27fb` `prep`+`parse` rewritten (live-verified) | ✅ done |
+| 03r | `03r-seam-aware-refiner-context.md` | refiner gets the **previous scene's narration tail** + position-in-talk (`sceneTail`, 3 new `RefineSceneRequest` fields) so stitched seams flow instead of being written independently; dedicated fields (not folded into `direction`); rule `afacb572` `prep` adds a `CONTINUITY` rule + two prompt blocks (backward-compatible) | ✅ done* |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 
