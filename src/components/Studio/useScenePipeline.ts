@@ -58,6 +58,8 @@ import {
   removeSavedVoice,
   setSelected,
   setFinalCutUrl,
+  addSource,
+  patchSource,
   resetStudio,
   type TranscriptWord,
 } from '../../store/studioSlice'
@@ -177,6 +179,11 @@ export function useScenePipeline() {
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
   const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
+  const sources = useAppSelector((s) => s.studio.sources)
+  // 09a bridge: until a later story makes every read per-source, the "current"
+  // source is the first (single-video projects have exactly one). The prep steps
+  // dual-write here so sources[0] tracks the legacy fields.
+  const currentSource = sources[0] ?? null
 
   const [transcribeReq] = useTranscribeMutation()
   const [scenesReq] = useScenesMutation()
@@ -462,13 +469,16 @@ export function useScenePipeline() {
   // Stage ① — upload the source clip directly to the storage bucket via the
   // presigned flow (the video is far over the 1 MB proxy body cap).
   const uploadClip = useCallback(
-    async ({ file }: StepContext) => {
+    async ({ file, duration }: StepContext) => {
       patch('upload', { status: 'active' })
+      const sourceId = currentSource?.id ?? 'source-1'
+      if (!currentSource) dispatch(addSource({ id: sourceId, fileName: file.name, duration }))
       const { url } = await uploadReq({ file, kind: 'source' }).unwrap()
-      dispatch(setSourceUrl(url))
+      dispatch(setSourceUrl(url))                                   // legacy (unchanged)
+      dispatch(patchSource({ id: sourceId, patch: { sourceUrl: url, fileName: file.name, duration } }))
       patch('upload', { status: 'done', detail: `${mb(file.size)} → storage bucket` })
     },
-    [patch, dispatch, uploadReq],
+    [patch, dispatch, uploadReq, currentSource],
   )
 
   // Stage ② — extract the audio in-browser, then upload that WAV to the bucket
@@ -484,14 +494,15 @@ export function useScenePipeline() {
         type: 'audio/wav',
       })
       const { url } = await uploadReq({ file: wavFile, kind: 'audio' }).unwrap()
-      dispatch(setAudioUrl(url))
-      dispatch(setAudioPeaks(peaks))
+      dispatch(setAudioUrl(url))                                       // legacy
+      dispatch(setAudioPeaks(peaks))                                   // legacy
+      dispatch(patchSource({ id: currentSource?.id ?? 'source-1', patch: { audioUrl: url, audioPeaks: peaks } }))
       patch('extract', {
         status: 'done',
         detail: `16 kHz mono WAV · ${mb(wav.size)} → bucket`,
       })
     },
-    [patch, dispatch, uploadReq],
+    [patch, dispatch, uploadReq, currentSource],
   )
 
   // Stage ③ — transcribe the uploaded audio. POSTs the bucketed `audioUrl` to
@@ -504,13 +515,14 @@ export function useScenePipeline() {
       const data = await transcribeReq({ audioUrl }).unwrap()
       const got = data.words ?? []
       dispatch(setWords(got))
+      dispatch(patchSource({ id: currentSource?.id ?? 'source-1', patch: { words: got } }))
       const count = got.length || Math.round((duration / 60) * 150)
       patch('transcribe', {
         status: 'done',
         detail: `${count.toLocaleString()} words · ${Math.ceil(duration / 60)} min`,
       })
     },
-    [patch, dispatch, transcribeReq, audioUrl],
+    [patch, dispatch, transcribeReq, audioUrl, currentSource],
   )
 
   // Stage ④ — sample interval thumbnails across the whole clip, compose them into
