@@ -388,7 +388,7 @@ export function Studio() {
         {!hasSource || !previewSrc ? (
           <div className="flex flex-col gap-8">
             <StudioStepper phase={phase} />
-            <MediaImport onSelect={selectFile} />
+            <MediaImport onSelect={(files) => { if (files[0]) selectFile(files[0]) }} />
           </div>
         ) : (
           <div className="flex flex-col gap-8">
