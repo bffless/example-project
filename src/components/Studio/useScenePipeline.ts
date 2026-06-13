@@ -23,10 +23,14 @@ import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
 import {
   captureFramesAt,
-  captureContactSheet,
   captureSceneContactSheet,
+  composeContactSheet,
+  CONTACT_SHEET_CELL,
+  CONTACT_SHEET_SUPERSAMPLE,
   type ContactSheet,
 } from '../../lib/frames'
+import { chunk, cellsPerSheet } from '../../lib/contactSheet'
+import { planGlobalSheetCaptures } from '../../lib/globalSheet'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
   studioApi,
@@ -543,23 +547,63 @@ export function useScenePipeline() {
     [patch, dispatch, transcribeReq, audioUrl, currentSource],
   )
 
-  // Stage ④ — sample interval thumbnails across the whole clip, compose them into
-  // timestamped contact sheets (real, browser-side), then upload each to its
+  // Stage ④ — sample interval thumbnails across ALL source videos, compose them
+  // into timestamped contact sheets (real, browser-side), then upload each to its
   // bucket so the master director (story 03) can be handed real image URLs — not
-  // just in-browser blobs. The local `dataUrl` stays for the preview; `url` is
-  // the persisted object.
+  // just in-browser blobs. The global timeline spacing is based on the COMBINED
+  // duration of all sources so the ≤10-sheet budget holds. Each frame is stamped
+  // with its GLOBAL time so the director reads one continuous timeline (story 09c).
   const generateThumbnails = useCallback(
-    async ({ src, duration }: StepContext) => {
+    async () => {
       patch('thumbnails', { status: 'active' })
-      const sheets = await captureContactSheet(src, duration) // real, tiled ≤10
-      // Show the freshly-captured blobs immediately, but keep them out of Redux
-      // (and therefore out of localStorage) — they're base64-heavy. If the upload
-      // below throws, these stay visible while the stage shows the error.
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const captures = planGlobalSheetCaptures(ordered.map((s) => ({ id: s.id, duration: s.duration })))
+
+      // Capture each planned frame from the RIGHT source video at its LOCAL time,
+      // off a same-origin blob URL (a <video crossOrigin> read of the signed GCS
+      // URL fails CORS — same lesson as the per-scene refiner sheets). Group by
+      // source so we sign+fetch each video once; keep frames in global order.
+      const captureHeight = Math.round(CONTACT_SHEET_CELL * CONTACT_SHEET_SUPERSAMPLE)
+      const frameByIndex: (string | null)[] = new Array(captures.length).fill(null)
+      const idxBySource = new Map<string, number[]>()
+      captures.forEach((c, i) => {
+        const arr = idxBySource.get(c.sourceId) ?? []
+        arr.push(i)
+        idxBySource.set(c.sourceId, arr)
+      })
+      for (const [sourceId, idxs] of idxBySource) {
+        const src = ordered.find((s) => s.id === sourceId)
+        if (!src?.sourceUrl) continue
+        const { url: signed } = await signReq(src.sourceUrl, true).unwrap()
+        const blob = await (await fetch(signed)).blob()
+        const objectUrl = URL.createObjectURL(blob)
+        try {
+          const localTimes = idxs.map((i) => captures[i].localTime)
+          const frames = await captureFramesAt(objectUrl, localTimes, captureHeight, { type: 'image/png' })
+          idxs.forEach((i, k) => {
+            frameByIndex[i] = frames[k] ?? null
+          })
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+        }
+      }
+
+      // Keep only captures that produced a frame, in global order, and compose into
+      // ≤10 tiles stamped with GLOBAL time (so the director reads one timeline).
+      const kept = captures.map((c, i) => ({ c, frame: frameByIndex[i] })).filter((x) => x.frame)
+      const frames = kept.map((x) => x.frame as string)
+      const times = kept.map((x) => x.c.globalTime)
+      const perSheet = cellsPerSheet(frames.length)
+      const frameTiles = chunk(frames, perSheet)
+      const timeTiles = chunk(times, perSheet)
+      const sheets: ContactSheet[] = []
+      for (let t = 0; t < frameTiles.length; t++) {
+        const sheet = await composeContactSheet(frameTiles[t], timeTiles[t], CONTACT_SHEET_CELL)
+        if (sheet.dataUrl) sheets.push({ ...sheet, index: sheets.length, total: frameTiles.length })
+      }
+
+      // ===== keep the EXISTING upload + dispatch logic below, verbatim =====
       setPendingSheets(sheets)
-      // Upload sheets one at a time, not in parallel: concurrent registers were
-      // racing the dev proxy's keep-alive socket pool into ECONNRESET 502s (see
-      // the proxy `agent` note in vite.config.ts). Sequential is plenty fast for
-      // the handful of sheets and keeps a single in-flight request to the edge.
       const uploaded: ContactSheet[] = []
       for (const sheet of sheets) {
         const blob = await (await fetch(sheet.dataUrl)).blob()
@@ -567,23 +611,19 @@ export function useScenePipeline() {
         const name = `contact-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
         const file = new File([blob], name, { type: blob.type })
         const { url } = await uploadReq({ file, kind: 'thumbnails' }).unwrap()
-        // The bucket URL is now the canonical state — drop the base64 blob so what
-        // we persist is just a small URL, and the preview loads through the serve
-        // route (the reverse-proxy-to-bucket path).
         uploaded.push({ ...sheet, url, dataUrl: '' })
       }
-      // Only the uploaded, URL-only sheets are committed to the persisted slice.
       dispatch(setContactSheets(uploaded))
       setPendingSheets([])
-      const frames = uploaded.reduce((n, s) => n + s.count, 0)
+      const frameCount = uploaded.reduce((n, s) => n + s.count, 0)
       patch('thumbnails', {
         status: 'done',
-        detail: frames
-          ? `${frames} frames · ${uploaded.length} sheet${uploaded.length === 1 ? '' : 's'} → bucket`
+        detail: frameCount
+          ? `${frameCount} frames · ${uploaded.length} sheet${uploaded.length === 1 ? '' : 's'} → bucket`
           : 'no frames sampled',
       })
     },
-    [patch, dispatch, uploadReq],
+    [patch, dispatch, sources, signReq, uploadReq],
   )
 
   // Stages ⑤⑥ — the master director (story 03). One multimodal Gemini call gets
@@ -814,7 +854,7 @@ export function useScenePipeline() {
         if (id === 'upload') await uploadClip(ctx)
         else if (id === 'extract') await extractAndUploadAudio(ctx)
         else if (id === 'transcribe') await transcribe(ctx)
-        else if (id === 'thumbnails') await generateThumbnails(ctx)
+        else if (id === 'thumbnails') await generateThumbnails()
         else if (id === 'director') await runDirector(ctx) // shorten + segment, one Gemini call
         // 'clone' isn't run here — the VoiceStudio resource owns it (record/clone
         // or pick a preset), so reaching it via the board is a no-op.
