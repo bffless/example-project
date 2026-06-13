@@ -726,21 +726,32 @@ export function useScenePipeline() {
   // persisted source serve URL so it works after a reload without the in-memory
   // clip. Separate from the whole-clip prep sheets.
   const generateSceneSheets = useCallback(
-    async (id: string) => {
+    async (id: string, file: File | null) => {
       if (sheetingId || refiningId) return
       const scene = scenes.find((s) => s.id === id)
       if (!scene || !sourceUrl) return
       setSheetingId(id)
       setSceneError(null)
+      // Capture frames off a SAME-ORIGIN blob: URL, never the cross-origin signed
+      // bucket URL directly. A `<video crossOrigin>` media read against the GCS
+      // object fails CORS (the element's range/preflight isn't satisfied even
+      // though GET from this origin is allowed), whereas a plain `fetch` of the
+      // bytes is fine. Prefer the in-memory upload (no refetch); after a hard
+      // reload there's no `file`, so pull the source bytes back through the signed
+      // URL — the same fetch `sliceScene`'s fallback uses — and wrap them in a
+      // blob URL so capture stays same-origin either way.
+      let objectUrl: string | null = null
       try {
-        const sheets = await captureSceneContactSheet(await signedSourceUrl(), scene.start, scene.end)
+        const source = file ?? (await (await fetch(await signedSourceUrl())).blob())
+        objectUrl = URL.createObjectURL(source)
+        const sheets = await captureSceneContactSheet(objectUrl, scene.start, scene.end)
         const uploaded: ContactSheet[] = []
         for (const sheet of sheets) {
           const blob = await (await fetch(sheet.dataUrl)).blob()
           const ext = blob.type === 'image/png' ? 'png' : 'jpg'
           const name = `scene-${scene.index + 1}-sheet-${String(sheet.index + 1).padStart(2, '0')}.${ext}`
-          const file = new File([blob], name, { type: blob.type })
-          const { url } = await uploadReq({ file, kind: 'thumbnails' }).unwrap()
+          const sheetFile = new File([blob], name, { type: blob.type })
+          const { url } = await uploadReq({ file: sheetFile, kind: 'thumbnails' }).unwrap()
           // Persist URL-only — drop the base64 blob so localStorage stays small.
           uploaded.push({ ...sheet, url, dataUrl: '' })
         }
@@ -748,6 +759,7 @@ export function useScenePipeline() {
       } catch (e) {
         setSceneError(stageError(e))
       } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
         setSheetingId(null)
       }
     },
