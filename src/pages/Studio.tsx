@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { setDirection, setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, setDirection, setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
+import { SourceQueue } from '../components/Studio/SourceQueue'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
 import { ContactSheetPreview } from '../components/Studio/ContactSheetPreview'
@@ -30,7 +31,7 @@ import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMutation } from '../store/studioApi'
 import { buildSearchRequest, toSearchHits } from '../lib/search'
 import { skipToken } from '@reduxjs/toolkit/query'
-import { studioPhase, type StudioPhase } from '../lib/pipeline'
+import { GLOBAL_STAGES, studioPhase, type StudioPhase } from '../lib/pipeline'
 
 export function Studio() {
   // The in-memory clip is transient — never persisted. After a hard reload it's
@@ -39,6 +40,9 @@ export function Studio() {
   // the clip back from the bucket automatically (no re-attach prompt); the banner
   // only appears as a fallback if that fetch fails.
   const [file, setFile] = useState<File | null>(null)
+  // In-memory File for each source id, transient (lost on reload — fine; reload
+  // resumes from persisted per-source progress). Keyed by VideoSource.id.
+  const [files, setFiles] = useState<Map<string, File>>(new Map())
   const [rehydrating, setRehydrating] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
   // Free-text direction the user hands the master director (e.g. "keep the demo
@@ -91,7 +95,7 @@ export function Studio() {
   // confirm-gated re-run variant (story 03m) instead of hiding it.
   const directorDone =
     pipe.stages.find((s) => s.id === 'director')?.status === 'done' && pipe.scenes.length > 0
-  const hasSource = !!file || hasPersisted
+  const hasSource = !!file || hasPersisted || pipe.sources.length > 0
   // What the <video> plays: the local object URL when present, else the persisted
   // source SIGNED into a direct bucket URL — the raw serve path must never be a
   // media src (streaming ~280 MB through file_serve 504s/OOMs the backend).
@@ -120,6 +124,22 @@ export function Studio() {
       dispatch(setFileName(f.name))
       dispatch(setDuration(0))
     }
+  }
+
+  // Multi-video import (story 09b): each picked file becomes a source in the queue
+  // + is held in memory under its id for processing. Math.random for a unique id is
+  // fine here (a component event handler, not a workflow).
+  function onImport(picked: File[]) {
+    setRestoreError(null)
+    setFiles((prev) => {
+      const next = new Map(prev)
+      for (const f of picked) {
+        const id = `source-${Date.now()}-${Math.round(Math.random() * 1e6)}`
+        dispatch(addSource({ id, fileName: f.name, duration: 0 }))
+        next.set(id, f)
+      }
+      return next
+    })
   }
 
   function startOver() {
@@ -385,10 +405,10 @@ export function Studio() {
         title={hasSource ? <>Prep, then build scene by scene<Dot /></> : <>Load one clip to begin<Dot /></>}
         divider={false}
       >
-        {!hasSource || !previewSrc ? (
+        {pipe.sources.length === 0 && !hasPersisted && !file ? (
           <div className="flex flex-col gap-8">
             <StudioStepper phase={phase} />
-            <MediaImport onSelect={(files) => { if (files[0]) selectFile(files[0]) }} />
+            <MediaImport onSelect={onImport} />
           </div>
         ) : (
           <div className="flex flex-col gap-8">
@@ -445,9 +465,19 @@ export function Studio() {
                  (right, two thirds), then the transcript editor full-width below
                  once transcription has produced words. */
               <div className="flex flex-col gap-8">
+                {pipe.sources.length > 0 && (
+                  <SourceQueue
+                    sources={[...pipe.sources].sort((a, b) => a.order - b.order)}
+                    busyId={pipe.processingId}
+                    onReorder={(from, to) => dispatch(reorderSources({ from, to }))}
+                    onRemove={(id) => { dispatch(removeSource(id)); setFiles((prev) => { const m = new Map(prev); m.delete(id); return m }) }}
+                    onProcess={(id) => { const f = files.get(id); if (f) void pipe.processSource(id, f) }}
+                    onProcessAll={() => void pipe.processAll(files)}
+                  />
+                )}
                 <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
                   <PipelineBoard
-                    stages={pipe.stages}
+                    stages={pipe.stages.filter((s) => GLOBAL_STAGES.includes(s.id))}
                     currentStageId={pipe.currentStageId}
                     busy={pipe.running || rehydrating}
                     onAction={onBoardAction}
@@ -462,12 +492,14 @@ export function Studio() {
                       <p className="meta-label">&nbsp;</p>
                       <p className="font-mono text-[12px]">&nbsp;</p>
                     </div>
-                    <PreviewPlayer
-                      src={previewSrc}
-                      videoRef={videoRef}
-                      cuts={[]}
-                      onLoaded={onLoaded}
-                    />
+                    {previewSrc && (
+                      <PreviewPlayer
+                        src={previewSrc}
+                        videoRef={videoRef}
+                        cuts={[]}
+                        onLoaded={onLoaded}
+                      />
+                    )}
                     {pipe.audioUrl && (
                       <div className="mt-4">
                         <AudioArtifact peaks={pipe.audioPeaks} audioUrl={pipe.audioUrl} />
@@ -599,7 +631,7 @@ export function Studio() {
                         instead of the whole film — and don't let it overwrite the
                         full-source `duration` the grid relies on (see noLoaded). */}
                     <PreviewPlayer
-                      src={clipSrc ?? previewSrc}
+                      src={clipSrc ?? previewSrc ?? ''}
                       videoRef={videoRef}
                       cuts={[]}
                       onLoaded={clipSrc ? noLoaded : onLoaded}
