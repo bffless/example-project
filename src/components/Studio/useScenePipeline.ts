@@ -18,7 +18,7 @@ import {
   applyOriginalClips,
   type RefineSceneRaw,
 } from '../../lib/refiner'
-import { totalDuration } from '../../lib/sources'
+import { totalDuration, sourceForScene } from '../../lib/sources'
 import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
@@ -214,15 +214,15 @@ export function useScenePipeline() {
   const [voiceSayReq] = useVoiceSayMutation()
   const [signReq] = useLazySignDownloadQuery()
 
-  // The raw source (~hundreds of MB) must never stream through the file_serve
-  // pipeline — it 504s/OOMs the backend. Every read of `sourceUrl` swaps it for
-  // a time-limited direct bucket URL first (`preferCacheValue` reuses the cached
-  // signature across sheet capture, slicing, and the preview within its 1 h life).
-  const signedSourceUrl = useCallback(async () => {
-    if (!sourceUrl) throw new Error('No source clip available.')
-    const { url } = await signReq(sourceUrl, true).unwrap()
-    return url
-  }, [signReq, sourceUrl])
+  // Sign any bucket serve path into a time-limited direct GCS URL (big media must
+  // never stream through file_serve). Per-scene callers pass THAT scene's source URL.
+  const signFor = useCallback(
+    async (url: string) => {
+      const { url: signed } = await signReq(url, true).unwrap()
+      return signed
+    },
+    [signReq],
+  )
 
   // Transient UI state — not persisted.
   const [running, setRunning] = useState(false)
@@ -334,10 +334,11 @@ export function useScenePipeline() {
    */
   const sliceAndUploadSpans = useCallback(
     async (
+      sourceAudioUrl: string,
       spans: { start: number; end: number }[],
     ): Promise<({ url: string; seconds: number } | null)[]> => {
-      if (!audioUrl) throw new Error('No extracted audio to slice from.')
-      const blobs = await sliceManyAudioWav(audioUrl, spans)
+      if (!sourceAudioUrl) throw new Error('No extracted audio to slice from.')
+      const blobs = await sliceManyAudioWav(sourceAudioUrl, spans)
       const out: ({ url: string; seconds: number } | null)[] = []
       for (let i = 0; i < blobs.length; i++) {
         try {
@@ -356,7 +357,7 @@ export function useScenePipeline() {
       }
       return out
     },
-    [audioUrl, uploadReq],
+    [uploadReq],
   )
 
   /**
@@ -441,6 +442,7 @@ export function useScenePipeline() {
           patchScene(sceneId, { refineJobId: null })
           return
         }
+        const src = sourceForScene(sources, scene)
         const refinement = toRefinement(result as RefineSceneRaw, scene)
 
         const idx = suggestedOriginalIndices(refinement.segments)
@@ -450,6 +452,7 @@ export function useScenePipeline() {
           let clips: ({ url: string; seconds: number } | null)[] = idx.map(() => null)
           try {
             clips = await sliceAndUploadSpans(
+              src?.audioUrl ?? '',
               idx.map((i) => ({ start: segments[i].start, end: segments[i].end })),
             )
           } catch {
@@ -479,7 +482,7 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [pollJob, scenes, patchScene, sliceAndUploadSpans],
+    [pollJob, scenes, patchScene, sliceAndUploadSpans, sources],
   )
 
   // Resume any in-flight job after a hard reload (redux-persist brings back the
@@ -899,23 +902,22 @@ export function useScenePipeline() {
   // persisted source serve URL so it works after a reload without the in-memory
   // clip. Separate from the whole-clip prep sheets.
   const generateSceneSheets = useCallback(
-    async (id: string, file: File | null) => {
+    async (id: string) => {
       if (sheetingId || refiningId) return
       const scene = scenes.find((s) => s.id === id)
-      if (!scene || !sourceUrl) return
+      const src = scene && sourceForScene(sources, scene)
+      if (!scene || !src?.sourceUrl) return
       setSheetingId(id)
       setSceneError(null)
       // Capture frames off a SAME-ORIGIN blob: URL, never the cross-origin signed
       // bucket URL directly. A `<video crossOrigin>` media read against the GCS
       // object fails CORS (the element's range/preflight isn't satisfied even
       // though GET from this origin is allowed), whereas a plain `fetch` of the
-      // bytes is fine. Prefer the in-memory upload (no refetch); after a hard
-      // reload there's no `file`, so pull the source bytes back through the signed
-      // URL — the same fetch `sliceScene`'s fallback uses — and wrap them in a
-      // blob URL so capture stays same-origin either way.
+      // bytes is fine. Pull the scene's own source bytes back through the signed
+      // URL and wrap them in a blob URL so capture stays same-origin.
       let objectUrl: string | null = null
       try {
-        const source = file ?? (await (await fetch(await signedSourceUrl())).blob())
+        const source = await (await fetch(await signFor(src.sourceUrl))).blob()
         objectUrl = URL.createObjectURL(source)
         const sheets = await captureSceneContactSheet(objectUrl, scene.start, scene.end)
         const uploaded: ContactSheet[] = []
@@ -936,7 +938,7 @@ export function useScenePipeline() {
         setSheetingId(null)
       }
     },
-    [sheetingId, refiningId, scenes, sourceUrl, signedSourceUrl, uploadReq, patchScene],
+    [sheetingId, refiningId, scenes, sources, signFor, uploadReq, patchScene],
   )
 
   // Button 2: hand the scene's word timings + the director's refinePrompt +
@@ -954,7 +956,8 @@ export function useScenePipeline() {
         // is required to listen, so refining an un-cut scene is an error, not a
         // silent fall-back to the old deaf behavior.
         if (!scene.clipAudioUrl) throw new Error('Cut this scene first — the refiner needs its audio.')
-        const scoped = words.filter((w) => w.start >= scene.start && w.start < scene.end)
+        const src = sourceForScene(sources, scene)
+        const scoped = (src?.words ?? []).filter((w) => w.start >= scene.start && w.start < scene.end)
         const sheetUrls = (scene.sheets ?? []).map((s) => s.url).filter((u): u is string => !!u)
         // Seam-aware context (story 03r): hand the refiner the tail of the
         // PREVIOUS scene's effective narration so this scene opens in flow with
@@ -986,7 +989,7 @@ export function useScenePipeline() {
         setRefiningId(null)
       }
     },
-    [sheetingId, refiningId, scenes, words, direction, refineSceneReq, patchScene, completeRefineJob],
+    [sheetingId, refiningId, scenes, sources, direction, refineSceneReq, patchScene, completeRefineJob],
   )
 
   // Creator steering for the refine call (story 03l). Both are INPUT-layer scene
@@ -1029,13 +1032,14 @@ export function useScenePipeline() {
     async (sceneId: string, origStart: number, origEnd: number, dropStart: number) => {
       if (adoptingId) return
       const scene = scenes.find((s) => s.id === sceneId)
-      if (!scene || !audioUrl) return
+      const src = sourceForScene(sources, scene ?? { sourceId: '' })
+      if (!scene || !src?.audioUrl) return
       const duration = origEnd - origStart
       const segs = effectiveSegments(scene)
       setAdoptingId(sceneId)
       setSceneError(null)
       try {
-        const wav = await sliceAudioWav(audioUrl, origStart, origEnd)
+        const wav = await sliceAudioWav(src.audioUrl, origStart, origEnd)
         const file = new File([wav], `original-${Math.round(origStart)}-${Math.round(origEnd)}.wav`, {
           type: 'audio/wav',
         })
@@ -1043,7 +1047,7 @@ export function useScenePipeline() {
         const measured = await measureAudioDuration(url)
         const len = measured > 0 ? measured : duration
         const start = clampDropStart(scene, dropStart, len)
-        const text = words
+        const text = src.words
           .filter((w) => w.start >= origStart && w.start < origEnd)
           .map((w) => w.text)
           .join(' ')
@@ -1072,7 +1076,7 @@ export function useScenePipeline() {
         setAdoptingId(null)
       }
     },
-    [adoptingId, scenes, audioUrl, words, uploadReq, patchScene],
+    [adoptingId, scenes, sources, uploadReq, patchScene],
   )
 
   // Cut this scene into its own video clip + soundtrack (story 03g + 03k, build
@@ -1084,22 +1088,19 @@ export function useScenePipeline() {
   // paths in ONE patch, so the scene gets both resources or neither and a reload
   // resumes with the cut done. Re-cutting overwrites both.
   const sliceScene = useCallback(
-    async (sceneId: string, file: File | null) => {
+    async (sceneId: string) => {
       if (slicingId) return
       const scene = scenes.find((s) => s.id === sceneId)
-      if (!scene) return
+      const src = scene && sourceForScene(sources, scene)
+      if (!scene || !src) return
       setSlicingId(sceneId)
       setSceneError(null)
       try {
-        if (!audioUrl) throw new Error('No extracted audio to cut the scene soundtrack from.')
-        const source = file
-          ? new Uint8Array(await file.arrayBuffer())
-          : sourceUrl
-            ? // Direct bucket read — no `credentials`, it's a presigned URL, and
-              // sending cookies cross-origin would fail the CORS check.
-              new Uint8Array(await (await fetch(await signedSourceUrl())).arrayBuffer())
-            : null
-        if (!source) throw new Error('No source clip available to cut from.')
+        if (!src.audioUrl) throw new Error('No extracted audio to cut the scene soundtrack from.')
+        if (!src.sourceUrl) throw new Error('No source clip available to cut from.')
+        // Direct bucket read — no `credentials`, it's a presigned URL, and
+        // sending cookies cross-origin would fail the CORS check.
+        const source = new Uint8Array(await (await fetch(await signFor(src.sourceUrl))).arrayBuffer())
 
         const command = buildSliceCommand({
           start: scene.start,
@@ -1109,7 +1110,7 @@ export function useScenePipeline() {
         const blob = await ffmpegSlice({ source, command })
         const clip = new File([blob], `scene-${scene.index}.mp4`, { type: 'video/mp4' })
         const { url } = await uploadReq({ file: clip, kind: 'scene-clip' }).unwrap()
-        const wav = await sliceAudioWav(audioUrl, scene.start, scene.end)
+        const wav = await sliceAudioWav(src.audioUrl, scene.start, scene.end)
         const audioFile = new File([wav], `scene-${scene.index}-audio.wav`, { type: 'audio/wav' })
         const { url: clipAudioUrl } = await uploadReq({ file: audioFile, kind: 'audio' }).unwrap()
         patchScene(sceneId, { clipUrl: url, clipAudioUrl })
@@ -1119,7 +1120,7 @@ export function useScenePipeline() {
         setSlicingId(null)
       }
     },
-    [slicingId, scenes, audioUrl, sourceUrl, signedSourceUrl, uploadReq, patchScene],
+    [slicingId, scenes, sources, signFor, uploadReq, patchScene],
   )
 
   // Delete one New-pane run, reopening its gap (story 03d) — e.g. to clear room
@@ -1278,10 +1279,11 @@ export function useScenePipeline() {
       const scene = scenes.find((s) => s.id === sceneId)
       const seg = scene && effectiveSegments(scene)[segIndex]
       if (!seg) return
+      const src = scene && sourceForScene(sources, scene)
       setVoicingSegKey(`${sceneId}:${segIndex}`)
       setSceneError(null)
       try {
-        const [clip] = await sliceAndUploadSpans([{ start: seg.start, end: seg.end }])
+        const [clip] = await sliceAndUploadSpans(src?.audioUrl ?? '', [{ start: seg.start, end: seg.end }])
         if (!clip) throw new Error("Couldn't slice the original audio for this run.")
         setSegmentAudio(sceneId, segIndex, {
           audioUrl: clip.url,
@@ -1294,7 +1296,7 @@ export function useScenePipeline() {
         setVoicingSegKey(null)
       }
     },
-    [voicingSegKey, scenes, sliceAndUploadSpans, setSegmentAudio],
+    [voicingSegKey, scenes, sources, sliceAndUploadSpans, setSegmentAudio],
   )
 
   // ---- Scene build loop -----------------------------------------------------
