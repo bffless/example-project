@@ -193,7 +193,8 @@ export type TranscriptSource = { id: string; fileName: string; duration: number;
  * existing `timedTranscript`, and joined with a labeled boundary marker naming
  * the next video and its global start -- so the director sees one continuous talk
  * but knows where each video begins (and must not start a chapter in one video
- * and end it in another; the response coercion splits any that do).
+ * and end it in another; if one does, `toScenes` assigns it to the source it
+ * overlaps most rather than splitting it).
  */
 export function combinedTimedTranscript(sources: TranscriptSource[]): string {
   const spans = sourceOffsets(sources)
