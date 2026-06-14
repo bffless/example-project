@@ -20,7 +20,8 @@ import { JobPromptDisclosure } from '../components/Studio/PromptDisclosure'
 import { DirectorPanel } from '../components/Studio/DirectorPanel'
 import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
 import { CastStudio } from '../components/Studio/CastStudio'
-import { uniqueSpeakers, seedAssignmentsByLabel } from '../lib/speakers'
+import { uniqueSpeakers, seedAssignmentsByLabel, dominantSpeaker, resolveSpeakerVoice, resolvePerson } from '../lib/speakers'
+import { presetLabel, PRESET_VOICES } from '../lib/voices'
 import { StudioStepper } from '../components/Studio/StudioStepper'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
@@ -289,22 +290,48 @@ export function Studio() {
   // Per-segment voice controls for the selected scene — each narration run gets an
   // inline record/AI/play control in the diff viewer's New pane.
   const segmentControls = useMemo<SegmentControl[]>(
-    () =>
-      selected
-        ? effectiveSegments(selected).map((seg, i) => ({
-            sceneId: selected.id,
-            index: i,
-            start: seg.start,
-            end: seg.end,
-            text: seg.text,
-            audioUrl: seg.audioUrl,
-            audioSeconds: seg.audioSeconds,
-            audioSource: seg.audioSource,
-            suggestedSource: seg.suggestedSource,
-            busy: pipe.voicingSegKey === `${selected.id}:${i}`,
-          }))
-        : [],
-    [selected, pipe.voicingSegKey],
+    () => {
+      if (!selected) return []
+      const selSrc = pipe.sources.find((s) => s.id === selected.sourceId)
+      return effectiveSegments(selected).map((seg, i) => {
+        const label = selSrc ? dominantSpeaker(selSrc.words ?? [], seg.start, seg.end) : null
+        const def =
+          label && selected
+            ? resolveSpeakerVoice(selected.sourceId, label, pipe.cast, pipe.speakerAssignments)
+            : null
+        return {
+          sceneId: selected.id,
+          index: i,
+          start: seg.start,
+          end: seg.end,
+          text: seg.text,
+          audioUrl: seg.audioUrl,
+          audioSeconds: seg.audioSeconds,
+          audioSource: seg.audioSource,
+          suggestedSource: seg.suggestedSource,
+          busy: pipe.voicingSegKey === `${selected.id}:${i}`,
+          speakerName:
+            label && selected
+              ? (resolvePerson(selected.sourceId, label, pipe.cast, pipe.speakerAssignments)?.name ?? label)
+              : undefined,
+          defaultVoiceId: def?.voiceId,
+          voiceId: seg.voiceId,
+        }
+      })
+    },
+    [selected, pipe.voicingSegKey, pipe.sources, pipe.cast, pipe.speakerAssignments],
+  )
+
+  // Voice options for the per-segment picker (story 10d): all cast people with a
+  // voice, then all presets — so the producer can override the speaker default.
+  const voiceOptions = useMemo(
+    () => [
+      ...pipe.cast
+        .filter((p) => p.voice)
+        .map((p) => ({ voiceId: p.voice!.voiceId, label: `${p.name} (${p.voice!.label})` })),
+      ...PRESET_VOICES.map((v) => ({ voiceId: v.id, label: presetLabel(v.id) })),
+    ],
+    [pipe.cast],
   )
 
   // A cut hand-edit on the diff grid. The grid hands us a span on the whole-talk
@@ -738,6 +765,8 @@ export function Studio() {
                     windowStart={selected.start}
                     windowEnd={selected.end}
                     originalAudioUrl={pipe.audioUrl ?? undefined}
+                    voiceOptions={voiceOptions}
+                    onPickVoice={pipe.setSegmentVoice}
                   />
                   ) : (
                     <DiffLockedHint />

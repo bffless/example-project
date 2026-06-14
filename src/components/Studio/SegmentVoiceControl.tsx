@@ -20,6 +20,12 @@ export type SegmentControl = {
   suggestedSource?: 'original' | 'revoice'
   /** This segment is mid-voicing (AI call or record upload). */
   busy: boolean
+  /** The segment's default voice label (from its speaker), shown when no override. */
+  speakerName?: string
+  /** The voice id resolved from the segment's dominant speaker. */
+  defaultVoiceId?: string
+  /** The producer's override (story 10d); falls back to defaultVoiceId. */
+  voiceId?: string
 }
 
 type Props = {
@@ -37,6 +43,10 @@ type Props = {
   /** Voice this run with the clip's own audio (story 03j) — rendered only while
    *  the run is unvoiced and the AI suggested 'original'. Omit to hide. */
   onUseOriginal?: () => void
+  /** List of voices to offer in the picker (cast + presets). Omit to hide. */
+  voiceOptions?: { voiceId: string; label: string }[]
+  /** Called when the producer picks a voice from the dropdown. */
+  onPickVoice?: (voiceId: string) => void
 }
 
 /** How the run was voiced, for the inline label. */
@@ -58,7 +68,7 @@ const btn =
  * **drag handle** (story 03h) — chosen so moving never collides with
  * cut-painting, which owns pointer-drags that start on the grid cells.
  */
-export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete, onMoveStart, onUseOriginal }: Props) {
+export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, onPlay, onDelete, onMoveStart, onUseOriginal, voiceOptions, onPickVoice }: Props) {
   const recorder = useRecorder()
   const submitted = useRef(false)
 
@@ -159,6 +169,19 @@ export function SegmentVoiceControl({ segment, canAI, onGenerateAI, onRecord, on
           >
             ✨ {audioUrl ? 'Re-AI' : 'AI'}
           </button>
+          {voiceOptions && voiceOptions.length > 0 && (
+            <select
+              className="rounded border border-paper-line bg-paper px-1 py-0.5 text-[11px] text-ink transition-colors"
+              value={segment.voiceId ?? segment.defaultVoiceId ?? ''}
+              onChange={(e) => onPickVoice?.(e.target.value)}
+              title={segment.speakerName ? `Speaker: ${segment.speakerName}` : 'Voice'}
+            >
+              {!segment.defaultVoiceId && <option value="">choose voice…</option>}
+              {voiceOptions.map((o) => (
+                <option key={o.voiceId} value={o.voiceId}>{o.label}</option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             className={`${btn} ml-auto`}
