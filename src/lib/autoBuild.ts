@@ -1,7 +1,7 @@
 /**
  * Auto Build (story 03s) — the pure decision layer for the unattended Build run.
  *
- * Auto mode drives every pending scene through the same six manual steps in order;
+ * Auto mode drives every pending scene through the same build steps in order;
  * this module says, from the durable scene state alone, which step a scene is on,
  * what the run should do next, and how to colour each row in the dashboard. It
  * holds NO state of its own — "done" is derived from the same scene fields the
