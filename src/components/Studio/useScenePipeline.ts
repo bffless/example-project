@@ -19,6 +19,7 @@ import {
   type RefineSceneRaw,
 } from '../../lib/refiner'
 import { totalDuration, sourceForScene } from '../../lib/sources'
+import { resolvePerson } from '../../lib/speakers'
 import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
@@ -678,8 +679,11 @@ export function useScenePipeline() {
     async ({ src }: StepContext) => {
       patch('director', { status: 'active' })
       const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const namer = (videoId: string, label: string) =>
+        resolvePerson(videoId, label, cast, speakerAssignments)?.name ?? label
       const transcript = combinedTimedTranscript(
         ordered.map((s) => ({ id: s.id, fileName: s.fileName, duration: s.duration, words: s.words })),
+        namer,
       )
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
       const duration = totalDuration(ordered.map((s) => ({ id: s.id, duration: s.duration })))
@@ -690,7 +694,7 @@ export function useScenePipeline() {
       dispatch(setScenesJobId(jobId))
       await completeDirectorJob(jobId, src)
     },
-    [patch, sources, persistedSheets, direction, scenesReq, dispatch, completeDirectorJob],
+    [patch, sources, persistedSheets, direction, scenesReq, dispatch, completeDirectorJob, cast, speakerAssignments],
   )
 
   // Re-run the master director after it's already done (story 03m). `next()`
