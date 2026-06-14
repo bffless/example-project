@@ -67,6 +67,11 @@ type Props = {
    *  row → a snapped new start, clamped so the run never passes the scene end.
    *  Omit to make runs immovable. */
   onMoveRun?: (sceneId: string, index: number, newStart: number) => void
+  /** Voice options for the per-segment picker (story 10d): cast people + presets.
+   *  Omit to hide the picker. */
+  voiceOptions?: { voiceId: string; label: string }[]
+  /** Called when the producer picks a voice override for a segment. */
+  onPickVoice?: (sceneId: string, index: number, voiceId: string) => void
   /** Overlapping run spans (story 03h) — painted as a distinct amber conflict
    *  fill on the New pane, with an "N to resolve" note by its header. Overlap is
    *  a legal in-progress state; assemble is gated on it elsewhere. */
@@ -149,6 +154,10 @@ type Controls = {
   onMoveStart?: (seg: SegmentControl) => void
   /** Voice a run from the clip's own audio (story 03j). */
   onUseOriginal?: (sceneId: string, index: number) => void
+  /** Voice options for the per-segment picker (cast + presets, story 10d). */
+  voiceOptions?: { voiceId: string; label: string }[]
+  /** Called when the producer picks a voice for a specific segment. */
+  onPickVoice?: (sceneId: string, index: number, voiceId: string) => void
 }
 
 /**
@@ -182,6 +191,8 @@ export function TranscriptDiff({
   windowStart = 0,
   windowEnd = Infinity,
   originalAudioUrl,
+  voiceOptions,
+  onPickVoice,
 }: Props) {
   const [secondsPerLine, setSecondsPerLine] = useState(DEFAULT_SECONDS_PER_LINE)
   const [segmentSeconds, setSegmentSeconds] = useState(DEFAULT_SEGMENT_SECONDS)
@@ -590,6 +601,8 @@ export function TranscriptDiff({
         onDelete: onDeleteSegment ?? (() => {}),
         onMoveStart: onMoveRun ? onMoveStart : undefined,
         onUseOriginal,
+        voiceOptions,
+        onPickVoice,
       }
     : null
 
@@ -1333,6 +1346,12 @@ function Pane({
                       onUseOriginal={
                         controls.onUseOriginal
                           ? () => controls.onUseOriginal?.(seg.sceneId, seg.index)
+                          : undefined
+                      }
+                      voiceOptions={controls.voiceOptions}
+                      onPickVoice={
+                        controls.onPickVoice
+                          ? (vid) => controls.onPickVoice?.(seg.sceneId, seg.index, vid)
                           : undefined
                       }
                     />

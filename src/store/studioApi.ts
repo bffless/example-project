@@ -42,8 +42,8 @@ export type StartJobResponse = { jobId: string; status: string }
  */
 export type StudioJob = {
   status: 'pending' | 'running' | 'done' | 'error'
-  kind: 'scenes' | 'refine'
-  result?: ScenesResult | RefineSceneResult | null
+  kind: 'scenes' | 'refine' | 'transcribe'
+  result?: ScenesResult | RefineSceneResult | TranscribeResponse | null
   error?: string | null
   /** The stitched per-run Gemini prompt, stored on the job row at enqueue
    *  (story 03m). Null/absent on jobs older than 03m. */
@@ -63,7 +63,11 @@ export const studioApi = createApi({
   reducerPath: 'studioApi',
   baseQuery: fetchBaseQuery({ baseUrl: '/', credentials: 'include' }),
   endpoints: (builder) => ({
-    transcribe: builder.mutation<TranscribeResponse, { audioUrl: string | null }>({
+    // Transcription (story 02; async since story 10e). ENQUEUE-ONLY: returns a
+    // { jobId } to poll on — WhisperX (and, when `diarize`, the slow pyannote
+    // speaker pass) runs in the pipeline's postSteps so it can't hit the 30s edge
+    // timeout. The flattened { words, text } lands in the job row's `result` blob.
+    transcribeStart: builder.mutation<StartJobResponse, { audioUrl: string | null; diarize: boolean }>({
       query: (body) => ({
         url: 'api/transcribe',
         method: 'POST',
@@ -189,7 +193,7 @@ export const studioApi = createApi({
 })
 
 export const {
-  useTranscribeMutation,
+  useTranscribeStartMutation,
   useScenesMutation,
   useRefineSceneMutation,
   useLazyGetStudioJobQuery,

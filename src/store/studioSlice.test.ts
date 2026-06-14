@@ -127,3 +127,81 @@ describe('sources reducers', () => {
     expect(s.sources[0].order).toBe(0)
   })
 })
+
+// ── cast + speaker-assignments (story 10b) ──────────────────────────────────
+
+import { test } from 'vitest'
+import {
+  setPeopleCount, renamePerson, setPersonVoice, assignSpeaker, removePerson,
+} from './studioSlice'
+
+const init = () => reducer(undefined, { type: '@@init' }) as StudioState
+
+test("removeSource drops that source's speaker assignments", () => {
+  let s = reducer(init(), addSource({ id: 'src-x', fileName: 'a.mov', duration: 5 }))
+  s = reducer(s, setPeopleCount(2))
+  s = reducer(s, assignSpeaker({ videoId: 'src-x', label: 'SPEAKER_00', personId: s.cast[0].id }))
+  expect(s.speakerAssignments['src-x']).toBeDefined()
+  s = reducer(s, removeSource('src-x'))
+  expect(s.speakerAssignments['src-x']).toBeUndefined()
+})
+
+test('setPeopleCount pads up and truncates down, min 1', () => {
+  let s = init()
+  s = reducer(s, setPeopleCount(3))
+  expect(s.cast.map((p) => p.name)).toEqual(['Me', 'Person 2', 'Person 3'])
+  s = reducer(s, setPeopleCount(1))
+  expect(s.cast).toHaveLength(1)
+  s = reducer(s, setPeopleCount(0))
+  expect(s.cast).toHaveLength(1)
+})
+
+test('renamePerson and setPersonVoice update a person; cast[0] mirrors legacy voice', () => {
+  let s = reducer(init(), setPeopleCount(1))
+  const id = s.cast[0].id
+  s = reducer(s, renamePerson({ id, name: 'James' }))
+  expect(s.cast[0].name).toBe('James')
+  const voice = { voiceId: 'v1', source: 'clone' as const, label: 'mine' }
+  s = reducer(s, setPersonVoice({ id, voice }))
+  expect(s.cast[0].voice).toEqual(voice)
+  expect(s.voice).toEqual(voice) // legacy mirror so old readers keep working
+})
+
+test('assignSpeaker records a per-video mapping; removePerson strips its assignments', () => {
+  let s = reducer(init(), setPeopleCount(2))
+  const [a, b] = s.cast.map((p) => p.id)
+  s = reducer(s, assignSpeaker({ videoId: 'src-1', label: 'SPEAKER_00', personId: a }))
+  s = reducer(s, assignSpeaker({ videoId: 'src-1', label: 'SPEAKER_01', personId: b }))
+  expect(s.speakerAssignments['src-1']['SPEAKER_01']).toBe(b)
+  s = reducer(s, removePerson(b))
+  expect(s.speakerAssignments['src-1']['SPEAKER_01']).toBeUndefined()
+  expect(s.cast).toHaveLength(1)
+})
+
+test('resetStudio resets the person ids to a fresh slate', () => {
+  let s = reducer(init(), setPeopleCount(2))
+  s = reducer(s, resetStudio())
+  s = reducer(s, setPeopleCount(1))
+  expect(s.cast[0].id).toBe('person-1')
+})
+
+test('adding people to a REHYDRATED cast does not collide ids (persistence bug)', () => {
+  // Simulate a reload: redux-persist brings back a cast with `person-1` already
+  // voiced, but any module-level id counter is back at 0. A counter would re-mint
+  // `person-1`, so setPersonVoice on the new person would hit the original (Me).
+  const mine = { voiceId: 'R8_MINE', source: 'saved' as const, label: 'R8_MINE' }
+  const rehydrated: StudioState = {
+    ...init(),
+    cast: [{ id: 'person-1', name: 'Me', voice: mine }],
+    voice: mine,
+  }
+  let s = reducer(rehydrated, setPeopleCount(2))
+  expect(new Set(s.cast.map((p) => p.id)).size).toBe(2) // distinct ids
+  const second = s.cast[1].id
+  expect(second).not.toBe('person-1')
+
+  const preset = { voiceId: 'Elegant_Man', source: 'preset' as const, label: 'Elegant Man' }
+  s = reducer(s, setPersonVoice({ id: second, voice: preset }))
+  expect(s.cast[1].voice).toEqual(preset) // the new person got the preset
+  expect(s.cast[0].voice).toEqual(mine) // …and Me is untouched
+})

@@ -19,6 +19,7 @@ import {
   type RefineSceneRaw,
 } from '../../lib/refiner'
 import { totalDuration, sourceForScene } from '../../lib/sources'
+import { resolvePerson, dominantSpeaker, resolveSpeakerVoice } from '../../lib/speakers'
 import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
@@ -35,7 +36,7 @@ import { planGlobalSheetCaptures } from '../../lib/globalSheet'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
   studioApi,
-  useTranscribeMutation,
+  useTranscribeStartMutation,
   useScenesMutation,
   useRefineSceneMutation,
   useNarrateMutation,
@@ -58,7 +59,6 @@ import {
   setSynopsis,
   setScenesJobId,
   setDirectorPromptJobId,
-  setVoice,
   addSavedVoice,
   removeSavedVoice,
   setSelected,
@@ -69,6 +69,11 @@ import {
   patchSource,
   patchSourceStage,
   resetStudio,
+  setPeopleCount,
+  renamePerson,
+  setPersonVoice,
+  removePerson,
+  assignSpeaker,
   type TranscriptWord,
 } from '../../store/studioSlice'
 
@@ -197,6 +202,9 @@ export function useScenePipeline() {
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
   const voice = useAppSelector((s) => s.studio.voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
+  const cast = useAppSelector((s) => s.studio.cast)
+  const speakerAssignments = useAppSelector((s) => s.studio.speakerAssignments)
+  const diarize = useAppSelector((s) => s.studio.diarize)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
   const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
   const sources = useAppSelector((s) => s.studio.sources)
@@ -205,7 +213,7 @@ export function useScenePipeline() {
   // dual-write here so sources[0] tracks the legacy fields.
   const currentSource = sources[0] ?? null
 
-  const [transcribeReq] = useTranscribeMutation()
+  const [transcribeStartReq] = useTranscribeStartMutation()
   const [scenesReq] = useScenesMutation()
   const [refineSceneReq] = useRefineSceneMutation()
   const [narrateReq] = useNarrateMutation()
@@ -288,7 +296,7 @@ export function useScenePipeline() {
     [sources],
   )
 
-  // The next GLOBAL step to run (thumbnails → director → clone), shown on the prep
+  // The next GLOBAL step to run (thumbnails → clone → director), shown on the prep
   // board. Null while sources are still being prepped (the per-video stages live in
   // the queue, not the board) or once every global stage is done.
   const currentStageId = useMemo<StageId | null>(() => {
@@ -309,7 +317,7 @@ export function useScenePipeline() {
    * the network (never a stale cached `pending`) and leaves no cache subscription.
    */
   const pollJob = useCallback(
-    async (jobId: string): Promise<{ kind: 'scenes' | 'refine'; result: unknown }> => {
+    async (jobId: string): Promise<{ kind: 'scenes' | 'refine' | 'transcribe'; result: unknown }> => {
       const deadline = Date.now() + POLL_TIMEOUT_MS
       for (;;) {
         const job = await dispatch(
@@ -485,6 +493,43 @@ export function useScenePipeline() {
     [pollJob, scenes, patchScene, sliceAndUploadSpans, sources],
   )
 
+  /**
+   * Drive a per-source transcribe job to completion and write its words onto the
+   * source (story 10e). Shared by the live `processSource`/`transcribe` path and
+   * resume-on-reload; `pollsInFlight` keeps the two from double-polling. Dual-writes
+   * the legacy top-level `words`/board stage when this is the primary source (the
+   * 09a bridge). Clears the source's `transcribeJobId` on any terminal status.
+   */
+  const completeTranscribeJob = useCallback(
+    async (sourceId: string, jobId: string) => {
+      if (pollsInFlight.has(jobId)) return
+      pollsInFlight.add(jobId)
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const isPrimary = ordered.length === 0 || ordered[0].id === sourceId
+      dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'active' } }))
+      if (isPrimary) patch('transcribe', { status: 'active' })
+      try {
+        const { result } = await pollJob(jobId)
+        const got = ((result ?? {}) as { words?: TranscriptWord[] }).words ?? []
+        const detail = `${got.length.toLocaleString()} words`
+        dispatch(patchSource({ id: sourceId, patch: { words: got, transcribeJobId: null } }))
+        dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'done', detail } }))
+        if (isPrimary) {
+          dispatch(setWords(got))
+          patch('transcribe', { status: 'done', detail })
+        }
+      } catch (e) {
+        const detail = stageError(e)
+        dispatch(patchSource({ id: sourceId, patch: { transcribeJobId: null } }))
+        dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'error', detail } }))
+        if (isPrimary) patch('transcribe', { status: 'error', detail })
+      } finally {
+        pollsInFlight.delete(jobId)
+      }
+    },
+    [pollJob, dispatch, patch, sources],
+  )
+
   // Resume any in-flight job after a hard reload (redux-persist brings back the
   // persisted job ids). The `pollsInFlight` guard inside the `complete*` helpers
   // makes this safe to re-run and safe to race with a live action — only one poll
@@ -499,8 +544,26 @@ export function useScenePipeline() {
       for (const scene of scenes) {
         if (scene.refineJobId) void completeRefineJob(scene.id, scene.refineJobId)
       }
+      for (const s of sources) {
+        if (s.transcribeJobId) void completeTranscribeJob(s.id, s.transcribeJobId)
+      }
     })
-  }, [scenesJobId, sourceUrl, scenes, completeDirectorJob, completeRefineJob])
+  }, [scenesJobId, sourceUrl, scenes, sources, completeDirectorJob, completeRefineJob, completeTranscribeJob])
+
+  // Cast seeding (story 10b): ensure at least one person exists when the voice
+  // step is reached, so the single-narrator common case is one decision with no
+  // extra UI. Guard so we don't add if cast already has people.
+  useEffect(() => {
+    if (cast.length === 0) dispatch(setPeopleCount(1))
+  }, [cast.length, dispatch])
+
+  // Back-compat: a pre-cast session had a single legacy `voice` on the slice but
+  // no cast entry. Adopt it onto person 1 so old sessions resume without re-picking.
+  useEffect(() => {
+    if (cast.length === 1 && !cast[0].voice && voice) {
+      dispatch(setPersonVoice({ id: cast[0].id, voice }))
+    }
+  }, [cast, voice, dispatch])
 
   // ---- Individual steps -----------------------------------------------------
 
@@ -548,19 +611,17 @@ export function useScenePipeline() {
   // WhisperX with word-level alignment, story 02). Keeps the word-level
   // timestamps for shorten + segment (story 03).
   const transcribe = useCallback(
-    async ({ duration }: StepContext) => {
+    async () => {
+      const id = currentSource?.id ?? 'source-1'
       patch('transcribe', { status: 'active' })
-      const data = await transcribeReq({ audioUrl }).unwrap()
-      const got = data.words ?? []
-      dispatch(setWords(got))
-      dispatch(patchSource({ id: currentSource?.id ?? 'source-1', patch: { words: got } }))
-      const count = got.length || Math.round((duration / 60) * 150)
-      patch('transcribe', {
-        status: 'done',
-        detail: `${count.toLocaleString()} words · ${Math.ceil(duration / 60)} min`,
-      })
+      // Enqueue the async job, persist its id so a reload resumes polling, then
+      // drive it to completion (story 10e). Diarization is the producer's
+      // project-level choice; it's what can push this past the 30s edge timeout.
+      const { jobId } = await transcribeStartReq({ audioUrl, diarize }).unwrap()
+      dispatch(patchSource({ id, patch: { transcribeJobId: jobId } }))
+      await completeTranscribeJob(id, jobId)
     },
-    [patch, dispatch, transcribeReq, audioUrl, currentSource],
+    [patch, dispatch, transcribeStartReq, audioUrl, diarize, currentSource, completeTranscribeJob],
   )
 
   // Stage ④ — sample interval thumbnails across ALL source videos, compose them
@@ -656,8 +717,11 @@ export function useScenePipeline() {
     async ({ src }: StepContext) => {
       patch('director', { status: 'active' })
       const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const namer = (videoId: string, label: string) =>
+        resolvePerson(videoId, label, cast, speakerAssignments)?.name ?? label
       const transcript = combinedTimedTranscript(
         ordered.map((s) => ({ id: s.id, fileName: s.fileName, duration: s.duration, words: s.words })),
+        namer,
       )
       const sheetUrls = persistedSheets.map((s) => s.url).filter((u): u is string => !!u)
       const duration = totalDuration(ordered.map((s) => ({ id: s.id, duration: s.duration })))
@@ -668,7 +732,7 @@ export function useScenePipeline() {
       dispatch(setScenesJobId(jobId))
       await completeDirectorJob(jobId, src)
     },
-    [patch, sources, persistedSheets, direction, scenesReq, dispatch, completeDirectorJob],
+    [patch, sources, persistedSheets, direction, scenesReq, dispatch, completeDirectorJob, cast, speakerAssignments],
   )
 
   // Re-run the master director after it's already done (story 03m). `next()`
@@ -689,32 +753,60 @@ export function useScenePipeline() {
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
-  // the VoiceStudio resource at the bottom of prep, which calls one of these two
-  // actions. Either produces the one durable `voice` (cloned or preset) that
-  // Build re-voices each scene with.
+  // the VoiceStudio resource at the bottom of prep, which calls the *ForPerson
+  // variants below (story 10b). The legacy single-voice handlers were removed in
+  // 10d — use cloneForPerson / pickPresetForPerson / reuseForPerson / clearForPerson
+  // / sampleForPerson instead.
 
-  // Clone path: upload the recorded sample, then mint a voice id. The real $3
-  // `minimax/voice-cloning` call is DISABLED server-side — the pipeline returns a
-  // real preset id as a stub, so the recording is uploaded but the clone itself
-  // costs nothing for now. The returned id still drives the live TTS preview.
-  const cloneFromRecording = useCallback(
-    async (blob: Blob) => {
+  const forgetVoice = useCallback(
+    (voiceId: string) => dispatch(removeSavedVoice(voiceId)),
+    [dispatch],
+  )
+
+  // ---- Cast dispatchers (story 10b) -------------------------------------------
+  // Stable `useCallback`-wrapped wrappers around the imported action creators so
+  // the references never change between renders. `assignSpeaker` MUST be stable —
+  // it's a dep of the seeding effect in Studio.tsx; the others get the same
+  // treatment for consistency. Deps: [dispatch] only, since dispatch is itself
+  // stable for the lifetime of the store.
+  const assignSpeakerCb = useCallback(
+    (videoId: string, label: string, personId: string) =>
+      dispatch(assignSpeaker({ videoId, label, personId })),
+    [dispatch],
+  )
+  const setPeopleCountCb = useCallback(
+    (n: number) => dispatch(setPeopleCount(n)),
+    [dispatch],
+  )
+  const renamePersonCb = useCallback(
+    (id: string, name: string) => dispatch(renamePerson({ id, name })),
+    [dispatch],
+  )
+  const removePersonCb = useCallback(
+    (id: string) => dispatch(removePerson(id)),
+    [dispatch],
+  )
+
+  // ---- Person-scoped voice handlers (story 10b) --------------------------------
+  // Mirror the single-voice handlers above but target a specific cast person via
+  // `setPersonVoice({ id, voice })`. Each person can be cloned/preset/reused
+  // independently; the first person's voice mirrors to the legacy `voice` field
+  // via the slice reducer. Busy flags (`cloning`, `samplingVoice`) are shared
+  // across all persons — only one operation can run at a time, same as before.
+
+  const cloneForPerson = useCallback(
+    async (personId: string, blob: Blob) => {
       if (cloning) return
       setCloning(true)
       patch('clone', { status: 'active' })
       try {
-        // MediaRecorder gives us webm/opus (Chrome) or mp4 (Safari), but MiniMax
-        // voice-cloning only accepts mp3/m4a/wav. Decode the take and re-encode it
-        // to a 24 kHz mono WAV before upload so the clone never rejects the format
-        // (reuses the same WebAudio path as audio extraction).
         const recorded = new File([blob], 'voice-sample', { type: blob.type || 'audio/webm' })
         const wav = await extractAudioWav(recorded, 24000)
         const file = new File([wav], 'voice-sample.wav', { type: 'audio/wav' })
         const { url: sampleUrl } = await uploadReq({ file, kind: 'voice' }).unwrap()
         const { voiceId } = await voiceCloneReq({ sampleUrl }).unwrap()
         const label = 'Your cloned voice'
-        dispatch(setVoice({ voiceId, source: 'clone', label, sampleUrl }))
-        // Remember the id so it's reusable next session without re-paying the $3.
+        dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'clone', label, sampleUrl } }))
         dispatch(addSavedVoice({ voiceId, label }))
         patch('clone', { status: 'done', detail: `cloned voice ready · ${voiceId}` })
       } catch (e) {
@@ -726,55 +818,59 @@ export function useScenePipeline() {
     [cloning, patch, dispatch, uploadReq, voiceCloneReq],
   )
 
-  // Preset path: no recording, no upload, no cost — just store the picked id.
-  const pickPresetVoice = useCallback(
-    (voiceId: string) => {
+  const pickPresetForPerson = useCallback(
+    (personId: string, voiceId: string) => {
       const label = presetLabel(voiceId)
-      dispatch(setVoice({ voiceId, source: 'preset', label }))
+      dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'preset', label } }))
       patch('clone', { status: 'done', detail: `preset · ${label}` })
     },
     [dispatch, patch],
   )
 
-  // Reuse a previously-cloned voice id (pasted or picked from the saved list) —
-  // no clone call, no $3. MiniMax keeps cloned voices server-side by id.
-  const reuseVoiceId = useCallback(
-    (rawId: string, rawLabel?: string) => {
+  const reuseForPerson = useCallback(
+    (personId: string, rawId: string) => {
       const voiceId = rawId.trim()
       if (!voiceId) return
-      const label = (rawLabel ?? '').trim() || voiceId
-      dispatch(setVoice({ voiceId, source: 'saved', label }))
+      const label = voiceId
+      dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'saved', label } }))
       dispatch(addSavedVoice({ voiceId, label }))
       patch('clone', { status: 'done', detail: `saved voice · ${voiceId}` })
     },
     [dispatch, patch],
   )
 
-  const forgetVoice = useCallback(
+  const clearForPerson = useCallback(
+    (personId: string) => {
+      dispatch(setPersonVoice({ id: personId, voice: null }))
+      // Only reset the stage if ALL people now have no voice.
+      // (If another person still has a voice, the stage stays done.)
+      const anyVoiced = cast.some((p) => p.id !== personId && p.voice !== null)
+      if (!anyVoiced) patch('clone', { status: 'pending', detail: undefined })
+    },
+    [dispatch, patch, cast],
+  )
+
+  const forgetForPerson = useCallback(
     (voiceId: string) => dispatch(removeSavedVoice(voiceId)),
     [dispatch],
   )
 
-  // Re-do the voice step: clear the choice and reset the stage to pending.
-  const clearVoice = useCallback(() => {
-    dispatch(setVoice(null))
-    patch('clone', { status: 'pending', detail: undefined })
-  }, [dispatch, patch])
-
-  // Preview: speak a short canned line in the chosen voice so the producer can
-  // hear it (live, cheap TTS). Returns the audio URL for the resource to play.
-  const generateSample = useCallback(async (): Promise<string | null> => {
-    if (!voice || samplingVoice) return null
-    setSamplingVoice(true)
-    try {
-      const text =
-        'Here is a quick sample of how your narration will sound across the scenes.'
-      const { audioUrl } = await voiceSayReq({ text, voiceId: voice.voiceId }).unwrap()
-      return audioUrl
-    } finally {
-      setSamplingVoice(false)
-    }
-  }, [voice, samplingVoice, voiceSayReq])
+  const sampleForPerson = useCallback(
+    async (personId: string): Promise<string | null> => {
+      if (samplingVoice) return null
+      const person = cast.find((p) => p.id === personId)
+      if (!person?.voice) return null
+      setSamplingVoice(true)
+      try {
+        const text = 'Here is a quick sample of how your narration will sound across the scenes.'
+        const { audioUrl } = await voiceSayReq({ text, voiceId: person.voice.voiceId }).unwrap()
+        return audioUrl
+      } finally {
+        setSamplingVoice(false)
+      }
+    },
+    [cast, samplingVoice, voiceSayReq],
+  )
 
   // ---- Per-source processing (story 09b) --------------------------------------
 
@@ -824,17 +920,13 @@ export function useScenePipeline() {
           patch('extract', { status: 'done', detail: `16 kHz mono WAV · ${mb(wav.size)}` })
         }
 
+        // Transcribe is async (story 10e): enqueue, persist the job id (so a
+        // reload resumes), then poll to completion. `completeTranscribeJob` owns
+        // the stage transitions + the per-source/primary word dual-write.
         stage = 'transcribe'
-        dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
-        const data = await transcribeReq({ audioUrl: aUrl }).unwrap()
-        const got = data.words ?? []
-        dispatch(patchSource({ id, patch: { words: got } }))
-        const count = got.length || Math.round((duration / 60) * 150)
-        dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${count.toLocaleString()} words` } }))
-        if (isPrimary) {
-          dispatch(setWords(got))
-          patch('transcribe', { status: 'done', detail: `${count.toLocaleString()} words` })
-        }
+        const { jobId } = await transcribeStartReq({ audioUrl: aUrl, diarize }).unwrap()
+        dispatch(patchSource({ id, patch: { transcribeJobId: jobId } }))
+        await completeTranscribeJob(id, jobId)
       } catch (e) {
         dispatch(patchSourceStage({ id, stage, patch: { status: 'error', detail: stageError(e) } }))
       } finally {
@@ -843,7 +935,7 @@ export function useScenePipeline() {
         setProcessingId(null)
       }
     },
-    [processingId, sources, dispatch, uploadReq, transcribeReq, patch],
+    [processingId, sources, dispatch, uploadReq, transcribeStartReq, diarize, completeTranscribeJob, patch],
   )
 
   // Walk the source queue in order and process each that isn't already fully
@@ -872,7 +964,7 @@ export function useScenePipeline() {
       try {
         if (id === 'upload') await uploadClip(ctx)
         else if (id === 'extract') await extractAndUploadAudio(ctx)
-        else if (id === 'transcribe') await transcribe(ctx)
+        else if (id === 'transcribe') await transcribe()
         else if (id === 'thumbnails') await generateThumbnails()
         else if (id === 'director') await runDirector(ctx) // shorten + segment, one Gemini call
         // 'clone' isn't run here — the VoiceStudio resource owns it (record/clone
@@ -1203,6 +1295,22 @@ export function useScenePipeline() {
     [scenes, patchScene],
   )
 
+  // Set a per-segment voice override (story 10d): persisted on the non-destructive
+  // `refined` layer like every Build edit. The picker UI (10d.2) calls this.
+  const setSegmentVoice = useCallback(
+    (sceneId: string, segIndex: number, voiceId: string) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const segments = base.segments.map((seg, i) =>
+        i === segIndex ? { ...seg, voiceId } : seg,
+      )
+      patchScene(sceneId, { refined: { ...base, segments } })
+    },
+    [scenes, patchScene],
+  )
+
   // Add a hand-typed narration run (the "typed snippet" spec): an unvoiced
   // segment sized by the word-count estimate, dropped anywhere in the scene and
   // voiced later via its Record / AI controls. Same non-destructive layering as
@@ -1224,16 +1332,24 @@ export function useScenePipeline() {
 
   // Voice ONE segment with the saved voice via the persisted-TTS pipeline. The
   // robot/AI option, now per-segment (not the whole scene at once).
+  // Voice resolution order: per-segment override → speaker-derived voice → global voice.
   const generateSegmentNarration = useCallback(
     async (sceneId: string, segIndex: number) => {
-      if (voicingSegKey || !voice) return
+      if (voicingSegKey) return
       const scene = scenes.find((s) => s.id === sceneId)
       const seg = scene && effectiveSegments(scene)[segIndex]
       if (!seg) return
+      const src = scene && sourceForScene(sources, scene)
+      const label = src ? dominantSpeaker(src.words, seg.start, seg.end) : null
+      const speakerVoice = label && scene
+        ? resolveSpeakerVoice(scene.sourceId, label, cast, speakerAssignments)
+        : null
+      const voiceId = seg.voiceId ?? speakerVoice?.voiceId ?? voice?.voiceId
+      if (!voiceId) { setSceneError('Pick a voice for this speaker first.'); return }
       setVoicingSegKey(`${sceneId}:${segIndex}`)
       setSceneError(null)
       try {
-        const { audioUrl } = await narrateReq({ text: seg.text, voiceId: voice.voiceId }).unwrap()
+        const { audioUrl } = await narrateReq({ text: seg.text, voiceId }).unwrap()
         const audioSeconds = await measureAudioDuration(audioUrl)
         setSegmentAudio(sceneId, segIndex, { audioUrl, audioSeconds, audioSource: 'ai' })
       } catch (e) {
@@ -1242,7 +1358,7 @@ export function useScenePipeline() {
         setVoicingSegKey(null)
       }
     },
-    [voicingSegKey, voice, scenes, narrateReq, setSegmentAudio],
+    [voicingSegKey, scenes, sources, cast, speakerAssignments, voice, narrateReq, setSegmentAudio],
   )
 
   // Voice ONE segment with the user's OWN recording: re-encode the take to WAV,
@@ -1434,16 +1550,26 @@ export function useScenePipeline() {
     clearRefinement,
     generateSegmentNarration,
     recordSegmentNarration,
-    cloneFromRecording,
-    pickPresetVoice,
-    reuseVoiceId,
+    setSegmentVoice,
     forgetVoice,
-    clearVoice,
-    generateSample,
     toggleBuilt,
     sources,
     processingId,
     processSource,
     processAll,
+    // Cast & speaker assignment (story 10b)
+    cast,
+    speakerAssignments,
+    diarize,
+    setPeopleCount: setPeopleCountCb,
+    renamePerson: renamePersonCb,
+    removePerson: removePersonCb,
+    assignSpeaker: assignSpeakerCb,
+    cloneForPerson,
+    pickPresetForPerson,
+    reuseForPerson,
+    clearForPerson,
+    forgetForPerson,
+    sampleForPerson,
   }
 }

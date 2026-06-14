@@ -17,8 +17,9 @@ import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '..
 import type { Scene } from '../lib/scenes'
 import type { ContactSheet } from '../lib/frames'
 
-/** A word with its time markers, as transcription returns them. */
-export type TranscriptWord = { text: string; start: number; end: number }
+/** A word with its time markers, as transcription returns them. `speaker` is the
+ *  diarization label (story 10a), e.g. `SPEAKER_00`; absent on old transcripts. */
+export type TranscriptWord = { text: string; start: number; end: number; speaker?: string }
 
 /**
  * The narration voice the producer settled on in the clone prep step — either
@@ -34,6 +35,10 @@ export type VoiceChoice = {
   label: string
   sampleUrl?: string | null
 }
+
+/** A person in the project cast (story 10b): a name + the one voice their lines
+ *  are narrated in. Detected speaker labels are assigned to a person per video. */
+export type Person = { id: string; name: string; voice: VoiceChoice | null }
 
 /**
  * A cloned voice id worth keeping. MiniMax stores cloned voices server-side by
@@ -77,6 +82,10 @@ export type VideoSource = {
   audioUrl: string | null
   audioPeaks: number[]
   words: TranscriptWord[]
+  /** In-flight async transcribe job id (story 10e). Transcription runs as a
+   *  fire-and-poll job (diarization can exceed the 30s edge timeout), so a hard
+   *  reload resumes polling from this; cleared (null) on terminal status. */
+  transcribeJobId?: string | null
   /** Per-video prep progress: only the per-video stages (upload/extract/transcribe). */
   stageProgress: StageProgressMap
 }
@@ -97,6 +106,7 @@ const makeSource = (p: { id: string; fileName: string; duration: number; order: 
   audioUrl: null,
   audioPeaks: [],
   words: [],
+  transcribeJobId: null,
   stageProgress: freshSourceProgress(),
 })
 
@@ -112,7 +122,7 @@ export type StudioState = {
   revisitPrep: boolean
   /**
    * Whether the producer has clicked "Continue" to reveal the global plan
-   * (thumbnails → director → voice) after their source videos finished
+   * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
    * stays hidden so it doesn't get ahead of the first job (find & process your
    * clips). Persisted so the reveal survives a reload; reset by resetStudio.
@@ -120,6 +130,10 @@ export type StudioState = {
    * page — so this only gates the not-yet-started case.)
    */
   planRevealed: boolean
+  /** Whether transcription should run speaker **diarization** (story 10e). Off by
+   *  default (single-narrator = the fast path); the producer flips it on before
+   *  processing when a recording has more than one speaker. Persisted. */
+  diarize: boolean
   scenes: Scene[]
   /** Relative `/api/uploads/source/...` serve path once uploaded (proxies to bucket). */
   sourceUrl: string | null
@@ -177,12 +191,19 @@ export type StudioState = {
    * and are retired in a later task.
    */
   sources: VideoSource[]
+  /** Project cast (story 10b). Default seeds one person ('Me'); the legacy
+   *  top-level `voice` mirrors cast[0].voice for back-compat readers. */
+  cast: Person[]
+  /** Per-video speaker→person map: speakerAssignments[videoId][speakerLabel] = personId.
+   *  Absent entry + single-person cast resolves to that person (see speakers.ts). */
+  speakerAssignments: Record<string, Record<string, string>>
 }
 
 const initialState: StudioState = {
   stageProgress: freshProgress(),
   revisitPrep: false,
   planRevealed: false,
+  diarize: false,
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
@@ -200,6 +221,28 @@ const initialState: StudioState = {
   fileName: null,
   finalCutUrl: null,
   sources: [],
+  cast: [],
+  speakerAssignments: {},
+}
+
+const defaultPersonName = (i: number) => (i === 0 ? 'Me' : `Person ${i + 1}`)
+
+/**
+ * Next collision-free person id, derived from the CURRENT cast — NOT a module
+ * counter. `cast` persists across reloads (redux-persist) but a module counter
+ * resets to 0 on every page load, so it would re-mint `person-1` and collide
+ * with a rehydrated person; `setPersonVoice` would then `find` the wrong one and
+ * edit the original (the "picking Person 2's voice changed Me" bug). Deriving the
+ * id from the max existing suffix is stable, deterministic for tests, and
+ * collision-free after a reload.
+ */
+const nextPersonId = (cast: Person[]): string => {
+  let max = 0
+  for (const p of cast) {
+    const m = /^person-(\d+)$/.exec(p.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `person-${max + 1}`
 }
 
 const studioSlice = createSlice({
@@ -226,6 +269,10 @@ const studioSlice = createSlice({
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
       state.planRevealed = action.payload
+    },
+    /** Toggle speaker diarization for transcription (story 10e). */
+    setDiarize(state, action: PayloadAction<boolean>) {
+      state.diarize = action.payload
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
       state.scenes = action.payload
@@ -312,6 +359,7 @@ const studioSlice = createSlice({
     /** Remove a source by id and renumber `order` on the remaining entries. */
     removeSource(state, action: PayloadAction<string>) {
       state.sources = state.sources.filter((s) => s.id !== action.payload).map((s, i) => ({ ...s, order: i }))
+      delete state.speakerAssignments[action.payload]
     },
     /** Move a source from index `from` to index `to` and renumber `order`. */
     reorderSources(state, action: PayloadAction<{ from: number; to: number }>) {
@@ -320,6 +368,46 @@ const studioSlice = createSlice({
       const [moved] = state.sources.splice(from, 1)
       state.sources.splice(to, 0, moved)
       state.sources = state.sources.map((s, i) => ({ ...s, order: i }))
+    },
+    /** Grow/shrink the cast to exactly `n` people (min 1). New people get a default
+     *  name + no voice; removing trims from the end and drops their assignments. */
+    setPeopleCount(state, action: PayloadAction<number>) {
+      const n = Math.max(1, Math.floor(action.payload))
+      while (state.cast.length < n)
+        state.cast.push({ id: nextPersonId(state.cast), name: defaultPersonName(state.cast.length), voice: null })
+      if (state.cast.length > n) {
+        const removed = state.cast.slice(n).map((p) => p.id)
+        state.cast = state.cast.slice(0, n)
+        for (const vid of Object.keys(state.speakerAssignments))
+          for (const label of Object.keys(state.speakerAssignments[vid]))
+            if (removed.includes(state.speakerAssignments[vid][label]))
+              delete state.speakerAssignments[vid][label]
+      }
+      state.voice = state.cast[0]?.voice ?? null
+    },
+    renamePerson(state, action: PayloadAction<{ id: string; name: string }>) {
+      const p = state.cast.find((x) => x.id === action.payload.id)
+      if (p) p.name = action.payload.name
+    },
+    setPersonVoice(state, action: PayloadAction<{ id: string; voice: VoiceChoice | null }>) {
+      const p = state.cast.find((x) => x.id === action.payload.id)
+      if (!p) return
+      p.voice = action.payload.voice
+      if (state.cast[0]?.id === p.id) state.voice = p.voice // legacy mirror
+    },
+    removePerson(state, action: PayloadAction<string>) {
+      state.cast = state.cast.filter((p) => p.id !== action.payload)
+      if (state.cast.length === 0)
+        state.cast = [{ id: nextPersonId(state.cast), name: defaultPersonName(0), voice: null }]
+      for (const vid of Object.keys(state.speakerAssignments))
+        for (const label of Object.keys(state.speakerAssignments[vid]))
+          if (state.speakerAssignments[vid][label] === action.payload)
+            delete state.speakerAssignments[vid][label]
+      state.voice = state.cast[0]?.voice ?? null
+    },
+    assignSpeaker(state, action: PayloadAction<{ videoId: string; label: string; personId: string }>) {
+      const { videoId, label, personId } = action.payload
+      ;(state.speakerAssignments[videoId] ??= {})[label] = personId
     },
     /**
      * Wipe everything back to a clean import — used by "Start over". Keeps the
@@ -337,6 +425,7 @@ export const {
   failActiveStage,
   setRevisitPrep,
   setPlanRevealed,
+  setDiarize,
   setScenes,
   patchScene,
   setSourceUrl,
@@ -360,6 +449,11 @@ export const {
   patchSourceStage,
   removeSource,
   reorderSources,
+  setPeopleCount,
+  renamePerson,
+  setPersonVoice,
+  removePerson,
+  assignSpeaker,
   resetStudio,
 } = studioSlice.actions
 

@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, test } from 'vitest'
 import {
   timedTranscript,
   toScenes,
   combinedTimedTranscript,
   type DirectorScene,
+  type TranscriptSource,
 } from './director'
 
 describe('timedTranscript', () => {
@@ -163,4 +164,28 @@ it('combinedTimedTranscript offsets each source to global time with boundary mar
   expect(out).toMatch(/\[0:00\] hello/)
   expect(out).toMatch(/--- VIDEO 2: two\.mp4 \(starts 0:16\) ---/)
   expect(out).toMatch(/\[0:16\] world/)
+})
+
+test('combinedTimedTranscript labels speaker runs with resolved names', () => {
+  const words = [
+    { text: 'hello', start: 0, end: 0.5, speaker: 'SPEAKER_00' },
+    { text: 'there', start: 0.6, end: 1.0, speaker: 'SPEAKER_00' },
+    { text: 'hi', start: 1.2, end: 1.6, speaker: 'SPEAKER_01' },
+  ]
+  const src: TranscriptSource = { id: 'v1', fileName: 'a.mov', duration: 2, words }
+  const out = combinedTimedTranscript([src], (videoId, label) =>
+    videoId === 'v1' && label === 'SPEAKER_00' ? 'James' : 'Guest',
+  )
+  expect(out).toContain('James: hello there')
+  expect(out).toContain('Guest: hi')
+})
+
+test('combinedTimedTranscript without a resolver is unchanged (no speaker labels)', () => {
+  const src: TranscriptSource = {
+    id: 'v1', fileName: 'a.mov', duration: 2,
+    words: [{ text: 'hello', start: 0, end: 0.5, speaker: 'SPEAKER_00' }],
+  }
+  const out = combinedTimedTranscript([src])
+  expect(out).not.toContain('SPEAKER_00')
+  expect(out).toContain('hello')
 })

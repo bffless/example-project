@@ -17,6 +17,12 @@ type Props = {
   onProcessAll: () => void
   /** Append more source videos to the queue (same validated File[] as import). */
   onAdd: (files: File[]) => void
+  /** Resolve a diarization label to a display name for the transcript preview —
+   *  the person's name once mapped, else the raw label. Omitted = raw label. */
+  resolveSpeakerName?: (sourceId: string, label: string) => string
+  /** Project-level: run speaker diarization during transcription (story 10e). */
+  diarize?: boolean
+  onDiarizeChange?: (v: boolean) => void
 }
 
 const STAGE_LABELS: Record<StageId, string> = {
@@ -41,6 +47,7 @@ type RowProps = {
   onDragEnd: () => void
   onRemove: (id: string) => void
   onProcess: (id: string) => void
+  resolveSpeakerName?: (sourceId: string, label: string) => string
 }
 
 function SourceRow({
@@ -56,6 +63,7 @@ function SourceRow({
   onDragEnd,
   onRemove,
   onProcess,
+  resolveSpeakerName,
 }: RowProps) {
   const [expanded, setExpanded] = useState(false)
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -171,7 +179,12 @@ function SourceRow({
               <AudioArtifact peaks={source.audioPeaks} audioUrl={source.audioUrl} />
             )}
             {source.words.length > 0 && (
-              <TranscriptText words={source.words} />
+              <TranscriptText
+                words={source.words}
+                speakerName={
+                  resolveSpeakerName ? (label) => resolveSpeakerName(source.id, label) : undefined
+                }
+              />
             )}
           </div>
         )}
@@ -180,7 +193,7 @@ function SourceRow({
   )
 }
 
-export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd }: Props) {
+export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd, resolveSpeakerName, diarize = false, onDiarizeChange }: Props) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   // Validate dropped/picked files the same way MediaImport does, then append the
   // ones that pass. Surfaced inline below the queue.
@@ -246,6 +259,25 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
         />
       </div>
 
+      {/* Project-level diarization toggle (story 10e). Off = single-narrator fast
+          path; on = detect speakers (slower, runs as an async job). Locked while
+          a clip is processing so the choice can't change mid-run. */}
+      <label className="mb-3 flex items-start gap-2 border rule bg-paper px-4 py-3 text-[13px] text-ink-soft">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={diarize}
+          disabled={busy}
+          onChange={(e) => onDiarizeChange?.(e.target.checked)}
+        />
+        <span>
+          <span className="font-medium text-ink">Detect speakers automatically</span> — tag who&rsquo;s
+          talking in each clip (diarization) so every person&rsquo;s lines get their own voice in Build
+          without you sorting them out. Slower. Leave it off for a single narrator — or if you&rsquo;d
+          rather just declare a few voices in the voice step and pick them per scene yourself.
+        </span>
+      </label>
+
       {/* Queue list */}
       <ol className="overflow-hidden border rule">
         {sources.map((source, index) => {
@@ -260,6 +292,7 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
               busy={busy}
               isThisOne={isThisOne}
               isDragTarget={isDragTarget}
+              resolveSpeakerName={resolveSpeakerName}
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/plain', String(index))
                 e.dataTransfer.effectAllowed = 'move'

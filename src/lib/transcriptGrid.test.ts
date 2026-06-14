@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, test } from 'vitest'
 import {
   buildTranscriptGrid,
   cutColumns,
@@ -189,4 +189,11 @@ describe('gridPosition', () => {
   it('returns null before zero', () => {
     expect(gridPosition(-1)).toBeNull()
   })
+})
+
+test('buildTranscriptGrid preserves a word speaker tag', () => {
+  const words: TWord[] = [{ text: 'hi', start: 0.1, end: 0.4, speaker: 'SPEAKER_00' }]
+  const grid = buildTranscriptGrid(words, 2, 0.1)
+  const cell = grid[0].cells.find((c) => c.length > 0)
+  expect(cell?.[0].speaker).toBe('SPEAKER_00')
 })

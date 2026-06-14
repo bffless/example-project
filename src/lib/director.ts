@@ -186,6 +186,48 @@ export function toScenes(raw: DirectorScene[], sources: SourceLike[]): Scene[] {
 /** One source's transcript for the combined director request (story 09c). */
 export type TranscriptSource = { id: string; fileName: string; duration: number; words: TWord[] }
 
+/** Resolve a `(videoId, speakerLabel)` to a display name for the director prompt. */
+export type SpeakerNamer = (videoId: string, speakerLabel: string) => string
+
+/**
+ * Like `timedTranscript`, but when words carry a `speaker`, group consecutive
+ * same-speaker runs and prefix each emitted line with `Name:` (story 10c). A run
+ * is broken by either a speaker change or the time window rolling over, so the
+ * `[m:ss]` anchors are preserved. Single-speaker input yields the same name on
+ * every line (cheap, and the director ignores it) — effectively today's output
+ * plus a name.
+ */
+export function speakerTimedTranscript(
+  words: TWord[],
+  name: (label: string) => string,
+  secondsPerLine = 8,
+): string {
+  if (!words.length || secondsPerLine <= 0) return ''
+  const lines: { bucket: number; speaker: string | undefined; words: string[] }[] = []
+  let curBucket = -1
+  let curSpeaker: string | undefined
+  for (const w of words) {
+    const text = str(w?.text).trim()
+    if (!text) continue
+    const start = typeof w?.start === 'number' && Number.isFinite(w.start) ? w.start : null
+    const bucket = start == null ? Math.max(0, curBucket) : Math.floor(start / secondsPerLine)
+    const speaker = w?.speaker
+    const rollover = start != null && (bucket !== curBucket || speaker !== curSpeaker)
+    if (rollover || lines.length === 0) {
+      lines.push({ bucket, speaker, words: [] })
+      curBucket = bucket
+      curSpeaker = speaker
+    }
+    lines[lines.length - 1].words.push(text)
+  }
+  return lines
+    .map((l) => {
+      const who = l.speaker ? `${name(l.speaker)}: ` : ''
+      return `[${clockLabel(l.bucket * secondsPerLine)}] ${who}${l.words.join(' ')}`
+    })
+    .join('\n')
+}
+
 /**
  * Build ONE timestamped transcript across all source videos for the master
  * director (story 09c): each source's words are offset onto the global timeline
@@ -195,8 +237,12 @@ export type TranscriptSource = { id: string; fileName: string; duration: number;
  * but knows where each video begins (and must not start a chapter in one video
  * and end it in another; if one does, `toScenes` assigns it to the source it
  * overlaps most rather than splitting it).
+ *
+ * When an optional `namer` is provided (story 10c), words with a `speaker` field
+ * are grouped by consecutive speaker runs and prefixed with the resolved display
+ * name. Without a namer, output is byte-identical to today's behaviour.
  */
-export function combinedTimedTranscript(sources: TranscriptSource[]): string {
+export function combinedTimedTranscript(sources: TranscriptSource[], namer?: SpeakerNamer): string {
   const spans = sourceOffsets(sources)
   return sources
     .map((s, i) => {
@@ -206,7 +252,9 @@ export function combinedTimedTranscript(sources: TranscriptSource[]): string {
         start: typeof w.start === 'number' ? w.start + offset : w.start,
         end: typeof w.end === 'number' ? w.end + offset : w.end,
       }))
-      const body = timedTranscript(shifted)
+      const body = namer
+        ? speakerTimedTranscript(shifted, (label) => namer(s.id, label))
+        : timedTranscript(shifted)
       const header = `--- VIDEO ${i + 1}: ${s.fileName} (starts ${clockLabel(offset)}) ---`
       return i === 0 ? `${header}\n${body}` : `\n${header}\n${body}`
     })

@@ -73,7 +73,13 @@ optimizations are slated next but NOT done**: audio polish (per-segment `loudnor
 + short `acrossfade`), a stream-copy/no-re-encode speed path, and — **parked** —
 multithreaded ffmpeg.wasm (`core-mt` is incompatible with `@ffmpeg/ffmpeg@0.12.15`'s
 module worker + classic pthread workers; reverted to single-threaded). See story 05's
-"Optimizations — slated next". **Next up overall: manual cut editing (03d phase) —
+"Optimizations — slated next". **Stories 10a–10d shipped speaker diarization + per-person voices** (branch
+`studio/diarization-cast-voices`): WhisperX now runs with `diarization:true` and
+carries a per-word `speaker` label through the transcript; a new project **cast**
+(`Person[]`) lets the producer name people and assign each one a voice; the
+director receives a speaker-labelled transcript; and at Build each narration
+segment defaults to its dominant speaker's voice with a per-segment override
+`<select>`. **Next up overall: manual cut editing (03d phase) —
 let the user add/remove cuts directly in the diff viewer** — then the wps knob.
 (Per-scene scope shipped: the Build diff is now windowed to the selected scene tab
 via `windowLines`, instead of rendering the whole talk.)
@@ -130,11 +136,17 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03r | `03r-seam-aware-refiner-context.md` | refiner gets the **previous scene's narration tail** + position-in-talk (`sceneTail`, 3 new `RefineSceneRequest` fields) so stitched seams flow instead of being written independently; dedicated fields (not folded into `direction`); rule `afacb572` `prep` adds a `CONTINUITY` rule + two prompt blocks (backward-compatible) | ✅ done* |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
+| 10a | `10a-diarization.md` | `/api/transcribe` rule `972a6dc5` runs `diarization:true` + `huggingface_access_token: secrets.HF_TOKEN`; flatten step carries per-word `speaker`; `TranscriptWord`/`TWord` gain `speaker?` | ✅ done* |
+| 10b | `10b-cast-and-voice-step.md` | prep reordered thumbnails→voice→director; project **cast** (`Person[]`) + per-video `speakerAssignments`; people count control (default 1 = auto-assign, grid at N≥2); `src/lib/speakers.ts` resolution helpers; `CastStudio` UI | ✅ done |
+| 10c | `10c-speaker-aware-director.md` | `speakerTimedTranscript` groups words by speaker + labels each run with the cast name; `SpeakerNamer` threaded through `combinedTimedTranscript`; back-compat when no namer — director rule `138f27fb` prompt intentionally unchanged (self-describing `Name:` format) | ✅ done* |
+| 10d | `10d-per-segment-voice.md` | `NarrationSegment.voiceId?` override; `dominantSpeaker` → assignment → person → voice default per segment; per-segment voice `<select>` in Build diff; `/api/voice/narrate` uses resolved id (override ?? speaker default ?? global); export unchanged | ✅ done* |
+| 10e | async transcribe + optional diarization | diarization is a project-level opt-in (default off; "more than one speaker" checkbox in the source queue, threaded into the enqueue body); `/api/transcribe` rebuilt to the fire-and-poll shape (`prep → createJob → respond {jobId}`, postSteps `setRunning → sign → whisper(diarization=steps.prep.diarize) → flatten → check → finishOk/finishErr`) so diarization can't hit the 30s edge timeout; client polls the shared `/api/studio/job` (new `transcribe` kind) with per-source `transcribeJobId` + reload-resume; speakers also shown in the transcript preview + playable samples in the assignment grid | ✅ done* |
 
 Legend: ✅ done · ▶ next up · 🔨 in progress · 📝 spec ready · ⏳ queued. `*` = code done, needs
 the Replicate API token in BFFless Settings → AI to run. `†` = shipped; open
-non-blocking follow-ups (speed/smart-cut spike, encode-quality toggle). Finish a
-story → set it ✅, move the file to `stories/done/`, promote the next to ▶.
+non-blocking follow-ups (speed/smart-cut spike, encode-quality toggle). Stories 10a–10d shipped
+together on one branch `studio/diarization-cast-voices` (one-branch-per-refactor convention).
+Finish a story → set it ✅, move the file to `stories/done/`, promote the next to ▶.
 
 ## How to work it
 
