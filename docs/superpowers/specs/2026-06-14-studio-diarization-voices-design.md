@@ -59,12 +59,13 @@ runs **thumbnails → director → voice**. This feature:
 `MOCK_STUDIO`) gains `SPEAKER_00` / `SPEAKER_01` so dev exercises the path
 without the paid model.
 
-**⚠️ Live verification (needs the Replicate token):** confirm that
-`align_output:true + diarization:true` returns a **word-level** `speaker`. The
-user's sample (which had `align_output:false`) showed speaker only at the
-*segment* level. If the live word objects lack `speaker`, the flatten step maps
-segment speakers onto words by time-overlap instead — **same resulting shape**,
-slightly more code. Lock the flatten step only after this is confirmed.
+**✅ Live verification (done 2026-06-14):** a real run with
+`align_output:true + diarization:true` returns a **word-level** `speaker` on every
+word — `output.segments[].words[]` each carry
+`{ word, start, end, score, speaker: "SPEAKER_00" }`, and each segment also carries
+a top-level `speaker`. So the flatten maps `speaker: w.speaker ?? segment.speaker ??
+null` (the segment value backstops any word a diarization gap missed). The
+time-overlap fallback is **not** needed.
 
 ## Story 10b — Cast + reordered voice step + per-video assignment
 
