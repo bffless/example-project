@@ -154,6 +154,9 @@ function stageError(e: unknown): string {
   return 'Unknown error'
 }
 
+/** Re-exported so the auto-build orchestrator surfaces the same readable error. */
+export const autoBuildError = stageError
+
 export type { TranscriptWord }
 
 /** What each step needs: the source file, its object URL, and its duration.
@@ -252,6 +255,8 @@ export function useScenePipeline() {
   // Which segment is currently being voiced (AI or record-upload), as
   // `${sceneId}:${segmentIndex}` — so only that one row shows a spinner.
   const [voicingSegKey, setVoicingSegKey] = useState<string | null>(null)
+  // Which scene is currently having ALL its segments voiced by auto mode (story 03s).
+  const [voicingSceneId, setVoicingSceneId] = useState<string | null>(null)
   const [sceneError, setSceneError] = useState<string | null>(null)
   // The clone prep step's two busy flags: cloning a recording, and synthesizing
   // the post-selection preview sample. Transient — fine to lose on reload.
@@ -1415,6 +1420,69 @@ export function useScenePipeline() {
     [voicingSegKey, scenes, sources, sliceAndUploadSpans, setSegmentAudio],
   )
 
+  // Voice EVERY unvoiced segment in a scene for auto mode (story 03s). Segments the
+  // refiner already voiced from the source audio (auto-adopted `original`) keep
+  // their audio and are skipped; a still-unvoiced segment the refiner TAGGED
+  // `original` is reused from the source audio; every other unvoiced segment gets
+  // AI TTS in its resolved voice (per-segment override → speaker voice → global).
+  // Sequential — one network call at a time. Builds the new segments array locally
+  // and commits in ONE patch (a tight loop of `setSegmentAudio` would merge from a
+  // stale `refined` and lose earlier segments). On failure sets `sceneError` and
+  // bails WITHOUT a partial commit — auto mode reads `sceneError` to halt; resuming
+  // re-voices the scene from its already-voiced segments (the skip keeps it cheap).
+  const voiceAllSegments = useCallback(
+    async (sceneId: string) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      setVoicingSceneId(sceneId)
+      setSceneError(null)
+      try {
+        const src = sourceForScene(sources, scene)
+        const base =
+          scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+        const segments = [...base.segments]
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i]
+          if (seg.audioUrl) continue // already voiced (incl. auto-adopted original)
+          if (seg.suggestedSource === 'original') {
+            const [clip] = await sliceAndUploadSpans(src?.audioUrl ?? '', [{ start: seg.start, end: seg.end }])
+            if (!clip) throw new Error(`Couldn't reuse the original audio for segment ${i + 1}.`)
+            segments[i] = {
+              ...seg,
+              audioUrl: clip.url,
+              audioSeconds: clip.seconds,
+              audioSource: 'original',
+              end: seg.start + clip.seconds,
+            }
+          } else {
+            const label = src ? dominantSpeaker(src.words, seg.start, seg.end) : null
+            const speakerVoice =
+              label != null ? resolveSpeakerVoice(scene.sourceId, label, cast, speakerAssignments) : null
+            const voiceId = seg.voiceId ?? speakerVoice?.voiceId ?? voice?.voiceId
+            if (!voiceId)
+              throw new Error('Pick a voice before auto-building — segments need a voice to narrate.')
+            const { audioUrl } = await narrateReq({ text: seg.text, voiceId }).unwrap()
+            const audioSeconds = await measureAudioDuration(audioUrl)
+            segments[i] = {
+              ...seg,
+              audioUrl,
+              audioSeconds,
+              audioSource: 'ai',
+              end: seg.start + (audioSeconds > 0 ? audioSeconds : seg.end - seg.start),
+            }
+          }
+        }
+        const total = segments.reduce((n, s) => n + (s.audioSeconds ?? 0), 0)
+        patchScene(sceneId, { refined: { ...base, segments }, narrationSeconds: total > 0 ? total : null })
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setVoicingSceneId(null)
+      }
+    },
+    [scenes, sources, cast, speakerAssignments, voice, narrateReq, sliceAndUploadSpans, patchScene],
+  )
+
   // ---- Scene build loop -----------------------------------------------------
 
   const markBuilt = useCallback(
@@ -1552,6 +1620,9 @@ export function useScenePipeline() {
     recordSegmentNarration,
     setSegmentVoice,
     forgetVoice,
+    markBuilt,
+    voiceAllSegments,
+    voicingSceneId,
     toggleBuilt,
     sources,
     processingId,
