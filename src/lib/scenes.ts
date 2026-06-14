@@ -46,6 +46,9 @@ export type NarrationSegment = {
    *  it survives user overrides, so revert/re-open flows can still show what
    *  the AI wanted. `audioSource` above stays "what actually happened". */
   suggestedSource?: 'original' | 'revoice'
+  /** Producer's per-segment voice override (story 10d). Absent = use the segment's
+   *  speaker-derived default. Persists on `scene.refined` like every Build edit. */
+  voiceId?: string
 }
 
 /**

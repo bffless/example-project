@@ -19,7 +19,7 @@ import {
   type RefineSceneRaw,
 } from '../../lib/refiner'
 import { totalDuration, sourceForScene } from '../../lib/sources'
-import { resolvePerson } from '../../lib/speakers'
+import { resolvePerson, dominantSpeaker, resolveSpeakerVoice } from '../../lib/speakers'
 import { extractAudio, extractAudioWav, sliceAudioWav, sliceManyAudioWav } from '../../lib/audio'
 import { buildSliceCommand } from '../../lib/export/slice'
 import { slice as ffmpegSlice } from '../../lib/export/ffmpeg'
@@ -1338,6 +1338,22 @@ export function useScenePipeline() {
     [scenes, patchScene],
   )
 
+  // Set a per-segment voice override (story 10d): persisted on the non-destructive
+  // `refined` layer like every Build edit. The picker UI (10d.2) calls this.
+  const setSegmentVoice = useCallback(
+    (sceneId: string, segIndex: number, voiceId: string) => {
+      const scene = scenes.find((s) => s.id === sceneId)
+      if (!scene) return
+      const base =
+        scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
+      const segments = base.segments.map((seg, i) =>
+        i === segIndex ? { ...seg, voiceId } : seg,
+      )
+      patchScene(sceneId, { refined: { ...base, segments } })
+    },
+    [scenes, patchScene],
+  )
+
   // Add a hand-typed narration run (the "typed snippet" spec): an unvoiced
   // segment sized by the word-count estimate, dropped anywhere in the scene and
   // voiced later via its Record / AI controls. Same non-destructive layering as
@@ -1359,16 +1375,24 @@ export function useScenePipeline() {
 
   // Voice ONE segment with the saved voice via the persisted-TTS pipeline. The
   // robot/AI option, now per-segment (not the whole scene at once).
+  // Voice resolution order: per-segment override → speaker-derived voice → global voice.
   const generateSegmentNarration = useCallback(
     async (sceneId: string, segIndex: number) => {
-      if (voicingSegKey || !voice) return
+      if (voicingSegKey) return
       const scene = scenes.find((s) => s.id === sceneId)
       const seg = scene && effectiveSegments(scene)[segIndex]
       if (!seg) return
+      const src = scene && sourceForScene(sources, scene)
+      const label = src ? dominantSpeaker(src.words, seg.start, seg.end) : null
+      const speakerVoice = label && scene
+        ? resolveSpeakerVoice(scene.sourceId, label, cast, speakerAssignments)
+        : null
+      const voiceId = seg.voiceId ?? speakerVoice?.voiceId ?? voice?.voiceId
+      if (!voiceId) { setSceneError('Pick a voice for this speaker first.'); return }
       setVoicingSegKey(`${sceneId}:${segIndex}`)
       setSceneError(null)
       try {
-        const { audioUrl } = await narrateReq({ text: seg.text, voiceId: voice.voiceId }).unwrap()
+        const { audioUrl } = await narrateReq({ text: seg.text, voiceId }).unwrap()
         const audioSeconds = await measureAudioDuration(audioUrl)
         setSegmentAudio(sceneId, segIndex, { audioUrl, audioSeconds, audioSource: 'ai' })
       } catch (e) {
@@ -1377,7 +1401,7 @@ export function useScenePipeline() {
         setVoicingSegKey(null)
       }
     },
-    [voicingSegKey, voice, scenes, narrateReq, setSegmentAudio],
+    [voicingSegKey, scenes, sources, cast, speakerAssignments, voice, narrateReq, setSegmentAudio],
   )
 
   // Voice ONE segment with the user's OWN recording: re-encode the take to WAV,
@@ -1569,6 +1593,7 @@ export function useScenePipeline() {
     clearRefinement,
     generateSegmentNarration,
     recordSegmentNarration,
+    setSegmentVoice,
     cloneFromRecording,
     pickPresetVoice,
     reuseVoiceId,
