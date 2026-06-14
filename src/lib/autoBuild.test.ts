@@ -138,6 +138,10 @@ describe('voiceProgress', () => {
     })
     expect(voiceProgress(s)).toEqual({ done: 1, total: 2 })
   })
+
+  it('returns { done: 0, total: 0 } for an unrefined scene', () => {
+    expect(voiceProgress(scene())).toEqual({ done: 0, total: 0 })
+  })
 })
 
 describe('sceneStepStatuses', () => {

@@ -10,7 +10,6 @@
  */
 
 import type { Scene } from './scenes'
-import { effectiveSegments } from './refiner'
 
 /** The per-scene build steps, in the order auto mode runs them. `assemble` covers
  *  both rendering the scene MP4 and saving it (one action). */
@@ -55,9 +54,11 @@ export const AUTO_STEPS: AutoStepDef[] = [
   { id: 'assemble', label: 'Assemble & save', isDone: (s) => !!s.assembledUrl },
 ]
 
-/** Voiced/total segment counts for the dashboard's "Voice (n/m)" sub-progress. */
+/** Voiced/total segment counts for the dashboard's "Voice (n/m)" sub-progress.
+ *  Reads `refined.segments` (the same source as the voice step) so it never shows
+ *  a phantom count on a not-yet-refined scene. */
 export function voiceProgress(scene: Scene): { done: number; total: number } {
-  const segs = effectiveSegments(scene)
+  const segs = scene.refined?.segments ?? []
   return { done: segs.filter((s) => !!s.audioUrl).length, total: segs.length }
 }
 
@@ -89,14 +90,16 @@ export function nextAction(scenes: Scene[]): { scene: Scene; step: AutoStepId | 
 
 /** Per-step display status for one scene, given the live run pointer. */
 export function sceneStepStatuses(scene: Scene, run: AutoBuildRun): Record<AutoStepId, AutoStepStatus> {
-  const out = {} as Record<AutoStepId, AutoStepStatus>
-  for (const step of AUTO_STEPS) {
-    if (step.isDone(scene)) out[step.id] = 'done'
-    else if (run.currentSceneId === scene.id && run.currentStepId === step.id)
-      out[step.id] = run.status === 'halted' ? 'error' : run.status === 'running' ? 'running' : 'pending'
-    else out[step.id] = 'pending'
+  const status = (step: AutoStepDef): AutoStepStatus => {
+    if (step.isDone(scene)) return 'done'
+    if (run.currentSceneId === scene.id && run.currentStepId === step.id)
+      return run.status === 'halted' ? 'error' : run.status === 'running' ? 'running' : 'pending'
+    return 'pending'
   }
-  return out
+  return Object.fromEntries(AUTO_STEPS.map((step) => [step.id, status(step)])) as Record<
+    AutoStepId,
+    AutoStepStatus
+  >
 }
 
 /** Rolled-up status for a scene row in the dashboard. */
