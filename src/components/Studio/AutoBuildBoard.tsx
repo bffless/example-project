@@ -26,6 +26,17 @@ const STEP_ICON: Record<AutoStepStatus, string> = {
   pending: '·',
 }
 
+/** Animated activity indicator — inherits the surrounding text colour. Lets a slow
+ *  async step (refine, voicing) read as ALIVE rather than frozen on the board. */
+function Spinner({ className = '' }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block animate-spin rounded-full border-2 border-current border-t-transparent align-middle ${className}`}
+    />
+  )
+}
+
 /**
  * Auto Build dashboard (story 03s) — a pure render of the run: the scene tree with
  * per-step status, plus the Start/Pause/Resume/Stop controls. It owns no logic;
@@ -35,9 +46,13 @@ const STEP_ICON: Record<AutoStepStatus, string> = {
 export function AutoBuildBoard({ scenes, run, selectedId, onSelect, onStart, onPause, onResume, onStop }: Props) {
   const builtCount = scenes.filter((s) => s.status === 'built').length
   const activeIndex = scenes.findIndex((s) => s.id === run.currentSceneId)
-  const headline =
-    run.status === 'running'
-      ? `▶ Running · Scene ${activeIndex >= 0 ? activeIndex + 1 : builtCount + 1} / ${scenes.length}`
+  // The final stitch has no active scene (currentSceneId is null) — give it its own
+  // headline + spinner so the run doesn't look frozen / off-by-one while it renders.
+  const stitching = run.status === 'running' && run.currentStepId === 'stitch'
+  const headline = stitching
+    ? 'Stitching the final cut…'
+    : run.status === 'running'
+      ? `Running · Scene ${activeIndex >= 0 ? activeIndex + 1 : Math.min(builtCount + 1, scenes.length)} / ${scenes.length}`
       : run.status === 'paused'
         ? '⏸ Paused'
         : run.status === 'halted'
@@ -51,7 +66,10 @@ export function AutoBuildBoard({ scenes, run, selectedId, onSelect, onStart, onP
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="meta-label">Auto build</p>
-          <p className="mt-1 text-[13px] text-ink-soft">{headline}</p>
+          <p className="mt-1 flex items-center gap-2 text-[13px] text-ink-soft">
+            {run.status === 'running' && <Spinner className="h-3 w-3 text-terracotta" />}
+            {headline}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {run.status === 'idle' || run.status === 'done' ? (
@@ -106,11 +124,21 @@ export function AutoBuildBoard({ scenes, run, selectedId, onSelect, onStart, onP
                       : rolled === 'built'
                         ? 'text-ink'
                         : rolled === 'running'
-                          ? 'text-terracotta'
+                          ? 'inline-flex items-center gap-1.5 text-terracotta'
                           : 'text-ink-mute'
                   }
                 >
-                  {rolled === 'built' ? '✓ built' : rolled === 'running' ? '⟳ running' : rolled === 'error' ? '✗ error' : 'pending'}
+                  {rolled === 'built' ? (
+                    '✓ built'
+                  ) : rolled === 'running' ? (
+                    <>
+                      <Spinner className="h-2.5 w-2.5" /> running
+                    </>
+                  ) : rolled === 'error' ? (
+                    '✗ error'
+                  ) : (
+                    'pending'
+                  )}
                 </span>
               </button>
               {expanded && (
@@ -128,7 +156,12 @@ export function AutoBuildBoard({ scenes, run, selectedId, onSelect, onStart, onP
                               : ''
                       }
                     >
-                      {STEP_ICON[steps[step.id]]} {step.label}
+                      {steps[step.id] === 'running' ? (
+                        <Spinner className="mr-0.5 h-2.5 w-2.5" />
+                      ) : (
+                        STEP_ICON[steps[step.id]]
+                      )}{' '}
+                      {step.label}
                       {step.id === 'voice' && steps.voice !== 'pending' ? ` (${vp.done}/${vp.total})` : ''}
                     </span>
                   ))}
