@@ -10,7 +10,7 @@
  * a renderer over `buildTranscriptGrid`.
  */
 
-export type TWord = { text: string; start: number; end: number }
+export type TWord = { text: string; start: number; end: number; speaker?: string }
 
 /** A dropped footage span, in seconds — drawn as red cells on the grid. */
 export type CutSpan = { start: number; end: number }

@@ -17,8 +17,9 @@ import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '..
 import type { Scene } from '../lib/scenes'
 import type { ContactSheet } from '../lib/frames'
 
-/** A word with its time markers, as transcription returns them. */
-export type TranscriptWord = { text: string; start: number; end: number }
+/** A word with its time markers, as transcription returns them. `speaker` is the
+ *  diarization label (story 10a), e.g. `SPEAKER_00`; absent on old transcripts. */
+export type TranscriptWord = { text: string; start: number; end: number; speaker?: string }
 
 /**
  * The narration voice the producer settled on in the clone prep step — either
