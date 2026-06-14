@@ -329,6 +329,7 @@ const studioSlice = createSlice({
     /** Remove a source by id and renumber `order` on the remaining entries. */
     removeSource(state, action: PayloadAction<string>) {
       state.sources = state.sources.filter((s) => s.id !== action.payload).map((s, i) => ({ ...s, order: i }))
+      delete state.speakerAssignments[action.payload]
     },
     /** Move a source from index `from` to index `to` and renumber `order`. */
     reorderSources(state, action: PayloadAction<{ from: number; to: number }>) {

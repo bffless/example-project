@@ -748,7 +748,7 @@ export function Studio() {
                     editedWords={editedWords}
                     cuts={cutSpans}
                     segments={segmentControls}
-                    canGenerateAI={!!pipe.voice}
+                    canGenerateAI={pipe.cast.some((p) => p.voice != null) || !!pipe.voice}
                     onGenerateAI={pipe.generateSegmentNarration}
                     onRecord={pipe.recordSegmentNarration}
                     onUseOriginal={pipe.adoptSegmentOriginal}

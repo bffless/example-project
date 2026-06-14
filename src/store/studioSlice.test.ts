@@ -137,6 +137,15 @@ import {
 
 const init = () => reducer(undefined, { type: '@@init' }) as StudioState
 
+test("removeSource drops that source's speaker assignments", () => {
+  let s = reducer(init(), addSource({ id: 'src-x', fileName: 'a.mov', duration: 5 }))
+  s = reducer(s, setPeopleCount(2))
+  s = reducer(s, assignSpeaker({ videoId: 'src-x', label: 'SPEAKER_00', personId: s.cast[0].id }))
+  expect(s.speakerAssignments['src-x']).toBeDefined()
+  s = reducer(s, removeSource('src-x'))
+  expect(s.speakerAssignments['src-x']).toBeUndefined()
+})
+
 test('setPeopleCount pads up and truncates down, min 1', () => {
   let s = init()
   s = reducer(s, setPeopleCount(3))

@@ -59,7 +59,6 @@ import {
   setSynopsis,
   setScenesJobId,
   setDirectorPromptJobId,
-  setVoice,
   addSavedVoice,
   removeSavedVoice,
   setSelected,
@@ -715,92 +714,15 @@ export function useScenePipeline() {
   )
 
   // Stage ⑥ — the voice step (story 04). Not run through `next()`: it's owned by
-  // the VoiceStudio resource at the bottom of prep, which calls one of these two
-  // actions. Either produces the one durable `voice` (cloned or preset) that
-  // Build re-voices each scene with.
-
-  // Clone path: upload the recorded sample, then mint a voice id. The real $3
-  // `minimax/voice-cloning` call is DISABLED server-side — the pipeline returns a
-  // real preset id as a stub, so the recording is uploaded but the clone itself
-  // costs nothing for now. The returned id still drives the live TTS preview.
-  const cloneFromRecording = useCallback(
-    async (blob: Blob) => {
-      if (cloning) return
-      setCloning(true)
-      patch('clone', { status: 'active' })
-      try {
-        // MediaRecorder gives us webm/opus (Chrome) or mp4 (Safari), but MiniMax
-        // voice-cloning only accepts mp3/m4a/wav. Decode the take and re-encode it
-        // to a 24 kHz mono WAV before upload so the clone never rejects the format
-        // (reuses the same WebAudio path as audio extraction).
-        const recorded = new File([blob], 'voice-sample', { type: blob.type || 'audio/webm' })
-        const wav = await extractAudioWav(recorded, 24000)
-        const file = new File([wav], 'voice-sample.wav', { type: 'audio/wav' })
-        const { url: sampleUrl } = await uploadReq({ file, kind: 'voice' }).unwrap()
-        const { voiceId } = await voiceCloneReq({ sampleUrl }).unwrap()
-        const label = 'Your cloned voice'
-        dispatch(setVoice({ voiceId, source: 'clone', label, sampleUrl }))
-        // Remember the id so it's reusable next session without re-paying the $3.
-        dispatch(addSavedVoice({ voiceId, label }))
-        patch('clone', { status: 'done', detail: `cloned voice ready · ${voiceId}` })
-      } catch (e) {
-        patch('clone', { status: 'error', detail: stageError(e) })
-      } finally {
-        setCloning(false)
-      }
-    },
-    [cloning, patch, dispatch, uploadReq, voiceCloneReq],
-  )
-
-  // Preset path: no recording, no upload, no cost — just store the picked id.
-  const pickPresetVoice = useCallback(
-    (voiceId: string) => {
-      const label = presetLabel(voiceId)
-      dispatch(setVoice({ voiceId, source: 'preset', label }))
-      patch('clone', { status: 'done', detail: `preset · ${label}` })
-    },
-    [dispatch, patch],
-  )
-
-  // Reuse a previously-cloned voice id (pasted or picked from the saved list) —
-  // no clone call, no $3. MiniMax keeps cloned voices server-side by id.
-  const reuseVoiceId = useCallback(
-    (rawId: string, rawLabel?: string) => {
-      const voiceId = rawId.trim()
-      if (!voiceId) return
-      const label = (rawLabel ?? '').trim() || voiceId
-      dispatch(setVoice({ voiceId, source: 'saved', label }))
-      dispatch(addSavedVoice({ voiceId, label }))
-      patch('clone', { status: 'done', detail: `saved voice · ${voiceId}` })
-    },
-    [dispatch, patch],
-  )
+  // the VoiceStudio resource at the bottom of prep, which calls the *ForPerson
+  // variants below (story 10b). The legacy single-voice handlers were removed in
+  // 10d — use cloneForPerson / pickPresetForPerson / reuseForPerson / clearForPerson
+  // / sampleForPerson instead.
 
   const forgetVoice = useCallback(
     (voiceId: string) => dispatch(removeSavedVoice(voiceId)),
     [dispatch],
   )
-
-  // Re-do the voice step: clear the choice and reset the stage to pending.
-  const clearVoice = useCallback(() => {
-    dispatch(setVoice(null))
-    patch('clone', { status: 'pending', detail: undefined })
-  }, [dispatch, patch])
-
-  // Preview: speak a short canned line in the chosen voice so the producer can
-  // hear it (live, cheap TTS). Returns the audio URL for the resource to play.
-  const generateSample = useCallback(async (): Promise<string | null> => {
-    if (!voice || samplingVoice) return null
-    setSamplingVoice(true)
-    try {
-      const text =
-        'Here is a quick sample of how your narration will sound across the scenes.'
-      const { audioUrl } = await voiceSayReq({ text, voiceId: voice.voiceId }).unwrap()
-      return audioUrl
-    } finally {
-      setSamplingVoice(false)
-    }
-  }, [voice, samplingVoice, voiceSayReq])
 
   // ---- Cast dispatchers (story 10b) -------------------------------------------
   // Stable `useCallback`-wrapped wrappers around the imported action creators so
@@ -1594,12 +1516,7 @@ export function useScenePipeline() {
     generateSegmentNarration,
     recordSegmentNarration,
     setSegmentVoice,
-    cloneFromRecording,
-    pickPresetVoice,
-    reuseVoiceId,
     forgetVoice,
-    clearVoice,
-    generateSample,
     toggleBuilt,
     sources,
     processingId,
