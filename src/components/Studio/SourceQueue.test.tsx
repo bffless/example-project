@@ -21,21 +21,21 @@ describe('SourceQueue', () => {
   const sources = [src('v1', 0, 'a.mp4'), src('v2', 1, 'b.mp4')]
 
   it('lists every source by filename in order', () => {
-    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={vi.fn()} onProcessAll={vi.fn()} busyId={null} />)
+    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={vi.fn()} onProcessAll={vi.fn()} onAdd={vi.fn()} busyId={null} />)
     const names = screen.getAllByTestId('source-name').map((n) => n.textContent)
     expect(names).toEqual(['a.mp4', 'b.mp4'])
   })
 
   it('fires onProcess with the source id', () => {
     const onProcess = vi.fn()
-    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={onProcess} onProcessAll={vi.fn()} busyId={null} />)
+    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={onProcess} onProcessAll={vi.fn()} onAdd={vi.fn()} busyId={null} />)
     fireEvent.click(screen.getAllByRole('button', { name: /process this video/i })[0])
     expect(onProcess).toHaveBeenCalledWith('v1')
   })
 
   it('fires onRemove with the source id', () => {
     const onRemove = vi.fn()
-    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={onRemove} onProcess={vi.fn()} onProcessAll={vi.fn()} busyId={null} />)
+    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={onRemove} onProcess={vi.fn()} onProcessAll={vi.fn()} onAdd={vi.fn()} busyId={null} />)
     fireEvent.click(screen.getAllByRole('button', { name: /remove/i })[1])
     expect(onRemove).toHaveBeenCalledWith('v2')
   })
@@ -63,6 +63,7 @@ describe('SourceQueue', () => {
         onRemove={vi.fn()}
         onProcess={vi.fn()}
         onProcessAll={vi.fn()}
+        onAdd={vi.fn()}
         busyId={null}
       />,
     )
@@ -87,8 +88,18 @@ describe('SourceQueue', () => {
 
   it('does not show the expand toggle for an unprocessed source', () => {
     render(
-      <SourceQueue sources={[src('v4', 0, 'd.mp4')]} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={vi.fn()} onProcessAll={vi.fn()} busyId={null} />,
+      <SourceQueue sources={[src('v4', 0, 'd.mp4')]} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={vi.fn()} onProcessAll={vi.fn()} onAdd={vi.fn()} busyId={null} />,
     )
     expect(screen.queryByRole('button', { name: /show preview/i })).not.toBeInTheDocument()
+  })
+
+  it('fires onAdd with valid dropped video files', () => {
+    const onAdd = vi.fn()
+    render(<SourceQueue sources={sources} onReorder={vi.fn()} onRemove={vi.fn()} onProcess={vi.fn()} onProcessAll={vi.fn()} onAdd={onAdd} busyId={null} />)
+    const strip = screen.getByText(/drop more clips here/i)
+    const file = new File(['x'], 'c.mp4', { type: 'video/mp4' })
+    fireEvent.drop(strip, { dataTransfer: { files: [file] } })
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(onAdd.mock.calls[0][0].map((f: File) => f.name)).toEqual(['c.mp4'])
   })
 })

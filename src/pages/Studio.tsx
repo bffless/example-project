@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, setDirection, setDuration, setFileName, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, setDirection, setDuration, setFileName, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -59,6 +59,10 @@ export function Studio() {
   // local useState) so a hard reload while revisiting Prep keeps you on Prep
   // rather than snapping forward to Build.
   const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
+  // Whether the producer has clicked "Continue" to reveal the global plan
+  // (thumbnails → director → voice). Until then the prep view shows only the
+  // source queue — find & process your clips first; the plan comes after.
+  const planRevealed = useAppSelector((s) => s.studio.planRevealed)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
@@ -374,6 +378,54 @@ export function Studio() {
   // and lets them jump back to Build.
   const inPrep = !pipe.ready || revisitPrep
   const displayPhase = inPrep ? 'prep' : phase
+  // The global plan (thumbnails → director → voice) is held back until the
+  // producer's source clips are processed AND they click "Continue" — so the
+  // first job is just "find your videos and process them." A plan that's already
+  // underway (any global stage past pending, e.g. after a reload) shows
+  // regardless, so the reveal gate only applies to the not-yet-started case.
+  const planStarted = pipe.stages.some(
+    (s) => GLOBAL_STAGES.includes(s.id) && s.status !== 'pending',
+  )
+  const showPlan = pipe.sourcesReady && (planRevealed || planStarted)
+
+  // The director step's artifact, tucked beneath its card in the plan board: the
+  // send/re-run panel (when it's the current step or already ran) above the
+  // result it produced — synopsis, the prompt that was sent, and the scene list.
+  // `undefined` when there's nothing yet, so the board renders no empty row.
+  const showDirectorPanel = pipe.currentStageId === 'director' || directorDone
+  const directorArtifact: ReactNode =
+    showDirectorPanel || pipe.scenes.length > 0 ? (
+      <div className="flex flex-col gap-4">
+        {showDirectorPanel && (
+          <DirectorPanel
+            value={direction}
+            onChange={(v) => dispatch(setDirection(v))}
+            onSubmit={directorDone ? rerunStep : runStep}
+            busy={pipe.running || rehydrating}
+            sheetCount={pipe.contactSheets.length}
+            wordCount={pipe.words.length}
+            rerun={directorDone}
+            sceneCount={pipe.scenes.length}
+          />
+        )}
+        {pipe.scenes.length > 0 && (
+          <>
+            {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
+            <JobPromptDisclosure
+              jobId={pipe.directorPromptJobId}
+              label="View the prompt the director was sent"
+            />
+            <div className="border rule bg-paper p-4">
+              <SceneList
+                scenes={pipe.scenes}
+                selectedId={pipe.selectedId}
+                onSelect={pipe.select}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    ) : undefined
   // Prep & Build are freely navigable once prep is done; before that you can only
   // be in Prep.
   const navigablePhases: StudioPhase[] = pipe.ready ? ['prep', 'build'] : []
@@ -471,9 +523,10 @@ export function Studio() {
             </div>
 
             {inPrep ? (
-              /* Prep phase: the notes board (left, a third) + the source preview
-                 (right, two thirds), then the transcript editor full-width below
-                 once transcription has produced words. */
+              /* Prep phase: process your source clips first; the global plan
+                 (thumbnails → director → voice) reveals once they're done and you
+                 continue. The plan is one column — each step's artifact (contact
+                 sheet, director result, voice studio) sits beneath its own card. */
               <div className="flex flex-col gap-8">
                 {pipe.sources.length > 0 && (
                   <SourceQueue
@@ -483,89 +536,59 @@ export function Studio() {
                     onRemove={(id) => { dispatch(removeSource(id)); setFiles((prev) => { const m = new Map(prev); m.delete(id); return m }) }}
                     onProcess={(id) => { const f = files.get(id); if (f) void pipe.processSource(id, f) }}
                     onProcessAll={() => void pipe.processAll(files)}
+                    onAdd={onImport}
                   />
                 )}
-                <div className="grid items-start gap-8 lg:grid-cols-[1fr_2fr]">
+
+                {/* Clips are processed but the plan isn't open yet — offer it
+                    deliberately rather than getting ahead of the producer. */}
+                {pipe.sourcesReady && !showPlan && (
+                  <div className="flex flex-wrap items-center justify-between gap-4 border rule bg-terracotta/5 px-5 py-4">
+                    <p className="text-[14px] text-ink-soft">
+                      {pipe.sources.length === 1 ? 'Your clip is' : `All ${pipe.sources.length} clips are`} processed
+                      — ready to build the plan.
+                    </p>
+                    <button
+                      type="button"
+                      className="pill-cta"
+                      onClick={() => dispatch(setPlanRevealed(true))}
+                    >
+                      Continue →
+                    </button>
+                  </div>
+                )}
+
+                {showPlan && (
                   <PipelineBoard
                     stages={pipe.stages.filter((s) => GLOBAL_STAGES.includes(s.id))}
                     currentStageId={pipe.currentStageId}
                     busy={pipe.running || rehydrating}
                     onAction={onBoardAction}
                     panelStageId="director"
-                  />
-                  <div>
-                    {/* Spacer so the video top lines up with the board's first
-                        item. The master director's panel (direction + send) lives
-                        at the BOTTOM of this column — you review the ingredients
-                        first, then send the cut. */}
-                    <div className="mb-3 flex items-baseline justify-between" aria-hidden="true">
-                      <p className="meta-label">&nbsp;</p>
-                      <p className="font-mono text-[12px]">&nbsp;</p>
-                    </div>
-                    {pipe.contactSheets.length > 0 && (
-                      <div className="mt-6">
-                        <ContactSheetPreview sheets={pipe.contactSheets} />
-                      </div>
-                    )}
-                    {/* The master director's action sits at the bottom — after the
-                        ingredients — when it's the current step. */}
-                    {(pipe.currentStageId === 'director' || directorDone) && (
-                      <div className="mt-6">
-                        <DirectorPanel
-                          value={direction}
-                          onChange={(v) => dispatch(setDirection(v))}
-                          onSubmit={directorDone ? rerunStep : runStep}
-                          busy={pipe.running || rehydrating}
-                          sheetCount={pipe.contactSheets.length}
-                          wordCount={pipe.words.length}
-                          rerun={directorDone}
-                          sceneCount={pipe.scenes.length}
-                        />
-                      </div>
-                    )}
-                    {/* The director's result — synopsis + scene breakdown together,
-                        shown as soon as it lands so it's visible during the rest of
-                        prep (clone), each in its own box to match the other
-                        prep-artifact sections above. */}
-                    {pipe.scenes.length > 0 && (
-                      <div className="mt-6 flex flex-col gap-4">
-                        {pipe.synopsis && <SynopsisCard synopsis={pipe.synopsis} />}
-                        <JobPromptDisclosure
-                          jobId={pipe.directorPromptJobId}
-                          label="View the prompt the director was sent"
-                        />
-                        <div className="border rule bg-paper-deep/30 p-4">
-                          <SceneList
-                            scenes={pipe.scenes}
-                            selectedId={pipe.selectedId}
-                            onSelect={pipe.select}
+                    artifacts={{
+                      thumbnails:
+                        pipe.contactSheets.length > 0 ? (
+                          <ContactSheetPreview sheets={pipe.contactSheets} />
+                        ) : undefined,
+                      director: directorArtifact,
+                      clone:
+                        showVoiceStudio || pipe.voice ? (
+                          <VoiceStudio
+                            voice={pipe.voice}
+                            savedVoices={pipe.savedVoices}
+                            cloning={pipe.cloning}
+                            samplingVoice={pipe.samplingVoice}
+                            onClone={chooseVoiceClone}
+                            onPickPreset={chooseVoicePreset}
+                            onReuseVoiceId={chooseVoiceSaved}
+                            onForgetVoice={pipe.forgetVoice}
+                            onClearVoice={pipe.clearVoice}
+                            onGenerateSample={pipe.generateSample}
                           />
-                        </div>
-                      </div>
-                    )}
-                    {/* The voice step: a resource under the scenes & chapters,
-                        sized to this right column (not full-bleed). Revealed by
-                        the board's "Choose your voice" action (or whenever a voice
-                        already exists). Record + clone or pick a preset here —
-                        it's the last prep step before Build. */}
-                    {(showVoiceStudio || pipe.voice) && (
-                      <div className="mt-6">
-                        <VoiceStudio
-                          voice={pipe.voice}
-                          savedVoices={pipe.savedVoices}
-                          cloning={pipe.cloning}
-                          samplingVoice={pipe.samplingVoice}
-                          onClone={chooseVoiceClone}
-                          onPickPreset={chooseVoicePreset}
-                          onReuseVoiceId={chooseVoiceSaved}
-                          onForgetVoice={pipe.forgetVoice}
-                          onClearVoice={pipe.clearVoice}
-                          onGenerateSample={pipe.generateSample}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
+                        ) : undefined,
+                    }}
+                  />
+                )}
                 {/* Once every prep step is done (incl. the voice), the producer
                     moves to Build deliberately — completing prep no longer
                     auto-advances. */}
@@ -653,7 +676,14 @@ export function Studio() {
                     onIncludeDirectionChange={(on) => pipe.setIncludeDirection(selected.id, on)}
                   />
                 )}
-                {selected && pipe.words.length > 0 && (
+                {/* The transcript time-grid editor only opens once the scene has
+                    been cut, sheeted, and refined — `refined` is the gate (refine
+                    can't run without the cut + audio + sheets). Until then the
+                    refine panel above is the whole story; show a quiet hint in
+                    the editor's place. Reverting a refinement re-locks it. */}
+                {selected &&
+                  pipe.words.length > 0 &&
+                  (selected.refined ? (
                   <TranscriptDiff
                     words={sceneWords}
                     editedWords={editedWords}
@@ -677,7 +707,9 @@ export function Studio() {
                     windowEnd={selected.end}
                     originalAudioUrl={pipe.audioUrl ?? undefined}
                   />
-                )}
+                  ) : (
+                    <DiffLockedHint />
+                  ))}
                 {/* Assemble the SELECTED scene off its own cut clip (story 03g
                     phase 2). Keyed by scene id so switching tabs resets its
                     transient render/preview. Bounded memory — only this scene's
@@ -713,6 +745,25 @@ export function Studio() {
         )}
       </Section>
     </>
+  )
+}
+
+/**
+ * Placeholder shown where the transcript diff editor will appear, before the
+ * selected scene has been refined. The editor is heavyweight (cut-painting,
+ * voicing, the filmstrip) and only meaningful once there's a refined script to
+ * work against, so it stays hidden until then — the refine panel above drives
+ * the cut → sheets → refine steps that unlock it.
+ */
+function DiffLockedHint() {
+  return (
+    <div className="border rule bg-paper px-5 py-10 text-center">
+      <p className="meta-label">Transcript editor</p>
+      <p className="mx-auto mt-2 max-w-prose text-[13.5px] leading-relaxed text-ink-soft">
+        Cut this scene, generate its contact sheets, then refine it above — the
+        transcript time-grid editor opens once the scene has been refined.
+      </p>
+    </div>
   )
 }
 
