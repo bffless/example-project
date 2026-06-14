@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { skipToken } from '@reduxjs/toolkit/query'
 import type { VideoSource } from '../../store/studioSlice'
 import { PER_VIDEO_STAGES, type StageId } from '../../lib/pipeline'
@@ -10,6 +10,10 @@ import { TranscriptText } from './TranscriptText'
 
 type Props = {
   sources: VideoSource[]
+  /** Transient in-memory Files keyed by source id (the page's upload map). Lets a
+   *  source be previewed from its local file BEFORE it's uploaded; absent after a
+   *  reload (the row then falls back to the signed bucket URL). */
+  files?: Map<string, File>
   busyId: string | null
   onReorder: (from: number, to: number) => void
   onRemove: (id: string) => void
@@ -36,6 +40,8 @@ const STAGE_LABELS: Record<StageId, string> = {
 
 type RowProps = {
   source: VideoSource
+  /** This source's local File, if still in memory (pre-upload / same session). */
+  file?: File
   index: number
   busy: boolean
   isThisOne: boolean
@@ -52,6 +58,7 @@ type RowProps = {
 
 function SourceRow({
   source,
+  file,
   index,
   busy,
   isThisOne,
@@ -68,12 +75,20 @@ function SourceRow({
   const [expanded, setExpanded] = useState(false)
   const previewRef = useRef<HTMLVideoElement>(null)
 
-  // Hook must be called unconditionally; conditionally skip via skipToken.
+  // Preview the local file directly (pre-upload "is this the right clip?"), no
+  // upload or signing needed. One object URL per File, revoked on unmount/change.
+  const localUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+  useEffect(() => () => { if (localUrl) URL.revokeObjectURL(localUrl) }, [localUrl])
+
+  // Only sign the bucket object when there's no local file to play (e.g. after a
+  // reload). Hook must be called unconditionally; conditionally skip via skipToken.
   const { data: signed } = useSignDownloadQuery(
-    expanded && source.sourceUrl ? source.sourceUrl : skipToken,
+    expanded && !localUrl && source.sourceUrl ? source.sourceUrl : skipToken,
   )
 
-  const canExpand = !!source.sourceUrl
+  // Local file wins (instant); else the signed bucket URL once it resolves.
+  const previewSrc = localUrl ?? signed?.url ?? null
+  const canExpand = !!localUrl || !!source.sourceUrl
 
   return (
     <li
@@ -165,9 +180,9 @@ function SourceRow({
         {/* Expanded per-source detail: preview player + waveform + transcript */}
         {expanded && (
           <div className="mt-4 border rule bg-paper-deep/30 p-4 flex flex-col gap-4">
-            {signed?.url ? (
+            {previewSrc ? (
               <PreviewPlayer
-                src={signed.url}
+                src={previewSrc}
                 videoRef={previewRef}
                 cuts={[]}
                 onLoaded={() => {}}
@@ -193,7 +208,7 @@ function SourceRow({
   )
 }
 
-export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd, resolveSpeakerName, diarize = false, onDiarizeChange }: Props) {
+export function SourceQueue({ sources, files, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd, resolveSpeakerName, diarize = false, onDiarizeChange }: Props) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   // Validate dropped/picked files the same way MediaImport does, then append the
   // ones that pass. Surfaced inline below the queue.
@@ -288,6 +303,7 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
             <SourceRow
               key={source.id}
               source={source}
+              file={files?.get(source.id)}
               index={index}
               busy={busy}
               isThisOne={isThisOne}

@@ -593,6 +593,7 @@ export function Studio() {
                 {pipe.sources.length > 0 && (
                   <SourceQueue
                     sources={[...pipe.sources].sort((a, b) => a.order - b.order)}
+                    files={files}
                     busyId={pipe.processingId}
                     onReorder={(from, to) => dispatch(reorderSources({ from, to }))}
                     onRemove={(id) => { dispatch(removeSource(id)); setFiles((prev) => { const m = new Map(prev); m.delete(id); return m }) }}
