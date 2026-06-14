@@ -20,7 +20,7 @@ export function StageCard({ stage, index, current, busy, onAction, hideAction }:
   const showAction = current && stage.actionLabel && onAction && !hideAction
 
   return (
-    <li
+    <div
       className={[
         'flex items-start gap-4 border-l-2 bg-paper px-5 py-4 transition-colors',
         active
@@ -69,7 +69,7 @@ export function StageCard({ stage, index, current, busy, onAction, hideAction }:
           </button>
         )}
       </div>
-    </li>
+    </div>
   )
 }
 

@@ -1409,6 +1409,7 @@ export function useScenePipeline() {
     voicingSegKey,
     sceneError,
     ready,
+    sourcesReady,
     allBuilt,
     currentStageId,
     next,

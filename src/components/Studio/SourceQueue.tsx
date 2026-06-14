@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { skipToken } from '@reduxjs/toolkit/query'
 import type { VideoSource } from '../../store/studioSlice'
 import { PER_VIDEO_STAGES, type StageId } from '../../lib/pipeline'
+import { sourceFileError } from '../../lib/upload'
 import { useSignDownloadQuery } from '../../store/studioApi'
 import { PreviewPlayer } from './PreviewPlayer'
 import { AudioArtifact } from './AudioArtifact'
@@ -14,6 +15,8 @@ type Props = {
   onRemove: (id: string) => void
   onProcess: (id: string) => void
   onProcessAll: () => void
+  /** Append more source videos to the queue (same validated File[] as import). */
+  onAdd: (files: File[]) => void
 }
 
 const STAGE_LABELS: Record<StageId, string> = {
@@ -177,24 +180,70 @@ function SourceRow({
   )
 }
 
-export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll }: Props) {
+export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd }: Props) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  // Validate dropped/picked files the same way MediaImport does, then append the
+  // ones that pass. Surfaced inline below the queue.
+  const [addError, setAddError] = useState<string | null>(null)
+  const [addDragging, setAddDragging] = useState(false)
+  const addInputRef = useRef<HTMLInputElement>(null)
 
   const busy = busyId !== null
+
+  function acceptAdd(list: FileList | null | undefined) {
+    const files = Array.from(list ?? [])
+    if (files.length === 0) return
+    const errors: string[] = []
+    const ok: File[] = []
+    for (const f of files) {
+      const err = sourceFileError(f)
+      if (err) errors.push(`${f.name}: ${err}`)
+      else ok.push(f)
+    }
+    setAddError(errors.length ? errors.join(' · ') : null)
+    if (ok.length) onAdd(ok)
+  }
+
+  function onAddDrop(e: DragEvent) {
+    e.preventDefault()
+    setAddDragging(false)
+    acceptAdd(e.dataTransfer.files)
+  }
 
   return (
     <div>
       {/* Header row */}
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <p className="meta-label">Source videos &middot; {sources.length} clip{sources.length !== 1 ? 's' : ''}</p>
-        <button
-          type="button"
-          className="pill-cta"
-          disabled={busy || sources.length === 0}
-          onClick={onProcessAll}
-        >
-          Process all
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="pill-ghost"
+            disabled={busy}
+            onClick={() => addInputRef.current?.click()}
+          >
+            + Add videos
+          </button>
+          <button
+            type="button"
+            className="pill-cta"
+            disabled={busy || sources.length === 0}
+            onClick={onProcessAll}
+          >
+            Process all
+          </button>
+        </div>
+        <input
+          ref={addInputRef}
+          type="file"
+          accept="video/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            acceptAdd(e.target.files)
+            e.target.value = '' // let re-picking the same file fire change again
+          }}
+        />
       </div>
 
       {/* Queue list */}
@@ -241,11 +290,25 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
         })}
       </ol>
 
-      {sources.length === 0 && (
-        <p className="mt-4 text-center font-mono text-[13px] text-ink-mute">
-          No source videos yet. Add a video above.
-        </p>
-      )}
+      {/* Drop more clips onto the queue (or use the header button). Separate from
+          the per-row reorder DnD — this reads dropped files, not a row index. */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setAddDragging(true)
+        }}
+        onDragLeave={() => setAddDragging(false)}
+        onDrop={onAddDrop}
+        onClick={() => addInputRef.current?.click()}
+        className={[
+          'mt-3 cursor-pointer border border-dashed px-5 py-4 text-center font-mono text-[12px] uppercase tracking-wider transition-colors',
+          addDragging ? 'border-terracotta bg-terracotta/5 text-terracotta' : 'rule text-ink-faint',
+        ].join(' ')}
+      >
+        {sources.length === 0 ? 'Drop clips here or click to add' : 'Drop more clips here, or click to add'}
+      </div>
+
+      {addError && <p className="mt-2 text-[13px] text-terracotta-ink">{addError}</p>}
     </div>
   )
 }

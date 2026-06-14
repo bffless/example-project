@@ -110,6 +110,16 @@ export type StudioState = {
    * resetStudio (Start over / fresh import).
    */
   revisitPrep: boolean
+  /**
+   * Whether the producer has clicked "Continue" to reveal the global plan
+   * (thumbnails → director → voice) after their source videos finished
+   * processing. Until then the prep view shows only the source queue — the plan
+   * stays hidden so it doesn't get ahead of the first job (find & process your
+   * clips). Persisted so the reveal survives a reload; reset by resetStudio.
+   * (A plan that's already underway shows regardless — see `planStarted` in the
+   * page — so this only gates the not-yet-started case.)
+   */
+  planRevealed: boolean
   scenes: Scene[]
   /** Relative `/api/uploads/source/...` serve path once uploaded (proxies to bucket). */
   sourceUrl: string | null
@@ -172,6 +182,7 @@ export type StudioState = {
 const initialState: StudioState = {
   stageProgress: freshProgress(),
   revisitPrep: false,
+  planRevealed: false,
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
@@ -211,6 +222,10 @@ const studioSlice = createSlice({
     /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
     setRevisitPrep(state, action: PayloadAction<boolean>) {
       state.revisitPrep = action.payload
+    },
+    /** Reveal the global plan once sources are processed (see `planRevealed`). */
+    setPlanRevealed(state, action: PayloadAction<boolean>) {
+      state.planRevealed = action.payload
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
       state.scenes = action.payload
@@ -321,6 +336,7 @@ export const {
   patchStage,
   failActiveStage,
   setRevisitPrep,
+  setPlanRevealed,
   setScenes,
   patchScene,
   setSourceUrl,
