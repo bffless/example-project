@@ -18,6 +18,9 @@ type Props = {
   assignments: SpeakerAssignments
   cloning: boolean
   samplingVoice: boolean
+  /** Whether automatic speaker detection ran (story 10e) — tunes the empty-state
+   *  copy in the assignment grid (off = manual palette, on = re-process hint). */
+  diarize: boolean
   onPeopleCount: (n: number) => void
   onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
@@ -39,6 +42,7 @@ export function CastStudio({
   assignments,
   cloning,
   samplingVoice,
+  diarize,
   onPeopleCount,
   onRename,
   onRemove,
@@ -88,7 +92,7 @@ export function CastStudio({
           <span className="ml-2 text-[13px] text-ink-soft">
             {cast.length === 1
               ? 'Just you? Leave it at 1.'
-              : 'Name each person, then assign their voice below.'}
+              : 'Name each person and give them a voice — every voice here is pickable for any scene in Build.'}
           </span>
         </div>
       </div>
@@ -134,8 +138,9 @@ export function CastStudio({
       {cast.length >= 2 && labelledSources.length === 0 && (
         <div className="border rule bg-paper px-5 py-4">
           <p className="text-[13px] text-ink-mute">
-            No speaker labels detected yet — transcribe your videos first and the
-            assignment grid will appear here.
+            {diarize
+              ? 'Speaker detection is on, but these clips were transcribed without it — re-process them to detect speakers. Your voices are still pickable per scene in Build.'
+              : 'Speaker detection is off, so there’s nothing to auto-map. These voices are still available to pick per scene in Build — turn on “Detect speakers automatically” at the top (before processing) if you want them assigned for you.'}
           </p>
         </div>
       )}

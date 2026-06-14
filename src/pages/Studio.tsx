@@ -293,6 +293,11 @@ export function Studio() {
     () => {
       if (!selected) return []
       const selSrc = pipe.sources.find((s) => s.id === selected.sourceId)
+      // Standard fallback when a segment has no detected speaker (diarization off,
+      // or single-speaker audio): default to the first declared voice so the picker
+      // shows something usable instead of "choose voice…". The producer can still
+      // pick any declared voice per segment.
+      const fallbackVoiceId = pipe.cast.find((p) => p.voice)?.voice?.voiceId ?? pipe.voice?.voiceId
       return effectiveSegments(selected).map((seg, i) => {
         const label = selSrc ? dominantSpeaker(selSrc.words ?? [], seg.start, seg.end) : null
         const def =
@@ -314,12 +319,12 @@ export function Studio() {
             label && selected
               ? (resolvePerson(selected.sourceId, label, pipe.cast, pipe.speakerAssignments)?.name ?? label)
               : undefined,
-          defaultVoiceId: def?.voiceId,
+          defaultVoiceId: def?.voiceId ?? fallbackVoiceId,
           voiceId: seg.voiceId,
         }
       })
     },
-    [selected, pipe.voicingSegKey, pipe.sources, pipe.cast, pipe.speakerAssignments],
+    [selected, pipe.voicingSegKey, pipe.sources, pipe.cast, pipe.speakerAssignments, pipe.voice],
   )
 
   // Voice options for the per-segment picker (story 10d): all cast people with a
@@ -638,6 +643,7 @@ export function Studio() {
                             assignments={pipe.speakerAssignments}
                             cloning={pipe.cloning}
                             samplingVoice={pipe.samplingVoice}
+                            diarize={pipe.diarize}
                             onPeopleCount={pipe.setPeopleCount}
                             onRename={pipe.renamePerson}
                             onRemove={pipe.removePerson}

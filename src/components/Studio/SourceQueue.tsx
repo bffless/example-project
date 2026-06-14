@@ -271,9 +271,10 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
           onChange={(e) => onDiarizeChange?.(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-ink">This recording has more than one speaker</span>{' '}
-          — detect who&rsquo;s speaking so you can give each person their own voice. Leave it off
-          for a single narrator (faster transcription).
+          <span className="font-medium text-ink">Detect speakers automatically</span> — tag who&rsquo;s
+          talking in each clip (diarization) so every person&rsquo;s lines get their own voice in Build
+          without you sorting them out. Slower. Leave it off for a single narrator — or if you&rsquo;d
+          rather just declare a few voices in the voice step and pick them per scene yourself.
         </span>
       </label>
 
