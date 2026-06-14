@@ -16,7 +16,7 @@
  * to completion (steps aren't cancellable mid-flight).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'react'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
   startAutoBuild,
@@ -67,6 +67,14 @@ export function useAutoBuild(pipe: Pipe): AutoBuildControls {
   // Only true after an explicit Start/Resume in this session — gates the runner so
   // a rehydrated `running` never auto-fires.
   const liveRef = useRef(false)
+  // Advancement nudge. The runner relies on re-running after a step finishes; the
+  // incidental re-render from the step's own `patchScene` can flush this effect
+  // WHILE `inFlightRef` is still true (React can flush a prior update's passive
+  // effects when the action's `finally` fires its `setXxxId(null)`), and then no
+  // dep change re-triggers it — the run stalls "running" with the step done. So
+  // each step bumps `tick` AFTER clearing `inFlightRef`, guaranteeing exactly one
+  // re-run with the guard already false that fires the next step.
+  const [tick, bump] = useReducer((n: number) => n + 1, 0)
 
   const start = useCallback(() => {
     liveRef.current = true
@@ -128,6 +136,7 @@ export function useAutoBuild(pipe: Pipe): AutoBuildControls {
           dispatch(haltAutoBuild(autoBuildError(e)))
         } finally {
           inFlightRef.current = false
+          bump()
         }
       })()
       return
@@ -163,11 +172,12 @@ export function useAutoBuild(pipe: Pipe): AutoBuildControls {
         dispatch(haltAutoBuild(autoBuildError(e)))
       } finally {
         inFlightRef.current = false
+        bump()
       }
     })()
     // The runner reads pipe via `pipeRef`; it's keyed only to the signals that must
-    // re-trigger it. exhaustive-deps can't see the ref reads, so silence it here.
-  }, [run.status, pipe.scenes, pipe.sceneError, pipe.finalCutUrl, dispatch, fetchBytes])
+    // re-trigger it (plus `tick`, the post-step advancement nudge).
+  }, [run.status, pipe.scenes, pipe.sceneError, pipe.finalCutUrl, tick, dispatch, fetchBytes])
 
   return { run, start, pause, resume, stop }
 }
