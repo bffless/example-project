@@ -798,6 +798,30 @@ export function useScenePipeline() {
     }
   }, [voice, samplingVoice, voiceSayReq])
 
+  // ---- Cast dispatchers (story 10b) -------------------------------------------
+  // Stable `useCallback`-wrapped wrappers around the imported action creators so
+  // the references never change between renders. `assignSpeaker` MUST be stable —
+  // it's a dep of the seeding effect in Studio.tsx; the others get the same
+  // treatment for consistency. Deps: [dispatch] only, since dispatch is itself
+  // stable for the lifetime of the store.
+  const assignSpeakerCb = useCallback(
+    (videoId: string, label: string, personId: string) =>
+      dispatch(assignSpeaker({ videoId, label, personId })),
+    [dispatch],
+  )
+  const setPeopleCountCb = useCallback(
+    (n: number) => dispatch(setPeopleCount(n)),
+    [dispatch],
+  )
+  const renamePersonCb = useCallback(
+    (id: string, name: string) => dispatch(renamePerson({ id, name })),
+    [dispatch],
+  )
+  const removePersonCb = useCallback(
+    (id: string) => dispatch(removePerson(id)),
+    [dispatch],
+  )
+
   // ---- Person-scoped voice handlers (story 10b) --------------------------------
   // Mirror the single-voice handlers above but target a specific cast person via
   // `setPersonVoice({ id, voice })`. Each person can be cloned/preset/reused
@@ -1555,11 +1579,10 @@ export function useScenePipeline() {
     // Cast & speaker assignment (story 10b)
     cast,
     speakerAssignments,
-    setPeopleCount: (n: number) => dispatch(setPeopleCount(n)),
-    renamePerson: (id: string, name: string) => dispatch(renamePerson({ id, name })),
-    removePerson: (id: string) => dispatch(removePerson(id)),
-    assignSpeaker: (videoId: string, label: string, personId: string) =>
-      dispatch(assignSpeaker({ videoId, label, personId })),
+    setPeopleCount: setPeopleCountCb,
+    renamePerson: renamePersonCb,
+    removePerson: removePersonCb,
+    assignSpeaker: assignSpeakerCb,
     cloneForPerson,
     pickPresetForPerson,
     reuseForPerson,

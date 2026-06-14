@@ -453,9 +453,10 @@ export function Studio() {
 
   // Seed speaker→person assignments when there are 2+ people: for each source
   // with detected labels, fill in any unassigned labels by ordinal (label 0 →
-  // person 0, etc.). Only dispatches when something actually changed to stay
-  // idempotent — won't loop. Destructure from `pipe` here so the deps array is
-  // exhaustive without listing `pipe` itself (which changes every render).
+  // person 0, etc.). Guarded so it only dispatches newly-filled labels —
+  // won't loop even though assignSpeaker is now a stable useCallback dep.
+  // Destructure from `pipe` here so the deps array is exhaustive without
+  // listing `pipe` itself (which changes every render).
   const { cast: pipeCast, sources: pipeSources, speakerAssignments: pipeAssignments, assignSpeaker: pipeAssignSpeaker } = pipe
   useEffect(() => {
     if (pipeCast.length < 2) return
