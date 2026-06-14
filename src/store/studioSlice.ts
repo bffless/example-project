@@ -215,9 +215,25 @@ const initialState: StudioState = {
   speakerAssignments: {},
 }
 
-let personSeq = 0
-const newPersonId = () => `person-${++personSeq}`
 const defaultPersonName = (i: number) => (i === 0 ? 'Me' : `Person ${i + 1}`)
+
+/**
+ * Next collision-free person id, derived from the CURRENT cast — NOT a module
+ * counter. `cast` persists across reloads (redux-persist) but a module counter
+ * resets to 0 on every page load, so it would re-mint `person-1` and collide
+ * with a rehydrated person; `setPersonVoice` would then `find` the wrong one and
+ * edit the original (the "picking Person 2's voice changed Me" bug). Deriving the
+ * id from the max existing suffix is stable, deterministic for tests, and
+ * collision-free after a reload.
+ */
+const nextPersonId = (cast: Person[]): string => {
+  let max = 0
+  for (const p of cast) {
+    const m = /^person-(\d+)$/.exec(p.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `person-${max + 1}`
+}
 
 const studioSlice = createSlice({
   name: 'studio',
@@ -344,7 +360,7 @@ const studioSlice = createSlice({
     setPeopleCount(state, action: PayloadAction<number>) {
       const n = Math.max(1, Math.floor(action.payload))
       while (state.cast.length < n)
-        state.cast.push({ id: newPersonId(), name: defaultPersonName(state.cast.length), voice: null })
+        state.cast.push({ id: nextPersonId(state.cast), name: defaultPersonName(state.cast.length), voice: null })
       if (state.cast.length > n) {
         const removed = state.cast.slice(n).map((p) => p.id)
         state.cast = state.cast.slice(0, n)
@@ -368,7 +384,7 @@ const studioSlice = createSlice({
     removePerson(state, action: PayloadAction<string>) {
       state.cast = state.cast.filter((p) => p.id !== action.payload)
       if (state.cast.length === 0)
-        state.cast = [{ id: newPersonId(), name: defaultPersonName(0), voice: null }]
+        state.cast = [{ id: nextPersonId(state.cast), name: defaultPersonName(0), voice: null }]
       for (const vid of Object.keys(state.speakerAssignments))
         for (const label of Object.keys(state.speakerAssignments[vid]))
           if (state.speakerAssignments[vid][label] === action.payload)
@@ -385,7 +401,6 @@ const studioSlice = createSlice({
      * across clips/sessions, so starting a new project shouldn't lose them.
      */
     resetStudio(state) {
-      personSeq = 0
       return { ...initialState, stageProgress: freshProgress(), savedVoices: state.savedVoices }
     },
   },

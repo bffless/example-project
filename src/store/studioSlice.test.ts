@@ -178,9 +178,30 @@ test('assignSpeaker records a per-video mapping; removePerson strips its assignm
   expect(s.cast).toHaveLength(1)
 })
 
-test('resetStudio resets the person id counter to a fresh slate', () => {
+test('resetStudio resets the person ids to a fresh slate', () => {
   let s = reducer(init(), setPeopleCount(2))
   s = reducer(s, resetStudio())
   s = reducer(s, setPeopleCount(1))
   expect(s.cast[0].id).toBe('person-1')
+})
+
+test('adding people to a REHYDRATED cast does not collide ids (persistence bug)', () => {
+  // Simulate a reload: redux-persist brings back a cast with `person-1` already
+  // voiced, but any module-level id counter is back at 0. A counter would re-mint
+  // `person-1`, so setPersonVoice on the new person would hit the original (Me).
+  const mine = { voiceId: 'R8_MINE', source: 'saved' as const, label: 'R8_MINE' }
+  const rehydrated: StudioState = {
+    ...init(),
+    cast: [{ id: 'person-1', name: 'Me', voice: mine }],
+    voice: mine,
+  }
+  let s = reducer(rehydrated, setPeopleCount(2))
+  expect(new Set(s.cast.map((p) => p.id)).size).toBe(2) // distinct ids
+  const second = s.cast[1].id
+  expect(second).not.toBe('person-1')
+
+  const preset = { voiceId: 'Elegant_Man', source: 'preset' as const, label: 'Elegant Man' }
+  s = reducer(s, setPersonVoice({ id: second, voice: preset }))
+  expect(s.cast[1].voice).toEqual(preset) // the new person got the preset
+  expect(s.cast[0].voice).toEqual(mine) // …and Me is untouched
 })
