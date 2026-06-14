@@ -3,10 +3,12 @@
  * run (the `victor-upmeet/whisperx` pipeline, story 02) and frozen here so dev
  * can exercise the transcript editor without paying Replicate per call. The MSW
  * handler in `handlers.ts` returns this verbatim. Shape matches the pipeline's
- * `{ words: [{ text, start, end }], text }` contract.
+ * `{ words: [{ text, start, end, speaker }], text }` contract.
+ *
+ * All words are tagged SPEAKER_00 (single-narrator clip) so MOCK_STUDIO exercises
+ * the diarization path (story 10a).
  */
-export const TRANSCRIBE_FIXTURE = {
-  "words": [
+const TRANSCRIBE_WORDS_BASE = [
     {
       "text": "uh",
       "start": 4.043,
@@ -417,7 +419,10 @@ export const TRANSCRIBE_FIXTURE = {
       "start": 49.189,
       "end": 49.61
     }
-  ],
-  "text": "uh in this session i'm going to be going over onboarding rules in this session i'm going to be going over onboarding rules onboarding rules allow you to either onboarding rules allow you to onboarding rules allow you to promote users when they first log in to higher level roles. Or they also allow you to run pipelines if you want. Maybe you wanna send someone an email when they create an account or when they create an account. There's other reasons."
-}
+];
+
+export const TRANSCRIBE_FIXTURE = {
+  words: TRANSCRIBE_WORDS_BASE.map((w) => ({ ...w, speaker: "SPEAKER_00" })),
+  text: "uh in this session i'm going to be going over onboarding rules in this session i'm going to be going over onboarding rules onboarding rules allow you to either onboarding rules allow you to onboarding rules allow you to promote users when they first log in to higher level roles. Or they also allow you to run pipelines if you want. Maybe you wanna send someone an email when they create an account or when they create an account. There's other reasons.",
+};
 
