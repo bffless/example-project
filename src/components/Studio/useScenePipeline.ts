@@ -1432,12 +1432,14 @@ export function useScenePipeline() {
   // re-voices the scene from its already-voiced segments (the skip keeps it cheap).
   const voiceAllSegments = useCallback(
     async (sceneId: string) => {
+      if (voicingSceneId) return
       const scene = scenes.find((s) => s.id === sceneId)
       if (!scene) return
       setVoicingSceneId(sceneId)
       setSceneError(null)
       try {
         const src = sourceForScene(sources, scene)
+        if (!src?.audioUrl) throw new Error('No source audio for this scene — cut the scene first.')
         const base =
           scene.refined ?? { segments: effectiveSegments(scene), cuts: scene.cuts ?? [], source: 'ai' as const }
         const segments = [...base.segments]
@@ -1445,7 +1447,7 @@ export function useScenePipeline() {
           const seg = segments[i]
           if (seg.audioUrl) continue // already voiced (incl. auto-adopted original)
           if (seg.suggestedSource === 'original') {
-            const [clip] = await sliceAndUploadSpans(src?.audioUrl ?? '', [{ start: seg.start, end: seg.end }])
+            const [clip] = await sliceAndUploadSpans(src.audioUrl, [{ start: seg.start, end: seg.end }])
             if (!clip) throw new Error(`Couldn't reuse the original audio for segment ${i + 1}.`)
             segments[i] = {
               ...seg,
@@ -1480,7 +1482,7 @@ export function useScenePipeline() {
         setVoicingSceneId(null)
       }
     },
-    [scenes, sources, cast, speakerAssignments, voice, narrateReq, sliceAndUploadSpans, patchScene],
+    [voicingSceneId, scenes, sources, cast, speakerAssignments, voice, narrateReq, sliceAndUploadSpans, patchScene],
   )
 
   // ---- Scene build loop -----------------------------------------------------
