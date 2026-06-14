@@ -15,6 +15,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
+import type { AutoBuildRun } from '../lib/autoBuild'
 import type { ContactSheet } from '../lib/frames'
 
 /** A word with its time markers, as transcription returns them. `speaker` is the
@@ -197,6 +198,11 @@ export type StudioState = {
   /** Per-video speaker→person map: speakerAssignments[videoId][speakerLabel] = personId.
    *  Absent entry + single-person cast resolves to that person (see speakers.ts). */
   speakerAssignments: Record<string, Record<string, string>>
+  /** Auto-build run pointer (story 03s). Durable so a reload knows a run was in
+   *  progress; the orchestrator coerces a persisted `running` back to `paused`
+   *  on reload (in-flight browser steps aren't resumable). The resumable truth is
+   *  the scenes themselves — this is just status + where it stopped + the error. */
+  autoBuild: AutoBuildRun
 }
 
 const initialState: StudioState = {
@@ -223,6 +229,7 @@ const initialState: StudioState = {
   sources: [],
   cast: [],
   speakerAssignments: {},
+  autoBuild: { status: 'idle', currentSceneId: null, currentStepId: null, error: null },
 }
 
 const defaultPersonName = (i: number) => (i === 0 ? 'Me' : `Person ${i + 1}`)
@@ -409,6 +416,40 @@ const studioSlice = createSlice({
       const { videoId, label, personId } = action.payload
       ;(state.speakerAssignments[videoId] ??= {})[label] = personId
     },
+    /** Begin / restart an auto-build run; clears any prior halt error. */
+    startAutoBuild(state) {
+      state.autoBuild.status = 'running'
+      state.autoBuild.error = null
+    },
+    /** Pause after the current step finishes (only meaningful while running). */
+    pauseAutoBuild(state) {
+      if (state.autoBuild.status === 'running') state.autoBuild.status = 'paused'
+    },
+    /** Resume a paused or halted run; clears the error. */
+    resumeAutoBuild(state) {
+      if (state.autoBuild.status === 'paused' || state.autoBuild.status === 'halted') {
+        state.autoBuild.status = 'running'
+        state.autoBuild.error = null
+      }
+    },
+    /** End the run, leaving completed scene work intact. */
+    stopAutoBuild(state) {
+      state.autoBuild = { status: 'idle', currentSceneId: null, currentStepId: null, error: null }
+    },
+    /** Stop on an error, recording the message and leaving the pointer in place. */
+    haltAutoBuild(state, action: PayloadAction<string>) {
+      state.autoBuild.status = 'halted'
+      state.autoBuild.error = action.payload
+    },
+    /** The run finished every scene (and the final stitch). */
+    completeAutoBuild(state) {
+      state.autoBuild.status = 'done'
+    },
+    /** Move the run pointer to the step currently executing. */
+    setAutoPointer(state, action: PayloadAction<{ sceneId: string | null; stepId: AutoBuildRun['currentStepId'] }>) {
+      state.autoBuild.currentSceneId = action.payload.sceneId
+      state.autoBuild.currentStepId = action.payload.stepId
+    },
     /**
      * Wipe everything back to a clean import — used by "Start over". Keeps the
      * `savedVoices` library: those cloned ids cost real money and are reusable
@@ -454,6 +495,13 @@ export const {
   setPersonVoice,
   removePerson,
   assignSpeaker,
+  startAutoBuild,
+  pauseAutoBuild,
+  resumeAutoBuild,
+  stopAutoBuild,
+  haltAutoBuild,
+  completeAutoBuild,
+  setAutoPointer,
   resetStudio,
 } = studioSlice.actions
 
