@@ -384,6 +384,7 @@ const studioSlice = createSlice({
      * across clips/sessions, so starting a new project shouldn't lose them.
      */
     resetStudio(state) {
+      personSeq = 0
       return { ...initialState, stageProgress: freshProgress(), savedVoices: state.savedVoices }
     },
   },

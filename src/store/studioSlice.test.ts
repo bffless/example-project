@@ -168,3 +168,10 @@ test('assignSpeaker records a per-video mapping; removePerson strips its assignm
   expect(s.speakerAssignments['src-1']['SPEAKER_01']).toBeUndefined()
   expect(s.cast).toHaveLength(1)
 })
+
+test('resetStudio resets the person id counter to a fresh slate', () => {
+  let s = reducer(init(), setPeopleCount(2))
+  s = reducer(s, resetStudio())
+  s = reducer(s, setPeopleCount(1))
+  expect(s.cast[0].id).toBe('person-1')
+})
