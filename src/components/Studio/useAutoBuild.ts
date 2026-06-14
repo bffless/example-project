@@ -11,6 +11,9 @@
  * `liveRef` is the in-session guard: it's only set by an explicit Start/Resume in
  * THIS session, so a persisted `running` status rehydrated after a reload does NOT
  * auto-fire — the runner coerces it to `paused` and the user resumes.
+ *
+ * Pause/Stop only prevent the NEXT step from starting; an in-flight step always runs
+ * to completion (steps aren't cancellable mid-flight).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
@@ -75,6 +78,7 @@ export function useAutoBuild(pipe: Pipe): AutoBuildControls {
   }, [dispatch])
   const pause = useCallback(() => {
     liveRef.current = false
+    attemptRef.current = null
     dispatch(pauseAutoBuild())
   }, [dispatch])
   const stop = useCallback(() => {
@@ -86,6 +90,8 @@ export function useAutoBuild(pipe: Pipe): AutoBuildControls {
   // Keep `pipe` in a ref so the runner reads the CURRENT actions/state while staying
   // keyed to just the signals that should re-trigger it (status, scenes, sceneError,
   // finalCutUrl) — `pipe` itself is a fresh object every render.
+  // useLayoutEffect (not useEffect): react-hooks/refs forbids writing a ref during render;
+  // a layout effect runs before the runner's passive effect so pipeRef is current when it reads.
   const pipeRef = useRef(pipe)
   useLayoutEffect(() => {
     pipeRef.current = pipe
