@@ -19,7 +19,8 @@ import { SceneRefinePanel } from '../components/Studio/SceneRefinePanel'
 import { JobPromptDisclosure } from '../components/Studio/PromptDisclosure'
 import { DirectorPanel } from '../components/Studio/DirectorPanel'
 import type { SegmentControl } from '../components/Studio/SegmentVoiceControl'
-import { VoiceStudio } from '../components/Studio/VoiceStudio'
+import { CastStudio } from '../components/Studio/CastStudio'
+import { uniqueSpeakers, seedAssignmentsByLabel } from '../lib/speakers'
 import { StudioStepper } from '../components/Studio/StudioStepper'
 import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
@@ -434,21 +435,45 @@ export function Studio() {
     else if (p === 'build') dispatch(setRevisitPrep(false))
   }
 
-  // Setting the voice is the last prep step, so completing it flips `ready` and
-  // would auto-jump to Build. Keep the producer on Prep instead (to sample the
-  // voice, change it, etc.) — moving to Build stays an explicit choice.
-  function chooseVoiceClone(blob: Blob) {
+  // Cast-scoped voice wrappers: keep the producer on Prep when a voice is set
+  // (same as the single-voice path above) so completing the cast step doesn't
+  // auto-jump to Build.
+  function castCloneForPerson(personId: string, blob: Blob) {
     dispatch(setRevisitPrep(true))
-    pipe.cloneFromRecording(blob)
+    void pipe.cloneForPerson(personId, blob)
   }
-  function chooseVoicePreset(id: string) {
+  function castPickPresetForPerson(personId: string, voiceId: string) {
     dispatch(setRevisitPrep(true))
-    pipe.pickPresetVoice(id)
+    pipe.pickPresetForPerson(personId, voiceId)
   }
-  function chooseVoiceSaved(id: string) {
+  function castReuseForPerson(personId: string, voiceId: string) {
     dispatch(setRevisitPrep(true))
-    pipe.reuseVoiceId(id)
+    pipe.reuseForPerson(personId, voiceId)
   }
+
+  // Seed speaker→person assignments when there are 2+ people: for each source
+  // with detected labels, fill in any unassigned labels by ordinal (label 0 →
+  // person 0, etc.). Only dispatches when something actually changed to stay
+  // idempotent — won't loop. Destructure from `pipe` here so the deps array is
+  // exhaustive without listing `pipe` itself (which changes every render).
+  const { cast: pipeCast, sources: pipeSources, speakerAssignments: pipeAssignments, assignSpeaker: pipeAssignSpeaker } = pipe
+  useEffect(() => {
+    if (pipeCast.length < 2) return
+    for (const source of pipeSources) {
+      const labels = uniqueSpeakers(source.words ?? [])
+      if (labels.length === 0) continue
+      const seeded = seedAssignmentsByLabel(source.id, labels, pipeCast, pipeAssignments)
+      const existing = pipeAssignments[source.id] ?? {}
+      const changed = labels.some((l) => seeded[l] !== existing[l])
+      if (changed) {
+        for (const [label, personId] of Object.entries(seeded)) {
+          if (existing[label] !== personId) {
+            pipeAssignSpeaker(source.id, label, personId)
+          }
+        }
+      }
+    }
+  }, [pipeCast, pipeSources, pipeAssignments, pipeAssignSpeaker])
 
   return (
     <>
@@ -572,18 +597,24 @@ export function Studio() {
                         ) : undefined,
                       director: directorArtifact,
                       clone:
-                        showVoiceStudio || pipe.voice ? (
-                          <VoiceStudio
-                            voice={pipe.voice}
+                        showVoiceStudio || pipe.cast.some((p) => p.voice) ? (
+                          <CastStudio
+                            cast={pipe.cast}
+                            sources={pipe.sources}
                             savedVoices={pipe.savedVoices}
+                            assignments={pipe.speakerAssignments}
                             cloning={pipe.cloning}
                             samplingVoice={pipe.samplingVoice}
-                            onClone={chooseVoiceClone}
-                            onPickPreset={chooseVoicePreset}
-                            onReuseVoiceId={chooseVoiceSaved}
-                            onForgetVoice={pipe.forgetVoice}
-                            onClearVoice={pipe.clearVoice}
-                            onGenerateSample={pipe.generateSample}
+                            onPeopleCount={pipe.setPeopleCount}
+                            onRename={pipe.renamePerson}
+                            onRemove={pipe.removePerson}
+                            onAssign={pipe.assignSpeaker}
+                            onCloneForPerson={castCloneForPerson}
+                            onPickPresetForPerson={castPickPresetForPerson}
+                            onReuseForPerson={castReuseForPerson}
+                            onClearForPerson={pipe.clearForPerson}
+                            onForgetForPerson={pipe.forgetForPerson}
+                            onSampleForPerson={pipe.sampleForPerson}
                           />
                         ) : undefined,
                     }}

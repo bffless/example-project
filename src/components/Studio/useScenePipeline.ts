@@ -69,6 +69,11 @@ import {
   patchSource,
   patchSourceStage,
   resetStudio,
+  setPeopleCount,
+  renamePerson,
+  setPersonVoice,
+  removePerson,
+  assignSpeaker,
   type TranscriptWord,
 } from '../../store/studioSlice'
 
@@ -197,6 +202,8 @@ export function useScenePipeline() {
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
   const voice = useAppSelector((s) => s.studio.voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
+  const cast = useAppSelector((s) => s.studio.cast)
+  const speakerAssignments = useAppSelector((s) => s.studio.speakerAssignments)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
   const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
   const sources = useAppSelector((s) => s.studio.sources)
@@ -502,6 +509,21 @@ export function useScenePipeline() {
     })
   }, [scenesJobId, sourceUrl, scenes, completeDirectorJob, completeRefineJob])
 
+  // Cast seeding (story 10b): ensure at least one person exists when the voice
+  // step is reached, so the single-narrator common case is one decision with no
+  // extra UI. Guard so we don't add if cast already has people.
+  useEffect(() => {
+    if (cast.length === 0) dispatch(setPeopleCount(1))
+  }, [cast.length, dispatch])
+
+  // Back-compat: a pre-cast session had a single legacy `voice` on the slice but
+  // no cast entry. Adopt it onto person 1 so old sessions resume without re-picking.
+  useEffect(() => {
+    if (cast.length === 1 && !cast[0].voice && voice) {
+      dispatch(setPersonVoice({ id: cast[0].id, voice }))
+    }
+  }, [cast, voice, dispatch])
+
   // ---- Individual steps -----------------------------------------------------
 
   // Stage ① — upload the source clip directly to the storage bucket via the
@@ -775,6 +797,91 @@ export function useScenePipeline() {
       setSamplingVoice(false)
     }
   }, [voice, samplingVoice, voiceSayReq])
+
+  // ---- Person-scoped voice handlers (story 10b) --------------------------------
+  // Mirror the single-voice handlers above but target a specific cast person via
+  // `setPersonVoice({ id, voice })`. Each person can be cloned/preset/reused
+  // independently; the first person's voice mirrors to the legacy `voice` field
+  // via the slice reducer. Busy flags (`cloning`, `samplingVoice`) are shared
+  // across all persons — only one operation can run at a time, same as before.
+
+  const cloneForPerson = useCallback(
+    async (personId: string, blob: Blob) => {
+      if (cloning) return
+      setCloning(true)
+      patch('clone', { status: 'active' })
+      try {
+        const recorded = new File([blob], 'voice-sample', { type: blob.type || 'audio/webm' })
+        const wav = await extractAudioWav(recorded, 24000)
+        const file = new File([wav], 'voice-sample.wav', { type: 'audio/wav' })
+        const { url: sampleUrl } = await uploadReq({ file, kind: 'voice' }).unwrap()
+        const { voiceId } = await voiceCloneReq({ sampleUrl }).unwrap()
+        const label = 'Your cloned voice'
+        dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'clone', label, sampleUrl } }))
+        dispatch(addSavedVoice({ voiceId, label }))
+        patch('clone', { status: 'done', detail: `cloned voice ready · ${voiceId}` })
+      } catch (e) {
+        patch('clone', { status: 'error', detail: stageError(e) })
+      } finally {
+        setCloning(false)
+      }
+    },
+    [cloning, patch, dispatch, uploadReq, voiceCloneReq],
+  )
+
+  const pickPresetForPerson = useCallback(
+    (personId: string, voiceId: string) => {
+      const label = presetLabel(voiceId)
+      dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'preset', label } }))
+      patch('clone', { status: 'done', detail: `preset · ${label}` })
+    },
+    [dispatch, patch],
+  )
+
+  const reuseForPerson = useCallback(
+    (personId: string, rawId: string) => {
+      const voiceId = rawId.trim()
+      if (!voiceId) return
+      const label = voiceId
+      dispatch(setPersonVoice({ id: personId, voice: { voiceId, source: 'saved', label } }))
+      dispatch(addSavedVoice({ voiceId, label }))
+      patch('clone', { status: 'done', detail: `saved voice · ${voiceId}` })
+    },
+    [dispatch, patch],
+  )
+
+  const clearForPerson = useCallback(
+    (personId: string) => {
+      dispatch(setPersonVoice({ id: personId, voice: null }))
+      // Only reset the stage if ALL people now have no voice.
+      // (If another person still has a voice, the stage stays done.)
+      const anyVoiced = cast.some((p) => p.id !== personId && p.voice !== null)
+      if (!anyVoiced) patch('clone', { status: 'pending', detail: undefined })
+    },
+    [dispatch, patch, cast],
+  )
+
+  const forgetForPerson = useCallback(
+    (voiceId: string) => dispatch(removeSavedVoice(voiceId)),
+    [dispatch],
+  )
+
+  const sampleForPerson = useCallback(
+    async (personId: string): Promise<string | null> => {
+      if (samplingVoice) return null
+      const person = cast.find((p) => p.id === personId)
+      if (!person?.voice) return null
+      setSamplingVoice(true)
+      try {
+        const text = 'Here is a quick sample of how your narration will sound across the scenes.'
+        const { audioUrl } = await voiceSayReq({ text, voiceId: person.voice.voiceId }).unwrap()
+        return audioUrl
+      } finally {
+        setSamplingVoice(false)
+      }
+    },
+    [cast, samplingVoice, voiceSayReq],
+  )
 
   // ---- Per-source processing (story 09b) --------------------------------------
 
@@ -1445,5 +1552,19 @@ export function useScenePipeline() {
     processingId,
     processSource,
     processAll,
+    // Cast & speaker assignment (story 10b)
+    cast,
+    speakerAssignments,
+    setPeopleCount: (n: number) => dispatch(setPeopleCount(n)),
+    renamePerson: (id: string, name: string) => dispatch(renamePerson({ id, name })),
+    removePerson: (id: string) => dispatch(removePerson(id)),
+    assignSpeaker: (videoId: string, label: string, personId: string) =>
+      dispatch(assignSpeaker({ videoId, label, personId })),
+    cloneForPerson,
+    pickPresetForPerson,
+    reuseForPerson,
+    clearForPerson,
+    forgetForPerson,
+    sampleForPerson,
   }
 }
