@@ -80,3 +80,50 @@ export function dominantSpeaker(words: TWord[], start: number, end: number): str
   for (const [label, o] of totals) if (o > bestO) { bestO = o; best = label }
   return best
 }
+
+/** An audio span, in seconds. */
+export type SampleSpan = { start: number; end: number }
+
+/**
+ * A few representative audio spans for a speaker, so the producer can HEAR who
+ * `SPEAKER_xx` is before mapping them to a person (story 10b). Walks the speaker's
+ * contiguous runs (consecutive words tagged with `label`), caps each to
+ * `maxSeconds`, prefers runs at least `minSeconds` long, and returns up to
+ * `maxSamples` of them in chronological order. Empty if the speaker never speaks.
+ */
+export function speakerSampleSpans(
+  words: TWord[],
+  label: string,
+  opts: { maxSamples?: number; maxSeconds?: number; minSeconds?: number } = {},
+): SampleSpan[] {
+  const maxSamples = opts.maxSamples ?? 2
+  const maxSeconds = opts.maxSeconds ?? 6
+  const minSeconds = opts.minSeconds ?? 1.2
+
+  // Contiguous runs of this speaker's words (a different speaker's word ends a run).
+  const runs: SampleSpan[] = []
+  let cur: SampleSpan | null = null
+  for (const w of words) {
+    const ok = w.speaker === label && Number.isFinite(w.start) && Number.isFinite(w.end)
+    if (ok) {
+      if (cur) cur.end = Math.max(cur.end, w.end)
+      else cur = { start: w.start, end: w.end }
+    } else if (cur) {
+      runs.push(cur)
+      cur = null
+    }
+  }
+  if (cur) runs.push(cur)
+  if (!runs.length) return []
+
+  // Cap each run's length; prefer the long-enough ones, else fall back to all.
+  const capped = runs.map((r) => ({ start: r.start, end: Math.min(r.end, r.start + maxSeconds) }))
+  const long = capped.filter((r) => r.end - r.start >= minSeconds)
+  const pool = long.length ? long : capped
+
+  // Longest first → take a couple → present in chronological order.
+  return [...pool]
+    .sort((a, b) => b.end - b.start - (a.end - a.start))
+    .slice(0, maxSamples)
+    .sort((a, b) => a.start - b.start)
+}

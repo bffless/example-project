@@ -5,10 +5,10 @@
  * VoiceStudio picker — no extra complexity. When the producer bumps the count
  * to 2+ a per-video speaker→person assignment grid appears below.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Person, SavedVoice, VideoSource } from '../../store/studioSlice'
 import type { SpeakerAssignments } from '../../lib/speakers'
-import { uniqueSpeakers } from '../../lib/speakers'
+import { uniqueSpeakers, speakerSampleSpans } from '../../lib/speakers'
 import { VoiceStudio } from './VoiceStudio'
 
 type Props = {
@@ -251,25 +251,86 @@ function SourceAssignment({
   onAssign: (videoId: string, label: string, personId: string) => void
 }) {
   const labels = uniqueSpeakers(source.words ?? [])
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const stopAtRef = useRef<number | null>(null)
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
+
+  // Play one [start, end] span of the source audio so the producer can identify
+  // the voice. Mirrors the diff viewer's seek-then-stop-at-end pattern; seeking
+  // waits for metadata if the element isn't ready yet. Clicking the active sample
+  // toggles it off.
+  function playSpan(key: string, start: number, end: number) {
+    const el = audioRef.current
+    if (!el) return
+    if (playingKey === key && !el.paused) {
+      el.pause()
+      return
+    }
+    stopAtRef.current = end
+    const begin = () => {
+      el.currentTime = start
+      void el.play().catch(() => {})
+    }
+    if (el.readyState >= 1) begin()
+    else el.addEventListener('loadedmetadata', begin, { once: true })
+    setPlayingKey(key)
+  }
+
   return (
     <div>
       <p className="mb-2 font-mono text-[12px] text-ink-soft truncate">{source.fileName}</p>
+      {source.audioUrl && (
+        <audio
+          ref={audioRef}
+          src={source.audioUrl}
+          preload="metadata"
+          className="hidden"
+          onTimeUpdate={() => {
+            const el = audioRef.current
+            if (el && stopAtRef.current != null && el.currentTime >= stopAtRef.current) el.pause()
+          }}
+          onPause={() => { setPlayingKey(null); stopAtRef.current = null }}
+          onEnded={() => { setPlayingKey(null); stopAtRef.current = null }}
+        />
+      )}
       <div className="flex flex-col gap-2">
-        {labels.map((label) => (
-          <label key={label} className="flex items-center gap-3">
-            <span className="w-24 shrink-0 font-mono text-[12px] text-ink">{label}</span>
-            <select
-              value={assignments[source.id]?.[label] ?? ''}
-              onChange={(e) => { if (e.target.value) onAssign(source.id, label, e.target.value) }}
-              className="flex-1 rounded-md border border-paper-line bg-paper p-2 text-[13.5px] text-ink"
-            >
-              <option value="">— unassigned —</option>
-              {cast.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
-        ))}
+        {labels.map((label) => {
+          const spans = source.audioUrl ? speakerSampleSpans(source.words ?? [], label) : []
+          return (
+            <label key={label} className="flex items-center gap-3">
+              <span className="w-24 shrink-0 font-mono text-[12px] text-ink">{label}</span>
+              {spans.length > 0 && (
+                <span className="flex shrink-0 gap-1">
+                  {spans.map((sp, i) => {
+                    const key = `${label}:${i}`
+                    const active = playingKey === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className="pill-ghost px-2 py-1 font-mono text-[11px]"
+                        onClick={() => playSpan(key, sp.start, sp.end)}
+                        title={`Hear a ${Math.max(1, Math.round(sp.end - sp.start))}s sample of ${label}`}
+                      >
+                        {active ? '⏸' : '▶'} {i + 1}
+                      </button>
+                    )
+                  })}
+                </span>
+              )}
+              <select
+                value={assignments[source.id]?.[label] ?? ''}
+                onChange={(e) => { if (e.target.value) onAssign(source.id, label, e.target.value) }}
+                className="flex-1 rounded-md border border-paper-line bg-paper p-2 text-[13.5px] text-ink"
+              >
+                <option value="">— unassigned —</option>
+                {cast.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
+          )
+        })}
       </div>
     </div>
   )
