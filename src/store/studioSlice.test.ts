@@ -127,3 +127,44 @@ describe('sources reducers', () => {
     expect(s.sources[0].order).toBe(0)
   })
 })
+
+// ── cast + speaker-assignments (story 10b) ──────────────────────────────────
+
+import { test } from 'vitest'
+import {
+  setPeopleCount, renamePerson, setPersonVoice, assignSpeaker, removePerson,
+} from './studioSlice'
+
+const init = () => reducer(undefined, { type: '@@init' }) as StudioState
+
+test('setPeopleCount pads up and truncates down, min 1', () => {
+  let s = init()
+  s = reducer(s, setPeopleCount(3))
+  expect(s.cast.map((p) => p.name)).toEqual(['Me', 'Person 2', 'Person 3'])
+  s = reducer(s, setPeopleCount(1))
+  expect(s.cast).toHaveLength(1)
+  s = reducer(s, setPeopleCount(0))
+  expect(s.cast).toHaveLength(1)
+})
+
+test('renamePerson and setPersonVoice update a person; cast[0] mirrors legacy voice', () => {
+  let s = reducer(init(), setPeopleCount(1))
+  const id = s.cast[0].id
+  s = reducer(s, renamePerson({ id, name: 'James' }))
+  expect(s.cast[0].name).toBe('James')
+  const voice = { voiceId: 'v1', source: 'clone' as const, label: 'mine' }
+  s = reducer(s, setPersonVoice({ id, voice }))
+  expect(s.cast[0].voice).toEqual(voice)
+  expect(s.voice).toEqual(voice) // legacy mirror so old readers keep working
+})
+
+test('assignSpeaker records a per-video mapping; removePerson strips its assignments', () => {
+  let s = reducer(init(), setPeopleCount(2))
+  const [a, b] = s.cast.map((p) => p.id)
+  s = reducer(s, assignSpeaker({ videoId: 'src-1', label: 'SPEAKER_00', personId: a }))
+  s = reducer(s, assignSpeaker({ videoId: 'src-1', label: 'SPEAKER_01', personId: b }))
+  expect(s.speakerAssignments['src-1']['SPEAKER_01']).toBe(b)
+  s = reducer(s, removePerson(b))
+  expect(s.speakerAssignments['src-1']['SPEAKER_01']).toBeUndefined()
+  expect(s.cast).toHaveLength(1)
+})

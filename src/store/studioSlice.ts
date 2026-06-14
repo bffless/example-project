@@ -36,6 +36,10 @@ export type VoiceChoice = {
   sampleUrl?: string | null
 }
 
+/** A person in the project cast (story 10b): a name + the one voice their lines
+ *  are narrated in. Detected speaker labels are assigned to a person per video. */
+export type Person = { id: string; name: string; voice: VoiceChoice | null }
+
 /**
  * A cloned voice id worth keeping. MiniMax stores cloned voices server-side by
  * id, so once you've paid the $3 to clone, you can reuse that id forever without
@@ -178,6 +182,12 @@ export type StudioState = {
    * and are retired in a later task.
    */
   sources: VideoSource[]
+  /** Project cast (story 10b). Default seeds one person ('Me'); the legacy
+   *  top-level `voice` mirrors cast[0].voice for back-compat readers. */
+  cast: Person[]
+  /** Per-video speaker→person map: speakerAssignments[videoId][speakerLabel] = personId.
+   *  Absent entry + single-person cast resolves to that person (see speakers.ts). */
+  speakerAssignments: Record<string, Record<string, string>>
 }
 
 const initialState: StudioState = {
@@ -201,7 +211,13 @@ const initialState: StudioState = {
   fileName: null,
   finalCutUrl: null,
   sources: [],
+  cast: [],
+  speakerAssignments: {},
 }
+
+let personSeq = 0
+const newPersonId = () => `person-${++personSeq}`
+const defaultPersonName = (i: number) => (i === 0 ? 'Me' : `Person ${i + 1}`)
 
 const studioSlice = createSlice({
   name: 'studio',
@@ -322,6 +338,46 @@ const studioSlice = createSlice({
       state.sources.splice(to, 0, moved)
       state.sources = state.sources.map((s, i) => ({ ...s, order: i }))
     },
+    /** Grow/shrink the cast to exactly `n` people (min 1). New people get a default
+     *  name + no voice; removing trims from the end and drops their assignments. */
+    setPeopleCount(state, action: PayloadAction<number>) {
+      const n = Math.max(1, Math.floor(action.payload))
+      while (state.cast.length < n)
+        state.cast.push({ id: newPersonId(), name: defaultPersonName(state.cast.length), voice: null })
+      if (state.cast.length > n) {
+        const removed = state.cast.slice(n).map((p) => p.id)
+        state.cast = state.cast.slice(0, n)
+        for (const vid of Object.keys(state.speakerAssignments))
+          for (const label of Object.keys(state.speakerAssignments[vid]))
+            if (removed.includes(state.speakerAssignments[vid][label]))
+              delete state.speakerAssignments[vid][label]
+      }
+      state.voice = state.cast[0]?.voice ?? null
+    },
+    renamePerson(state, action: PayloadAction<{ id: string; name: string }>) {
+      const p = state.cast.find((x) => x.id === action.payload.id)
+      if (p) p.name = action.payload.name
+    },
+    setPersonVoice(state, action: PayloadAction<{ id: string; voice: VoiceChoice | null }>) {
+      const p = state.cast.find((x) => x.id === action.payload.id)
+      if (!p) return
+      p.voice = action.payload.voice
+      if (state.cast[0]?.id === p.id) state.voice = p.voice // legacy mirror
+    },
+    removePerson(state, action: PayloadAction<string>) {
+      state.cast = state.cast.filter((p) => p.id !== action.payload)
+      if (state.cast.length === 0)
+        state.cast = [{ id: newPersonId(), name: defaultPersonName(0), voice: null }]
+      for (const vid of Object.keys(state.speakerAssignments))
+        for (const label of Object.keys(state.speakerAssignments[vid]))
+          if (state.speakerAssignments[vid][label] === action.payload)
+            delete state.speakerAssignments[vid][label]
+      state.voice = state.cast[0]?.voice ?? null
+    },
+    assignSpeaker(state, action: PayloadAction<{ videoId: string; label: string; personId: string }>) {
+      const { videoId, label, personId } = action.payload
+      ;(state.speakerAssignments[videoId] ??= {})[label] = personId
+    },
     /**
      * Wipe everything back to a clean import — used by "Start over". Keeps the
      * `savedVoices` library: those cloned ids cost real money and are reusable
@@ -361,6 +417,11 @@ export const {
   patchSourceStage,
   removeSource,
   reorderSources,
+  setPeopleCount,
+  renamePerson,
+  setPersonVoice,
+  removePerson,
+  assignSpeaker,
   resetStudio,
 } = studioSlice.actions
 
