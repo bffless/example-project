@@ -60,7 +60,7 @@ export function Studio() {
   // rather than snapping forward to Build.
   const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
   // Whether the producer has clicked "Continue" to reveal the global plan
-  // (thumbnails → director → voice). Until then the prep view shows only the
+  // (thumbnails → voice → director). Until then the prep view shows only the
   // source queue — find & process your clips first; the plan comes after.
   const planRevealed = useAppSelector((s) => s.studio.planRevealed)
 
@@ -378,7 +378,7 @@ export function Studio() {
   // and lets them jump back to Build.
   const inPrep = !pipe.ready || revisitPrep
   const displayPhase = inPrep ? 'prep' : phase
-  // The global plan (thumbnails → director → voice) is held back until the
+  // The global plan (thumbnails → voice → director) is held back until the
   // producer's source clips are processed AND they click "Continue" — so the
   // first job is just "find your videos and process them." A plan that's already
   // underway (any global stage past pending, e.g. after a reload) shows
@@ -524,7 +524,7 @@ export function Studio() {
 
             {inPrep ? (
               /* Prep phase: process your source clips first; the global plan
-                 (thumbnails → director → voice) reveals once they're done and you
+                 (thumbnails → voice → director) reveals once they're done and you
                  continue. The plan is one column — each step's artifact (contact
                  sheet, director result, voice studio) sits beneath its own card. */
               <div className="flex flex-col gap-8">

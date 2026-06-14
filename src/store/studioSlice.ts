@@ -113,7 +113,7 @@ export type StudioState = {
   revisitPrep: boolean
   /**
    * Whether the producer has clicked "Continue" to reveal the global plan
-   * (thumbnails → director → voice) after their source videos finished
+   * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
    * stays hidden so it doesn't get ahead of the first job (find & process your
    * clips). Persisted so the reveal survives a reload; reset by resetStudio.

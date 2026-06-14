@@ -288,7 +288,7 @@ export function useScenePipeline() {
     [sources],
   )
 
-  // The next GLOBAL step to run (thumbnails → director → clone), shown on the prep
+  // The next GLOBAL step to run (thumbnails → clone → director), shown on the prep
   // board. Null while sources are still being prepped (the per-video stages live in
   // the queue, not the board) or once every global stage is done.
   const currentStageId = useMemo<StageId | null>(() => {
