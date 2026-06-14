@@ -35,7 +35,7 @@ const lastSegment = (url: string) =>
  * actually iterates before resolving (exactly like the real pipeline's postSteps).
  */
 type MockJob = {
-  kind: 'scenes' | 'refine'
+  kind: 'scenes' | 'refine' | 'transcribe'
   result: unknown
   polls: number
   // What the "pipeline" sent the model (story 03m) — fabricated here, but the
@@ -112,7 +112,12 @@ const studioHandlers = [
 
   // Transcription: return the real captured WhisperX response (82 words with
   // word-level timestamps) so the editor has realistic data, free of charge.
-  http.post('/api/transcribe', () => HttpResponse.json(TRANSCRIBE_FIXTURE)),
+  // Transcription is async now (story 10e): enqueue a job and return its id, the
+  // same fire-and-poll shape as /api/scenes. The poll serves the fixture words.
+  http.post('/api/transcribe', () => {
+    const jobId = enqueueJob('transcribe', TRANSCRIBE_FIXTURE)
+    return HttpResponse.json({ jobId, status: 'pending' })
+  }),
 
   // Master director: enqueue a job and return its id (story 03f Part 0). The
   // canned synopsis + scenes (per-scene refinePrompt + cut spans, derived from the

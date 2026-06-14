@@ -36,7 +36,7 @@ import { planGlobalSheetCaptures } from '../../lib/globalSheet'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import {
   studioApi,
-  useTranscribeMutation,
+  useTranscribeStartMutation,
   useScenesMutation,
   useRefineSceneMutation,
   useNarrateMutation,
@@ -204,6 +204,7 @@ export function useScenePipeline() {
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
   const cast = useAppSelector((s) => s.studio.cast)
   const speakerAssignments = useAppSelector((s) => s.studio.speakerAssignments)
+  const diarize = useAppSelector((s) => s.studio.diarize)
   const selectedId = useAppSelector((s) => s.studio.selectedId)
   const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
   const sources = useAppSelector((s) => s.studio.sources)
@@ -212,7 +213,7 @@ export function useScenePipeline() {
   // dual-write here so sources[0] tracks the legacy fields.
   const currentSource = sources[0] ?? null
 
-  const [transcribeReq] = useTranscribeMutation()
+  const [transcribeStartReq] = useTranscribeStartMutation()
   const [scenesReq] = useScenesMutation()
   const [refineSceneReq] = useRefineSceneMutation()
   const [narrateReq] = useNarrateMutation()
@@ -316,7 +317,7 @@ export function useScenePipeline() {
    * the network (never a stale cached `pending`) and leaves no cache subscription.
    */
   const pollJob = useCallback(
-    async (jobId: string): Promise<{ kind: 'scenes' | 'refine'; result: unknown }> => {
+    async (jobId: string): Promise<{ kind: 'scenes' | 'refine' | 'transcribe'; result: unknown }> => {
       const deadline = Date.now() + POLL_TIMEOUT_MS
       for (;;) {
         const job = await dispatch(
@@ -492,6 +493,43 @@ export function useScenePipeline() {
     [pollJob, scenes, patchScene, sliceAndUploadSpans, sources],
   )
 
+  /**
+   * Drive a per-source transcribe job to completion and write its words onto the
+   * source (story 10e). Shared by the live `processSource`/`transcribe` path and
+   * resume-on-reload; `pollsInFlight` keeps the two from double-polling. Dual-writes
+   * the legacy top-level `words`/board stage when this is the primary source (the
+   * 09a bridge). Clears the source's `transcribeJobId` on any terminal status.
+   */
+  const completeTranscribeJob = useCallback(
+    async (sourceId: string, jobId: string) => {
+      if (pollsInFlight.has(jobId)) return
+      pollsInFlight.add(jobId)
+      const ordered = [...sources].sort((a, b) => a.order - b.order)
+      const isPrimary = ordered.length === 0 || ordered[0].id === sourceId
+      dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'active' } }))
+      if (isPrimary) patch('transcribe', { status: 'active' })
+      try {
+        const { result } = await pollJob(jobId)
+        const got = ((result ?? {}) as { words?: TranscriptWord[] }).words ?? []
+        const detail = `${got.length.toLocaleString()} words`
+        dispatch(patchSource({ id: sourceId, patch: { words: got, transcribeJobId: null } }))
+        dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'done', detail } }))
+        if (isPrimary) {
+          dispatch(setWords(got))
+          patch('transcribe', { status: 'done', detail })
+        }
+      } catch (e) {
+        const detail = stageError(e)
+        dispatch(patchSource({ id: sourceId, patch: { transcribeJobId: null } }))
+        dispatch(patchSourceStage({ id: sourceId, stage: 'transcribe', patch: { status: 'error', detail } }))
+        if (isPrimary) patch('transcribe', { status: 'error', detail })
+      } finally {
+        pollsInFlight.delete(jobId)
+      }
+    },
+    [pollJob, dispatch, patch, sources],
+  )
+
   // Resume any in-flight job after a hard reload (redux-persist brings back the
   // persisted job ids). The `pollsInFlight` guard inside the `complete*` helpers
   // makes this safe to re-run and safe to race with a live action — only one poll
@@ -506,8 +544,11 @@ export function useScenePipeline() {
       for (const scene of scenes) {
         if (scene.refineJobId) void completeRefineJob(scene.id, scene.refineJobId)
       }
+      for (const s of sources) {
+        if (s.transcribeJobId) void completeTranscribeJob(s.id, s.transcribeJobId)
+      }
     })
-  }, [scenesJobId, sourceUrl, scenes, completeDirectorJob, completeRefineJob])
+  }, [scenesJobId, sourceUrl, scenes, sources, completeDirectorJob, completeRefineJob, completeTranscribeJob])
 
   // Cast seeding (story 10b): ensure at least one person exists when the voice
   // step is reached, so the single-narrator common case is one decision with no
@@ -570,19 +611,17 @@ export function useScenePipeline() {
   // WhisperX with word-level alignment, story 02). Keeps the word-level
   // timestamps for shorten + segment (story 03).
   const transcribe = useCallback(
-    async ({ duration }: StepContext) => {
+    async () => {
+      const id = currentSource?.id ?? 'source-1'
       patch('transcribe', { status: 'active' })
-      const data = await transcribeReq({ audioUrl }).unwrap()
-      const got = data.words ?? []
-      dispatch(setWords(got))
-      dispatch(patchSource({ id: currentSource?.id ?? 'source-1', patch: { words: got } }))
-      const count = got.length || Math.round((duration / 60) * 150)
-      patch('transcribe', {
-        status: 'done',
-        detail: `${count.toLocaleString()} words · ${Math.ceil(duration / 60)} min`,
-      })
+      // Enqueue the async job, persist its id so a reload resumes polling, then
+      // drive it to completion (story 10e). Diarization is the producer's
+      // project-level choice; it's what can push this past the 30s edge timeout.
+      const { jobId } = await transcribeStartReq({ audioUrl, diarize }).unwrap()
+      dispatch(patchSource({ id, patch: { transcribeJobId: jobId } }))
+      await completeTranscribeJob(id, jobId)
     },
-    [patch, dispatch, transcribeReq, audioUrl, currentSource],
+    [patch, dispatch, transcribeStartReq, audioUrl, diarize, currentSource, completeTranscribeJob],
   )
 
   // Stage ④ — sample interval thumbnails across ALL source videos, compose them
@@ -881,17 +920,13 @@ export function useScenePipeline() {
           patch('extract', { status: 'done', detail: `16 kHz mono WAV · ${mb(wav.size)}` })
         }
 
+        // Transcribe is async (story 10e): enqueue, persist the job id (so a
+        // reload resumes), then poll to completion. `completeTranscribeJob` owns
+        // the stage transitions + the per-source/primary word dual-write.
         stage = 'transcribe'
-        dispatch(patchSourceStage({ id, stage, patch: { status: 'active' } }))
-        const data = await transcribeReq({ audioUrl: aUrl }).unwrap()
-        const got = data.words ?? []
-        dispatch(patchSource({ id, patch: { words: got } }))
-        const count = got.length || Math.round((duration / 60) * 150)
-        dispatch(patchSourceStage({ id, stage, patch: { status: 'done', detail: `${count.toLocaleString()} words` } }))
-        if (isPrimary) {
-          dispatch(setWords(got))
-          patch('transcribe', { status: 'done', detail: `${count.toLocaleString()} words` })
-        }
+        const { jobId } = await transcribeStartReq({ audioUrl: aUrl, diarize }).unwrap()
+        dispatch(patchSource({ id, patch: { transcribeJobId: jobId } }))
+        await completeTranscribeJob(id, jobId)
       } catch (e) {
         dispatch(patchSourceStage({ id, stage, patch: { status: 'error', detail: stageError(e) } }))
       } finally {
@@ -900,7 +935,7 @@ export function useScenePipeline() {
         setProcessingId(null)
       }
     },
-    [processingId, sources, dispatch, uploadReq, transcribeReq, patch],
+    [processingId, sources, dispatch, uploadReq, transcribeStartReq, diarize, completeTranscribeJob, patch],
   )
 
   // Walk the source queue in order and process each that isn't already fully
@@ -929,7 +964,7 @@ export function useScenePipeline() {
       try {
         if (id === 'upload') await uploadClip(ctx)
         else if (id === 'extract') await extractAndUploadAudio(ctx)
-        else if (id === 'transcribe') await transcribe(ctx)
+        else if (id === 'transcribe') await transcribe()
         else if (id === 'thumbnails') await generateThumbnails()
         else if (id === 'director') await runDirector(ctx) // shorten + segment, one Gemini call
         // 'clone' isn't run here — the VoiceStudio resource owns it (record/clone
@@ -1525,6 +1560,7 @@ export function useScenePipeline() {
     // Cast & speaker assignment (story 10b)
     cast,
     speakerAssignments,
+    diarize,
     setPeopleCount: setPeopleCountCb,
     renamePerson: renamePersonCb,
     removePerson: removePersonCb,

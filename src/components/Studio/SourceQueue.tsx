@@ -20,6 +20,9 @@ type Props = {
   /** Resolve a diarization label to a display name for the transcript preview —
    *  the person's name once mapped, else the raw label. Omitted = raw label. */
   resolveSpeakerName?: (sourceId: string, label: string) => string
+  /** Project-level: run speaker diarization during transcription (story 10e). */
+  diarize?: boolean
+  onDiarizeChange?: (v: boolean) => void
 }
 
 const STAGE_LABELS: Record<StageId, string> = {
@@ -190,7 +193,7 @@ function SourceRow({
   )
 }
 
-export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd, resolveSpeakerName }: Props) {
+export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, onProcessAll, onAdd, resolveSpeakerName, diarize = false, onDiarizeChange }: Props) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   // Validate dropped/picked files the same way MediaImport does, then append the
   // ones that pass. Surfaced inline below the queue.
@@ -255,6 +258,24 @@ export function SourceQueue({ sources, busyId, onReorder, onRemove, onProcess, o
           }}
         />
       </div>
+
+      {/* Project-level diarization toggle (story 10e). Off = single-narrator fast
+          path; on = detect speakers (slower, runs as an async job). Locked while
+          a clip is processing so the choice can't change mid-run. */}
+      <label className="mb-3 flex items-start gap-2 border rule bg-paper px-4 py-3 text-[13px] text-ink-soft">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={diarize}
+          disabled={busy}
+          onChange={(e) => onDiarizeChange?.(e.target.checked)}
+        />
+        <span>
+          <span className="font-medium text-ink">This recording has more than one speaker</span>{' '}
+          — detect who&rsquo;s speaking so you can give each person their own voice. Leave it off
+          for a single narrator (faster transcription).
+        </span>
+      </label>
 
       {/* Queue list */}
       <ol className="overflow-hidden border rule">

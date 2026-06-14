@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, setDirection, setDuration, setFileName, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, setDiarize, setDirection, setDuration, setFileName, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -593,6 +593,8 @@ export function Studio() {
                     resolveSpeakerName={(sourceId, label) =>
                       resolvePerson(sourceId, label, pipe.cast, pipe.speakerAssignments)?.name ?? label
                     }
+                    diarize={pipe.diarize}
+                    onDiarizeChange={(v) => dispatch(setDiarize(v))}
                   />
                 )}
 

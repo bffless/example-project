@@ -82,6 +82,10 @@ export type VideoSource = {
   audioUrl: string | null
   audioPeaks: number[]
   words: TranscriptWord[]
+  /** In-flight async transcribe job id (story 10e). Transcription runs as a
+   *  fire-and-poll job (diarization can exceed the 30s edge timeout), so a hard
+   *  reload resumes polling from this; cleared (null) on terminal status. */
+  transcribeJobId?: string | null
   /** Per-video prep progress: only the per-video stages (upload/extract/transcribe). */
   stageProgress: StageProgressMap
 }
@@ -102,6 +106,7 @@ const makeSource = (p: { id: string; fileName: string; duration: number; order: 
   audioUrl: null,
   audioPeaks: [],
   words: [],
+  transcribeJobId: null,
   stageProgress: freshSourceProgress(),
 })
 
@@ -125,6 +130,10 @@ export type StudioState = {
    * page — so this only gates the not-yet-started case.)
    */
   planRevealed: boolean
+  /** Whether transcription should run speaker **diarization** (story 10e). Off by
+   *  default (single-narrator = the fast path); the producer flips it on before
+   *  processing when a recording has more than one speaker. Persisted. */
+  diarize: boolean
   scenes: Scene[]
   /** Relative `/api/uploads/source/...` serve path once uploaded (proxies to bucket). */
   sourceUrl: string | null
@@ -194,6 +203,7 @@ const initialState: StudioState = {
   stageProgress: freshProgress(),
   revisitPrep: false,
   planRevealed: false,
+  diarize: false,
   scenes: [],
   sourceUrl: null,
   audioUrl: null,
@@ -259,6 +269,10 @@ const studioSlice = createSlice({
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
       state.planRevealed = action.payload
+    },
+    /** Toggle speaker diarization for transcription (story 10e). */
+    setDiarize(state, action: PayloadAction<boolean>) {
+      state.diarize = action.payload
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
       state.scenes = action.payload
@@ -411,6 +425,7 @@ export const {
   failActiveStage,
   setRevisitPrep,
   setPlanRevealed,
+  setDiarize,
   setScenes,
   patchScene,
   setSourceUrl,
