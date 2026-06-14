@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { skipToken } from '@reduxjs/toolkit/query'
 import type { VideoSource } from '../../store/studioSlice'
 import { PER_VIDEO_STAGES, type StageId } from '../../lib/pipeline'
@@ -76,9 +76,21 @@ function SourceRow({
   const previewRef = useRef<HTMLVideoElement>(null)
 
   // Preview the local file directly (pre-upload "is this the right clip?"), no
-  // upload or signing needed. One object URL per File, revoked on unmount/change.
-  const localUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
-  useEffect(() => () => { if (localUrl) URL.revokeObjectURL(localUrl) }, [localUrl])
+  // upload or signing needed. The object URL is minted in the toggle handler (not an
+  // effect) on first preview, so React 18 StrictMode's dev mount→unmount→remount
+  // cycle can't revoke a URL the <video> still points at (that left the preview blank
+  // in dev). Revoked on unmount / when replaced.
+  const [localUrl, setLocalUrl] = useState<string | null>(null)
+  useEffect(() => {
+    return () => {
+      if (localUrl) URL.revokeObjectURL(localUrl)
+    }
+  }, [localUrl])
+
+  function togglePreview() {
+    if (file && !localUrl) setLocalUrl(URL.createObjectURL(file))
+    setExpanded((v) => !v)
+  }
 
   // Only sign the bucket object when there's no local file to play (e.g. after a
   // reload). Hook must be called unconditionally; conditionally skip via skipToken.
@@ -88,7 +100,8 @@ function SourceRow({
 
   // Local file wins (instant); else the signed bucket URL once it resolves.
   const previewSrc = localUrl ?? signed?.url ?? null
-  const canExpand = !!localUrl || !!source.sourceUrl
+  // Offer the preview as soon as a File exists (or once the clip's been uploaded).
+  const canExpand = !!file || !!source.sourceUrl
 
   return (
     <li
@@ -170,7 +183,7 @@ function SourceRow({
               type="button"
               className="pill-ghost"
               aria-expanded={expanded}
-              onClick={() => setExpanded((v) => !v)}
+              onClick={togglePreview}
             >
               {expanded ? 'Hide preview' : 'Show preview'}
             </button>
