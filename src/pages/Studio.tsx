@@ -28,6 +28,8 @@ import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
+import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
+import { useAutoBuild } from '../components/Studio/useAutoBuild'
 import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMutation } from '../store/studioApi'
 import { buildSearchRequest, toSearchHits } from '../lib/search'
 import { skipToken } from '@reduxjs/toolkit/query'
@@ -68,6 +70,8 @@ export function Studio() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
+  const auto = useAutoBuild(pipe)
+  const [autoMode, setAutoMode] = useState(() => auto.run.status !== 'idle')
 
   // The Build scene tabs are sticky under the global header (`h-14` = 3.5rem).
   // The diff's "placing" bar is also sticky and must clear them, so measure the
@@ -698,15 +702,37 @@ export function Studio() {
                     "Scenes · chapters" label scrolls away). `tabsRef` measures
                     JUST the strip so the diff's placing bar parks flush beneath
                     it. Frosted like the header; z below it (z-40) so it wins. */}
-                <SceneTabs
-                  scenes={pipe.scenes}
-                  selectedId={pipe.selectedId}
-                  onSelect={pipe.select}
-                  tablistRef={tabsRef}
-                  tablistClassName="sticky top-14 z-30 bg-paper/85 backdrop-blur"
-                  onPreview={() => setPreviewOpen(true)}
-                  previewDisabled={!selected}
-                />
+                <div className="flex items-center justify-end pb-2">
+                  <button
+                    type="button"
+                    className="pill-ghost"
+                    onClick={() => setAutoMode((v) => !v)}
+                  >
+                    {autoMode ? 'Manual scene tabs' : 'Auto build ▶'}
+                  </button>
+                </div>
+                {autoMode ? (
+                  <AutoBuildBoard
+                    scenes={pipe.scenes}
+                    run={auto.run}
+                    selectedId={pipe.selectedId}
+                    onSelect={pipe.select}
+                    onStart={auto.start}
+                    onPause={auto.pause}
+                    onResume={auto.resume}
+                    onStop={auto.stop}
+                  />
+                ) : (
+                  <SceneTabs
+                    scenes={pipe.scenes}
+                    selectedId={pipe.selectedId}
+                    onSelect={pipe.select}
+                    tablistRef={tabsRef}
+                    tablistClassName="sticky top-14 z-30 bg-paper/85 backdrop-blur"
+                    onPreview={() => setPreviewOpen(true)}
+                    previewDisabled={!selected}
+                  />
+                )}
                 {/* Video capped on the left; the space to its right carries the
                     selected scene's metadata. The diff below still gets the full
                     page width. */}
