@@ -39,6 +39,17 @@ test('seedAssignmentsByLabel maps the Nth label to the Nth person', () => {
   expect(seeded).toEqual({ SPEAKER_00: 'p1', SPEAKER_01: 'p2' })
 })
 
+test('seedAssignmentsByLabel preserves existing entries and does not mutate input', () => {
+  const cast: Person[] = [
+    { id: 'p1', name: 'Me', voice: null },
+    { id: 'p2', name: 'Guest', voice: null },
+  ]
+  const input = { v1: { SPEAKER_00: 'p2' } }
+  const seeded = seedAssignmentsByLabel('v1', ['SPEAKER_00', 'SPEAKER_01'], cast, input)
+  expect(seeded).toEqual({ SPEAKER_00: 'p2', SPEAKER_01: 'p2' })
+  expect(input).toEqual({ v1: { SPEAKER_00: 'p2' } })
+})
+
 test('dominantSpeaker picks the label covering the most of the window', () => {
   const ws = [
     { text: 'a', start: 0, end: 2, speaker: 'SPEAKER_00' },
