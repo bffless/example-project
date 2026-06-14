@@ -9,12 +9,6 @@ import type { TranscriptWord } from '../store/studioSlice'
 /** One read-paragraph: a timestamp, an optional speaker, and the words. */
 export type TranscriptRow = { start: number; speaker?: string; text: string }
 
-/** "SPEAKER_00" → "Speaker 1" (1-based); anything unparseable returns the raw label. */
-export function friendlySpeaker(label: string): string {
-  const m = /(\d+)\s*$/.exec(label)
-  return m ? `Speaker ${Number(m[1]) + 1}` : label
-}
-
 /**
  * Bucket words into coarse, timestamped paragraphs so the transcript reads. A new
  * paragraph starts when the `chunkSeconds` window rolls over OR the diarized

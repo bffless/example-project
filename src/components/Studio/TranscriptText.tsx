@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { formatClock } from '../../lib/transcriptGrid'
 import { uniqueSpeakers } from '../../lib/speakers'
-import { paragraphs, friendlySpeaker } from '../../lib/transcriptText'
+import { paragraphs } from '../../lib/transcriptText'
 import type { TranscriptWord } from '../../store/studioSlice'
 
 type Props = {
@@ -10,8 +10,8 @@ type Props = {
    *  the transcript" read, not the time grid. */
   chunkSeconds?: number
   /** Turn a diarization label (e.g. `SPEAKER_00`) into a display name. Defaults to
-   *  a friendly `Speaker 1`; the page can pass a cast-name resolver once the
-   *  producer has named people in the voice step. */
+   *  the RAW label so it matches the assignment grid; the page passes a cast-name
+   *  resolver so a speaker reads as the person's name once they've been mapped. */
   speakerName?: (label: string) => string
 }
 
@@ -23,7 +23,7 @@ type Props = {
  * (single-speaker clips stay label-free — same "invisible until it matters"
  * philosophy as the cast step).
  */
-export function TranscriptText({ words, chunkSeconds = 15, speakerName = friendlySpeaker }: Props) {
+export function TranscriptText({ words, chunkSeconds = 15, speakerName = (label) => label }: Props) {
   const rows = useMemo(() => paragraphs(words, chunkSeconds), [words, chunkSeconds])
   const showSpeakers = useMemo(() => uniqueSpeakers(words).length > 1, [words])
 

@@ -590,6 +590,9 @@ export function Studio() {
                     onProcess={(id) => { const f = files.get(id); if (f) void pipe.processSource(id, f) }}
                     onProcessAll={() => void pipe.processAll(files)}
                     onAdd={onImport}
+                    resolveSpeakerName={(sourceId, label) =>
+                      resolvePerson(sourceId, label, pipe.cast, pipe.speakerAssignments)?.name ?? label
+                    }
                   />
                 )}
 

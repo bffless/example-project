@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest'
-import { paragraphs, friendlySpeaker } from './transcriptText'
+import { paragraphs } from './transcriptText'
 import type { TranscriptWord } from '../store/studioSlice'
 
 const w = (text: string, start: number, speaker?: string): TranscriptWord => ({
@@ -7,12 +7,6 @@ const w = (text: string, start: number, speaker?: string): TranscriptWord => ({
   start,
   end: start + 0.3,
   ...(speaker ? { speaker } : {}),
-})
-
-test('friendlySpeaker turns a diarization label into a 1-based name', () => {
-  expect(friendlySpeaker('SPEAKER_00')).toBe('Speaker 1')
-  expect(friendlySpeaker('SPEAKER_01')).toBe('Speaker 2')
-  expect(friendlySpeaker('narrator')).toBe('narrator') // unparseable → raw
 })
 
 test('paragraphs breaks on a speaker change within the same time bucket', () => {
