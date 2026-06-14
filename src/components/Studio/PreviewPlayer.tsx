@@ -49,7 +49,9 @@ export function PreviewPlayer({ src, videoRef, cuts, onTime, onLoaded }: Props) 
     <div className="overflow-hidden border rule bg-ink">
       <video
         ref={videoRef}
-        src={src}
+        // Omit the attribute (not "") when there's no source — an empty src string
+        // makes the browser re-request the whole page and logs a console warning.
+        src={src || undefined}
         controls
         // Signed bucket URLs are cross-origin: CORS mode (the bucket allows GET
         // from our origins) keeps them loadable on the cross-origin-isolated

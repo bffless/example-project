@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
-import { buildConcatCommand } from '../../lib/export/assemble'
-import { concat } from '../../lib/export/ffmpeg'
+import { assembleFinalCutBlob } from '../../lib/export/assembleScene'
 import { useSignedBytes } from './useSignedBytes'
 import { useSignDownloadQuery } from '../../store/studioApi'
 import { skipToken } from '@reduxjs/toolkit/query'
@@ -68,23 +67,7 @@ export function FinalCutBar({ scenes, finalCutUrl, saving, onSave }: Props) {
     }
     setResultBlob(null)
     try {
-      setStage(`Gathering ${scenes.length} assembled scene${scenes.length === 1 ? '' : 's'}…`)
-      const parts = await Promise.all(
-        scenes.map(async (s, i) => {
-          if (!s.assembledUrl) throw new Error(`Scene ${i + 1} isn't assembled yet.`)
-          return { name: `scene-${i}.mp4`, bytes: await fetchBytes(s.assembledUrl) }
-        }),
-      )
-
-      // One scene needs no concat — it IS the whole video.
-      let blob: Blob
-      if (parts.length === 1) {
-        blob = new Blob([parts[0].bytes.slice()], { type: 'video/mp4' })
-      } else {
-        setStage('Stitching the final cut…')
-        const command = buildConcatCommand(parts.map((p) => p.name))
-        blob = await concat({ parts, command })
-      }
+      const blob = await assembleFinalCutBlob({ scenes, fetchBytes, onStage: setStage })
       setResultBlob(blob)
       setResultUrl(URL.createObjectURL(blob))
       setStage(`Done · ${(blob.size / 1_048_576).toFixed(1)} MB · save it to keep it`)

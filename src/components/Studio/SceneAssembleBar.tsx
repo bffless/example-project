@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Scene } from '../../lib/scenes'
 import { effectiveCuts, effectiveSegments, overlaps } from '../../lib/refiner'
-import {
-  planScene,
-  buildFfmpegCommand,
-  buildMeasureCommand,
-  parseLoudnorm,
-  LOUDNORM_ENABLED,
-  type LoudnormStats,
-} from '../../lib/export/assemble'
-import { assemble, measureLoudness } from '../../lib/export/ffmpeg'
+import { planScene } from '../../lib/export/assemble'
+import { assembleSceneBlob } from '../../lib/export/assembleScene'
 import { useSignedBytes } from './useSignedBytes'
 import { useSignDownloadQuery } from '../../store/studioApi'
 import { skipToken } from '@reduxjs/toolkit/query'
@@ -105,47 +98,12 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
     }
     setResultBlob(null)
     try {
-      // First build resolves the audio-input order; rebuilt below once each
-      // clip's loudness is measured (inputs are identical either way).
-      const draft = buildFfmpegCommand(plan, { source: 'clip.mp4', output: 'scene.mp4' })
-
-      setStage('Loading the scene clip…')
-      const source = await fetchBytes(scene.clipUrl)
-
-      setStage(
-        `Gathering ${draft.audioInputs.length} narration clip${draft.audioInputs.length === 1 ? '' : 's'}…`,
-      )
-      const clips = await Promise.all(
-        draft.audioInputs.map((segIndex) => {
-          const url = segments[segIndex]?.audioUrl
-          if (!url) throw new Error(`Segment ${segIndex} has no audio to assemble.`)
-          return fetchBytes(url)
-        }),
-      )
-
-      // Loudnorm pass 1: measure each clip so the assemble can apply a single
-      // constant gain per clip (linear two-pass). Sequential — one wasm worker.
-      // A failed measurement leaves that clip on the dynamic single-pass.
-      // Skipped entirely while normalization is off (LOUDNORM_ENABLED).
-      const loudness: (LoudnormStats | null)[] = []
-      if (LOUDNORM_ENABLED) {
-        for (let k = 0; k < clips.length; k++) {
-          setStage(`Measuring narration loudness (${k + 1}/${clips.length})…`)
-          loudness.push(
-            await measureLoudness({ clip: clips[k], command: buildMeasureCommand(`m${k}.wav`) })
-              .then(parseLoudnorm)
-              .catch(() => null),
-          )
-        }
-      }
-      const command = buildFfmpegCommand(plan, {
-        source: 'clip.mp4',
-        output: 'scene.mp4',
-        loudness,
+      const blob = await assembleSceneBlob({
+        scene,
+        fetchBytes,
+        onStage: setStage,
+        onProgress: setProgress,
       })
-
-      setStage('Assembling this scene…')
-      const blob = await assemble({ source, clips, command, onProgress: setProgress })
       setResultBlob(blob)
       setResultUrl(URL.createObjectURL(blob))
       setStage(`Done · ${(blob.size / 1_048_576).toFixed(1)} MB · save it to keep it`)
@@ -155,7 +113,7 @@ export function SceneAssembleBar({ scene, saving, onSave, onPreview }: Props) {
     } finally {
       setRunning(false)
     }
-  }, [running, canAssemble, scene.clipUrl, plan, segments, resultUrl, fetchBytes])
+  }, [running, canAssemble, scene, resultUrl, fetchBytes])
 
   const save = useCallback(async () => {
     if (!resultBlob || saving) return
