@@ -122,6 +122,14 @@ export type StudioState = {
    */
   revisitPrep: boolean
   /**
+   * Whether the producer has moved on to the Export step. Like `revisitPrep`, an
+   * explicit navigation flag (persisted): Build doesn't auto-jump to Export when
+   * the last scene is built — the user clicks "Continue to export". Only takes
+   * effect once every scene is built (see `displayPhase`), so re-building a scene
+   * drops them back to Build. Reset by resetStudio.
+   */
+  inExport: boolean
+  /**
    * Whether the producer has clicked "Continue" to reveal the global plan
    * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
@@ -208,6 +216,7 @@ export type StudioState = {
 const initialState: StudioState = {
   stageProgress: freshProgress(),
   revisitPrep: false,
+  inExport: false,
   planRevealed: false,
   diarize: false,
   scenes: [],
@@ -272,6 +281,10 @@ const studioSlice = createSlice({
     /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
     setRevisitPrep(state, action: PayloadAction<boolean>) {
       state.revisitPrep = action.payload
+    },
+    /** Toggle the Build⇄Export view once all scenes are built (persisted, see above). */
+    setInExport(state, action: PayloadAction<boolean>) {
+      state.inExport = action.payload
     },
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
@@ -465,6 +478,7 @@ export const {
   patchStage,
   failActiveStage,
   setRevisitPrep,
+  setInExport,
   setPlanRevealed,
   setDiarize,
   setScenes,
