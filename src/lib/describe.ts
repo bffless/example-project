@@ -89,6 +89,26 @@ export function formatChapters(chapters: Chapter[]): string {
   return chapters.map((c) => `${chapterTime(c.time)} ${c.title}`).join('\n')
 }
 
+/**
+ * The final kept narration as a flat word list with interpolated timestamps —
+ * the shape `TranscriptText` renders, so the Export page can show the script in
+ * the SAME treatment as the prep transcript. Each segment's words are spread
+ * evenly across its `[start, end]` span (original-video seconds).
+ */
+export function scriptWords(scenes: Scene[]): { text: string; start: number; end: number }[] {
+  const out: { text: string; start: number; end: number }[] = []
+  for (const scene of scenes) {
+    const segs = scene.refined ? scene.refined.segments : effectiveSegments(scene)
+    for (const seg of segs) {
+      const words = seg.text.trim().split(/\s+/).filter(Boolean)
+      if (words.length === 0) continue
+      const per = Math.max(0.01, seg.end - seg.start) / words.length
+      words.forEach((w, i) => out.push({ text: w, start: seg.start + i * per, end: seg.start + (i + 1) * per }))
+    }
+  }
+  return out
+}
+
 /** Build the `/api/describe` request — the final script + the director's take. */
 export function buildDescribeRequest(scenes: Scene[], synopsis: string | null): DescribeRequest {
   return { script: videoScript(scenes), synopsis: (synopsis ?? '').trim() }

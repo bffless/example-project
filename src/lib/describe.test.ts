@@ -5,6 +5,7 @@ import {
   videoChapters,
   chapterTime,
   formatChapters,
+  scriptWords,
   buildDescribeRequest,
   toDescription,
 } from './describe'
@@ -85,6 +86,24 @@ describe('formatChapters', () => {
         { time: 83, title: 'Body' },
       ]),
     ).toBe('0:00 Intro\n1:23 Body')
+  })
+})
+
+describe('scriptWords', () => {
+  it('spreads each segment’s words evenly across its span', () => {
+    const scenes = [scene({ ...refined([{ text: 'Hello world', start: 0, end: 2 }]) })]
+    expect(scriptWords(scenes)).toEqual([
+      { text: 'Hello', start: 0, end: 1 },
+      { text: 'world', start: 1, end: 2 },
+    ])
+  })
+
+  it('concatenates across scenes and skips empty segments', () => {
+    const scenes = [
+      scene({ id: 'a', ...refined([{ text: 'One', start: 0, end: 1 }]) }),
+      scene({ id: 'b', ...refined([{ text: '   ', start: 1, end: 2 }, { text: 'Two', start: 2, end: 3 }]) }),
+    ]
+    expect(scriptWords(scenes).map((w) => w.text)).toEqual(['One', 'Two'])
   })
 })
 
