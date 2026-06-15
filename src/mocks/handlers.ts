@@ -207,6 +207,23 @@ const studioHandlers = [
     return HttpResponse.json({ results: results.slice(0, 20) })
   }),
 
+  // Export description (the finished-product page): a sync text call that writes a
+  // recommended title + summary from the FINAL kept script (with the director's
+  // synopsis as context). Deterministic stub derived from the inputs so it's
+  // exercisable offline; the real rule is a Gemini text call (mirrors search).
+  http.post('/api/describe', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { script?: string; synopsis?: string }
+    const script = (body.script ?? '').trim()
+    const synopsis = (body.synopsis ?? '').trim()
+    const firstSentence = (script.split(/(?<=[.!?])\s/)[0] ?? script).replace(/[.!?]+$/, '').trim()
+    const words = firstSentence.split(/\s+/).filter(Boolean).slice(0, 8).join(' ')
+    const title = words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Untitled video'
+    const summary = script
+      ? `${synopsis ? synopsis + ' ' : ''}In short: ${firstSentence || 'the key points'}.`.trim()
+      : 'No script to summarize yet.'
+    return HttpResponse.json({ title, summary })
+  }),
+
   // Poll a job (story 03f Part 0). Spins `pending` → `running` over the first two
   // polls, then resolves `done` with the stashed deterministic result — so the FE
   // poll loop iterates a couple of times before resolving, like the real pipeline.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { STAGE_DEFS, PER_VIDEO_STAGES, GLOBAL_STAGES, type Stage, type StageId } from '../../lib/pipeline'
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { combinedTimedTranscript, toScenes, type DirectorScene } from '../../lib/director'
+import { buildDescribeRequest, toDescription } from '../../lib/describe'
 import {
   toRefinement,
   refineDirections,
@@ -40,6 +41,7 @@ import {
   useScenesMutation,
   useRefineSceneMutation,
   useNarrateMutation,
+  useDescribeMutation,
   useUploadMutation,
   useLazySignDownloadQuery,
   useVoiceCloneMutation,
@@ -63,6 +65,8 @@ import {
   removeSavedVoice,
   setSelected,
   setFinalCutUrl,
+  setDescription,
+  setDescriptionTitle,
   setDuration,
   setFileName,
   addSource,
@@ -200,6 +204,7 @@ export function useScenePipeline() {
   const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
   const words = useAppSelector((s) => s.studio.words)
   const synopsis = useAppSelector((s) => s.studio.synopsis)
+  const description = useAppSelector((s) => s.studio.description)
   const direction = useAppSelector((s) => s.studio.direction)
   const directorPromptJobId = useAppSelector((s) => s.studio.directorPromptJobId)
   const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
@@ -220,6 +225,7 @@ export function useScenePipeline() {
   const [scenesReq] = useScenesMutation()
   const [refineSceneReq] = useRefineSceneMutation()
   const [narrateReq] = useNarrateMutation()
+  const [describeReq] = useDescribeMutation()
   const [uploadReq] = useUploadMutation()
   const [voiceCloneReq] = useVoiceCloneMutation()
   const [voiceSayReq] = useVoiceSayMutation()
@@ -241,6 +247,7 @@ export function useScenePipeline() {
   // bucket. The finished blob lives transiently in the AssembleBar (which also
   // owns the save error); only the saved serve URL (finalCutUrl) is persisted.
   const [savingFinalCut, setSavingFinalCut] = useState(false)
+  const [describing, setDescribing] = useState(false)
   // The scene whose assembled cut is currently uploading to the bucket (story 03g
   // phase 2 — per-scene assemble & save). Transient.
   const [savingSceneCutId, setSavingSceneCutId] = useState<string | null>(null)
@@ -1518,6 +1525,38 @@ export function useScenePipeline() {
 
   const select = useCallback((id: string | null) => dispatch(setSelected(id)), [dispatch])
 
+  // ---- Export: describe the finished video ----------------------------------
+
+  // Write the Export page's recommended title + summary from the FINAL kept script
+  // (with the director's synopsis as context) via /api/describe, and persist it
+  // alongside the script it was built from so the Export view can show it cached
+  // and only regenerate when the script changes. One sync text call (mirrors
+  // search). Errors surface through the shared `sceneError`.
+  const generateDescription = useCallback(async () => {
+    const req = buildDescribeRequest(scenes, synopsis)
+    if (!req.script) {
+      setSceneError('Build at least one scene before generating a description.')
+      return
+    }
+    setDescribing(true)
+    setSceneError(null)
+    try {
+      const raw = await describeReq(req).unwrap()
+      const { title, summary } = toDescription(raw)
+      dispatch(setDescription({ title, summary, script: req.script }))
+    } catch (e) {
+      setSceneError(stageError(e))
+    } finally {
+      setDescribing(false)
+    }
+  }, [scenes, synopsis, describeReq, dispatch])
+
+  // Producer edit of the recommended title (persisted on the description layer).
+  const editDescriptionTitle = useCallback(
+    (title: string) => dispatch(setDescriptionTitle(title)),
+    [dispatch],
+  )
+
   // ---- Export: save the assembled cut (story 05) ----------------------------
 
   // Persist the assembled MP4 the same way every other resource is saved: upload
@@ -1605,6 +1644,10 @@ export function useScenePipeline() {
     reset,
     select,
     saveFinalCut,
+    description,
+    describing,
+    generateDescription,
+    editDescriptionTitle,
     saveSceneCut,
     generateSceneSheets,
     refineScene,

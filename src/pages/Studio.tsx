@@ -27,6 +27,7 @@ import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
+import { ExportSummary } from '../components/Studio/ExportSummary'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
 import { useAutoBuild } from '../components/Studio/useAutoBuild'
@@ -708,7 +709,7 @@ export function Studio() {
               <div className="flex flex-col gap-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <p className="text-[14px] text-ink-soft">
-                    Stitch your built scenes into the whole video and download it.
+                    Your finished video — title, description, chapters, and the final cut.
                   </p>
                   <button
                     type="button"
@@ -718,6 +719,14 @@ export function Studio() {
                     ← Back to build
                   </button>
                 </div>
+                <ExportSummary
+                  scenes={pipe.scenes}
+                  synopsis={pipe.synopsis}
+                  description={pipe.description}
+                  generating={pipe.describing}
+                  onGenerate={pipe.generateDescription}
+                  onTitleChange={pipe.editDescriptionTitle}
+                />
                 <FinalCutBar
                   scenes={pipe.scenes}
                   finalCutUrl={pipe.finalCutUrl}

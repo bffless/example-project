@@ -16,6 +16,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
 import type { AutoBuildRun } from '../lib/autoBuild'
+import type { VideoDescription } from '../lib/describe'
 import type { ContactSheet } from '../lib/frames'
 
 /** A word with its time markers, as transcription returns them. `speaker` is the
@@ -194,6 +195,13 @@ export type StudioState = {
    */
   finalCutUrl: string | null
   /**
+   * The Export page's generated title + summary (from `/api/describe`), plus the
+   * final script it was written from — so we can show it cached and only
+   * regenerate when the script actually changes. Null until generated; the title
+   * is producer-editable. Reset by resetStudio.
+   */
+  description: (VideoDescription & { script: string }) | null
+  /**
    * All source videos in the project (story 09a). Each holds its own per-video
    * prep state (sourceUrl, audioUrl, words, stageProgress, etc.). The single
    * top-level fields (sourceUrl, audioUrl, etc.) remain for backward compat
@@ -235,6 +243,7 @@ const initialState: StudioState = {
   duration: 0,
   fileName: null,
   finalCutUrl: null,
+  description: null,
   sources: [],
   cast: [],
   speakerAssignments: {},
@@ -359,6 +368,15 @@ const studioSlice = createSlice({
      *  clearing (null) drops the saved reference without touching anything else. */
     setFinalCutUrl(state, action: PayloadAction<string | null>) {
       state.finalCutUrl = action.payload
+    },
+    /** Store the Export page's generated title + summary and the script it came
+     *  from (so we know when it's stale). */
+    setDescription(state, action: PayloadAction<VideoDescription & { script: string }>) {
+      state.description = action.payload
+    },
+    /** Producer edit of the recommended title (no-op if nothing's generated yet). */
+    setDescriptionTitle(state, action: PayloadAction<string>) {
+      if (state.description) state.description.title = action.payload
     },
     /** Append a new source video with fresh per-video prep progress (story 09a). */
     addSource(state, action: PayloadAction<{ id: string; fileName: string; duration: number }>) {
@@ -499,6 +517,8 @@ export const {
   setDuration,
   setFileName,
   setFinalCutUrl,
+  setDescription,
+  setDescriptionTitle,
   addSource,
   patchSource,
   patchSourceStage,
