@@ -13,6 +13,9 @@ type Props = {
    *  the RAW label so it matches the assignment grid; the page passes a cast-name
    *  resolver so a speaker reads as the person's name once they've been mapped. */
   speakerName?: (label: string) => string
+  /** Header label — defaults to "Transcript"; the Export page reuses this block
+   *  for the final "Script". */
+  label?: string
 }
 
 /**
@@ -23,14 +26,19 @@ type Props = {
  * (single-speaker clips stay label-free — same "invisible until it matters"
  * philosophy as the cast step).
  */
-export function TranscriptText({ words, chunkSeconds = 15, speakerName = (label) => label }: Props) {
+export function TranscriptText({
+  words,
+  chunkSeconds = 15,
+  speakerName = (label) => label,
+  label = 'Transcript',
+}: Props) {
   const rows = useMemo(() => paragraphs(words, chunkSeconds), [words, chunkSeconds])
   const showSpeakers = useMemo(() => uniqueSpeakers(words).length > 1, [words])
 
   return (
     <div className="border rule bg-paper">
       <div className="flex items-baseline justify-between border-b rule px-5 py-3">
-        <p className="meta-label">Transcript</p>
+        <p className="meta-label">{label}</p>
         <p className="font-mono text-[12px] text-ink-mute">
           {words.length.toLocaleString()} words
         </p>

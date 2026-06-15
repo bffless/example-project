@@ -13,8 +13,6 @@ import { effectiveCuts, effectiveSegments, normalizeCuts, voicingSummary } from 
 type Props = {
   scene: Scene
   className?: string
-  /** Flip this scene's built flag (the producer's "good to go" tracker). */
-  onToggleBuilt?: (id: string) => void
 }
 
 /**
@@ -23,7 +21,7 @@ type Props = {
  * — footage span, the director's cuts, how hard the script was condensed, and
  * (once voiced) whether the narration fits the footage.
  */
-export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
+export function SceneMeta({ scene, className = '' }: Props) {
   const span = sceneVideoSeconds(scene)
   // Read the EFFECTIVE layer (refined edits over the director's first pass) so these
   // numbers match the assembled final clip exactly — not the stale baseline. Cuts
@@ -66,22 +64,22 @@ export function SceneMeta({ scene, className = '', onToggleBuilt }: Props) {
     <div className={['border rule bg-paper-deep/30 p-5', className].join(' ')}>
       <div className="flex items-center justify-between gap-3">
         <p className="meta-label">Scene {scene.index + 1}</p>
-        {/* The built flag is a toggle: mark a scene "good to go", or click again to
-            re-open it. Drives the tab ✓ and the export readiness. */}
-        <button
-          type="button"
-          onClick={() => onToggleBuilt?.(scene.id)}
-          aria-pressed={done}
-          title={done ? 'Built — click to re-open this scene' : 'Mark this scene built'}
-          className={[
-            'rounded-full px-2.5 py-0.5 font-mono text-[11px] transition-colors',
+        {/* Read-only status badge — a scene becomes "built" automatically when you
+            assemble & save it (see `saveSceneCut`), not via a manual toggle. Drives
+            the tab ✓ and export readiness. */}
+        <span
+          title={
             done
-              ? 'bg-terracotta text-paper hover:bg-terracotta-ink'
-              : 'border border-paper-line text-ink-mute hover:border-terracotta hover:text-terracotta-ink',
+              ? 'Built — this scene is assembled & saved'
+              : 'Becomes “built” automatically once you assemble & save it'
+          }
+          className={[
+            'rounded-full px-2.5 py-0.5 font-mono text-[11px]',
+            done ? 'bg-terracotta text-paper' : 'border border-paper-line text-ink-mute',
           ].join(' ')}
         >
-          {done ? '✓ built' : 'Mark built'}
-        </button>
+          {done ? '✓ built' : 'not built'}
+        </span>
       </div>
       <h3 className="mt-1 font-serif text-[20px] leading-tight text-ink">{scene.title}</h3>
 

@@ -16,6 +16,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import type { Scene } from '../lib/scenes'
 import type { AutoBuildRun } from '../lib/autoBuild'
+import type { VideoDescription } from '../lib/describe'
 import type { ContactSheet } from '../lib/frames'
 
 /** A word with its time markers, as transcription returns them. `speaker` is the
@@ -122,6 +123,14 @@ export type StudioState = {
    */
   revisitPrep: boolean
   /**
+   * Whether the producer has moved on to the Export step. Like `revisitPrep`, an
+   * explicit navigation flag (persisted): Build doesn't auto-jump to Export when
+   * the last scene is built — the user clicks "Continue to export". Only takes
+   * effect once every scene is built (see `displayPhase`), so re-building a scene
+   * drops them back to Build. Reset by resetStudio.
+   */
+  inExport: boolean
+  /**
    * Whether the producer has clicked "Continue" to reveal the global plan
    * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
@@ -186,6 +195,13 @@ export type StudioState = {
    */
   finalCutUrl: string | null
   /**
+   * The Export page's generated title + summary (from `/api/describe`), plus the
+   * final script it was written from — so we can show it cached and only
+   * regenerate when the script actually changes. Null until generated; the title
+   * is producer-editable. Reset by resetStudio.
+   */
+  description: (VideoDescription & { script: string }) | null
+  /**
    * All source videos in the project (story 09a). Each holds its own per-video
    * prep state (sourceUrl, audioUrl, words, stageProgress, etc.). The single
    * top-level fields (sourceUrl, audioUrl, etc.) remain for backward compat
@@ -208,6 +224,7 @@ export type StudioState = {
 const initialState: StudioState = {
   stageProgress: freshProgress(),
   revisitPrep: false,
+  inExport: false,
   planRevealed: false,
   diarize: false,
   scenes: [],
@@ -226,6 +243,7 @@ const initialState: StudioState = {
   duration: 0,
   fileName: null,
   finalCutUrl: null,
+  description: null,
   sources: [],
   cast: [],
   speakerAssignments: {},
@@ -272,6 +290,10 @@ const studioSlice = createSlice({
     /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
     setRevisitPrep(state, action: PayloadAction<boolean>) {
       state.revisitPrep = action.payload
+    },
+    /** Toggle the Build⇄Export view once all scenes are built (persisted, see above). */
+    setInExport(state, action: PayloadAction<boolean>) {
+      state.inExport = action.payload
     },
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
@@ -346,6 +368,15 @@ const studioSlice = createSlice({
      *  clearing (null) drops the saved reference without touching anything else. */
     setFinalCutUrl(state, action: PayloadAction<string | null>) {
       state.finalCutUrl = action.payload
+    },
+    /** Store the Export page's generated title + summary and the script it came
+     *  from (so we know when it's stale). */
+    setDescription(state, action: PayloadAction<VideoDescription & { script: string }>) {
+      state.description = action.payload
+    },
+    /** Producer edit of the recommended title (no-op if nothing's generated yet). */
+    setDescriptionTitle(state, action: PayloadAction<string>) {
+      if (state.description) state.description.title = action.payload
     },
     /** Append a new source video with fresh per-video prep progress (story 09a). */
     addSource(state, action: PayloadAction<{ id: string; fileName: string; duration: number }>) {
@@ -465,6 +496,7 @@ export const {
   patchStage,
   failActiveStage,
   setRevisitPrep,
+  setInExport,
   setPlanRevealed,
   setDiarize,
   setScenes,
@@ -485,6 +517,8 @@ export const {
   setDuration,
   setFileName,
   setFinalCutUrl,
+  setDescription,
+  setDescriptionTitle,
   addSource,
   patchSource,
   patchSourceStage,

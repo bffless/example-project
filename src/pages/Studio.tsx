@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, setDiarize, setDirection, setDuration, setFileName, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -27,6 +27,7 @@ import { TranscriptDiff } from '../components/Studio/TranscriptDiff'
 import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
+import { ExportSummary } from '../components/Studio/ExportSummary'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
 import { useAutoBuild } from '../components/Studio/useAutoBuild'
@@ -63,6 +64,7 @@ export function Studio() {
   // local useState) so a hard reload while revisiting Prep keeps you on Prep
   // rather than snapping forward to Build.
   const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
+  const inExport = useAppSelector((s) => s.studio.inExport)
   // Whether the producer has clicked "Continue" to reveal the global plan
   // (thumbnails → voice → director). Until then the prep view shows only the
   // source queue — find & process your clips first; the plan comes after.
@@ -414,7 +416,11 @@ export function Studio() {
   // revisit it after completing it. The top stepper then reflects Prep as current
   // and lets them jump back to Build.
   const inPrep = !pipe.ready || revisitPrep
-  const displayPhase = inPrep ? 'prep' : phase
+  // Build doesn't auto-advance to Export when the last scene is built — the user
+  // clicks "Continue to export" (`inExport`). It only takes effect once everything
+  // is built, so re-building a scene drops `allBuilt` and bounces back to Build.
+  const displayPhase: StudioPhase = inPrep ? 'prep' : pipe.allBuilt && inExport ? 'export' : 'build'
+  const builtCount = pipe.scenes.filter((s) => s.status === 'built').length
   // The global plan (thumbnails → voice → director) is held back until the
   // producer's source clips are processed AND they click "Continue" — so the
   // first job is just "find your videos and process them." A plan that's already
@@ -465,10 +471,20 @@ export function Studio() {
     ) : undefined
   // Prep & Build are freely navigable once prep is done; before that you can only
   // be in Prep.
-  const navigablePhases: StudioPhase[] = pipe.ready ? ['prep', 'build'] : []
+  const navigablePhases: StudioPhase[] = pipe.ready
+    ? pipe.allBuilt
+      ? ['prep', 'build', 'export']
+      : ['prep', 'build']
+    : []
   function navigatePhase(p: StudioPhase) {
     if (p === 'prep') dispatch(setRevisitPrep(true))
-    else if (p === 'build') dispatch(setRevisitPrep(false))
+    else if (p === 'build') {
+      dispatch(setRevisitPrep(false))
+      dispatch(setInExport(false))
+    } else if (p === 'export') {
+      dispatch(setRevisitPrep(false))
+      dispatch(setInExport(true))
+    }
   }
 
   // Cast-scoped voice wrappers: keep the producer on Prep when a voice is set
@@ -676,12 +692,47 @@ export function Studio() {
                     <button
                       type="button"
                       className="pill-cta"
-                      onClick={() => dispatch(setRevisitPrep(false))}
+                      onClick={() => {
+                        dispatch(setRevisitPrep(false))
+                        dispatch(setInExport(false))
+                      }}
                     >
                       Continue to build →
                     </button>
                   </div>
                 )}
+              </div>
+            ) : displayPhase === 'export' ? (
+              /* Export phase: its own step, reached by "Continue to export" once
+                 every scene is built. Just the final stitch + download for now —
+                 a deliberate container to grow (thumbnail, publish, …). */
+              <div className="flex flex-col gap-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <p className="text-[14px] text-ink-soft">
+                    Your finished video — title, description, chapters, and the final cut.
+                  </p>
+                  <button
+                    type="button"
+                    className="pill-ghost"
+                    onClick={() => dispatch(setInExport(false))}
+                  >
+                    ← Back to build
+                  </button>
+                </div>
+                <ExportSummary
+                  scenes={pipe.scenes}
+                  synopsis={pipe.synopsis}
+                  description={pipe.description}
+                  generating={pipe.describing}
+                  onGenerate={pipe.generateDescription}
+                  onTitleChange={pipe.editDescriptionTitle}
+                />
+                <FinalCutBar
+                  scenes={pipe.scenes}
+                  finalCutUrl={pipe.finalCutUrl}
+                  saving={pipe.savingFinalCut}
+                  onSave={pipe.saveFinalCut}
+                />
               </div>
             ) : (
               /* Build phase: a scene tab strip across the top, then the source
@@ -750,11 +801,7 @@ export function Studio() {
                     />
                   </div>
                   {selected && (
-                    <SceneMeta
-                      scene={selected}
-                      className="lg:flex-[2]"
-                      onToggleBuilt={pipe.toggleBuilt}
-                    />
+                    <SceneMeta scene={selected} className="lg:flex-[2]" />
                   )}
                 </div>
                 {selected && (
@@ -830,14 +877,27 @@ export function Studio() {
                     sheets={pipe.contactSheets}
                   />
                 )}
-                {/* Master assemble: stream-copy concat of every scene's saved
-                    assembled cut → the whole video. Enabled once all are assembled. */}
-                <FinalCutBar
-                  scenes={pipe.scenes}
-                  finalCutUrl={pipe.finalCutUrl}
-                  saving={pipe.savingFinalCut}
-                  onSave={pipe.saveFinalCut}
-                />
+                {/* The export step lives on its own now (the final stitch +
+                    download moved there). This CTA is always shown so the goal is
+                    visible, but disabled until every scene is built. */}
+                <div className="flex flex-wrap items-center justify-between gap-4 border rule bg-terracotta/5 px-5 py-4">
+                  <p className="text-[14px] text-ink-soft">
+                    {pipe.allBuilt
+                      ? `✓ All ${pipe.scenes.length} scene${pipe.scenes.length === 1 ? '' : 's'} built — ready to export.`
+                      : `Build every scene to export — ${builtCount}/${pipe.scenes.length} done.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="pill-cta"
+                    disabled={!pipe.allBuilt}
+                    onClick={() => {
+                      dispatch(setRevisitPrep(false))
+                      dispatch(setInExport(true))
+                    }}
+                  >
+                    Continue to export →
+                  </button>
+                </div>
               </div>
             )}
           </div>
