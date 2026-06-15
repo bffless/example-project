@@ -792,11 +792,7 @@ export function Studio() {
                     />
                   </div>
                   {selected && (
-                    <SceneMeta
-                      scene={selected}
-                      className="lg:flex-[2]"
-                      onToggleBuilt={pipe.toggleBuilt}
-                    />
+                    <SceneMeta scene={selected} className="lg:flex-[2]" />
                   )}
                 </div>
                 {selected && (

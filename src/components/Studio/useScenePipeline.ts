@@ -1545,13 +1545,16 @@ export function useScenePipeline() {
   // MP4 (reusing the `export` presigned flow) and persists its serve path on the
   // scene as `assembledUrl`, so a reload keeps it and the final master concat can
   // stitch every scene's saved cut. Re-assembling + saving overwrites it.
+  // Saving an assembled scene IS what makes it "built" — set `status` here rather
+  // than leave it to a manual toggle, so the badge / tab ✓ / export readiness follow
+  // the actual work (a scene with an assembled cut is, by definition, built).
   const saveSceneCut = useCallback(
     async (sceneId: string, blob: Blob): Promise<string> => {
       setSavingSceneCutId(sceneId)
       try {
         const file = new File([blob], `scene-${sceneId}.mp4`, { type: blob.type || 'video/mp4' })
         const { url } = await uploadReq({ file, kind: 'export' }).unwrap()
-        patchScene(sceneId, { assembledUrl: url })
+        patchScene(sceneId, { assembledUrl: url, status: 'built' })
         return url
       } finally {
         setSavingSceneCutId(null)
