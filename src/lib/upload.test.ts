@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import {
+  presignedUpload,
+  toSignedUrl,
+  isUploadServePath,
+  sourceFileError,
+  MAX_SOURCE_BYTES,
+} from './upload'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -39,13 +46,6 @@ describe('presignedUpload threads projectId', () => {
     await expect(presignedUpload(file, '/api/uploads/source', '')).rejects.toThrow(/projectId/)
   })
 })
-import {
-  presignedUpload,
-  toSignedUrl,
-  isUploadServePath,
-  sourceFileError,
-  MAX_SOURCE_BYTES,
-} from './upload'
 
 describe('isUploadServePath', () => {
   it('matches persisted relative /api/uploads/ serve paths', () => {

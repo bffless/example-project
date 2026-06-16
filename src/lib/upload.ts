@@ -94,10 +94,10 @@ type RegisterResponse = {
 
 /**
  * Upload `file` to a storage bucket via the presigned flow at `basePath`
- * (e.g. `/api/uploads/source`). `projectId` scopes the object key under
- * `uploads/projects/<projectId>/<type>/...` — the rules interpolate it once
- * story 11c's server-side update ships; today's static rules ignore the extra
- * field harmlessly. Throws with a descriptive message if any step fails.
+ * (e.g. `/api/uploads/source`). `projectId` is sent to the prepare and
+ * register rules, which interpolate it into the per-project storage key
+ * (`uploads/projects/<projectId>/<type>/...`). Throws with a descriptive
+ * message if any step fails.
  */
 export async function presignedUpload(file: File, basePath: string, projectId: string): Promise<string> {
   if (!projectId) throw new Error('presignedUpload: projectId is required')
