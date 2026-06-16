@@ -14,7 +14,7 @@
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
-import type { ProjectMeta } from '../lib/projects'
+import { nextUntitledName, type ProjectMeta } from '../lib/projects'
 import type { Scene } from '../lib/scenes'
 import type { AutoBuildRun } from '../lib/autoBuild'
 import type { VideoDescription } from '../lib/describe'
@@ -408,6 +408,41 @@ const studioSlice = createSlice({
     removeSavedVoice(state, action: PayloadAction<string>) {
       state.savedVoices = state.savedVoices.filter((v) => v.voiceId !== action.payload)
     },
+    /** Mint a new project (id + timestamp minted by the caller, kept out of the
+     *  reducer so it stays pure), name it the next free "Untitled project", seed
+     *  its working state, and make it active. */
+    createProject(state, action: PayloadAction<{ id: string; now: number }>) {
+      const { id, now } = action.payload
+      const name = nextUntitledName(Object.values(state.index).map((m) => m.name))
+      state.index[id] = { id, name, createdAt: now, updatedAt: now, phase: 'import', thumbnailUrl: null }
+      state.working[id] = freshWorkingState()
+      state.activeProjectId = id
+    },
+    /** Select an existing project (no-op if it has no working state). */
+    openProject(state, action: PayloadAction<string>) {
+      if (state.working[action.payload]) state.activeProjectId = action.payload
+    },
+    /** Return to the dashboard (no project active). */
+    closeProject(state) {
+      state.activeProjectId = null
+    },
+    renameProject(state, action: PayloadAction<{ id: string; name: string; now: number }>) {
+      const meta = state.index[action.payload.id]
+      if (!meta) return
+      meta.name = action.payload.name
+      meta.updatedAt = action.payload.now
+    },
+    deleteProject(state, action: PayloadAction<string>) {
+      delete state.index[action.payload]
+      delete state.working[action.payload]
+      if (state.activeProjectId === action.payload) state.activeProjectId = null
+    },
+    /** Reset the active project's working state back to fresh (keeps it in the list). */
+    resetProject(state) {
+      const id = state.activeProjectId
+      if (!id) return
+      state.working[id] = freshWorkingState()
+    },
     setSelected(state, action: PayloadAction<string | null>) {
       const w = active(state); if (!w) return
       w.selectedId = action.payload
@@ -581,6 +616,12 @@ export const {
   setVoice,
   addSavedVoice,
   removeSavedVoice,
+  createProject,
+  openProject,
+  closeProject,
+  renameProject,
+  deleteProject,
+  resetProject,
   setSelected,
   setDuration,
   setFileName,

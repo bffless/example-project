@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import reducer, { setScenes, setDirection, addSavedVoice, freshWorkingState, type StudioState } from './studioSlice'
+import {
+  createProject, openProject, closeProject, renameProject, deleteProject, resetProject,
+} from './studioSlice'
 
 const withOneProject = (): StudioState => ({
   index: { p1: { id: 'p1', name: 'A', createdAt: 1, updatedAt: 1, phase: 'import', thumbnailUrl: null } },
@@ -25,5 +28,47 @@ describe('savedVoices live at the root, shared across projects', () => {
     const next = reducer(withOneProject(), addSavedVoice({ voiceId: 'v1', label: 'Mine' }))
     expect(next.savedVoices).toEqual([{ voiceId: 'v1', label: 'Mine' }])
     expect('savedVoices' in next.working.p1).toBe(false)
+  })
+})
+
+describe('project management', () => {
+  it('createProject mints an id, adds index + working, and makes it active', () => {
+    const next = reducer(undefined, createProject({ id: 'p1', now: 100 }))
+    expect(next.activeProjectId).toBe('p1')
+    expect(next.index.p1.name).toBe('Untitled project')
+    expect(next.index.p1.createdAt).toBe(100)
+    expect(next.working.p1.scenes).toEqual([])
+  })
+  it('names the second untitled project "Untitled project 2"', () => {
+    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    s = reducer(s, createProject({ id: 'p2', now: 2 }))
+    expect(s.index.p2.name).toBe('Untitled project 2')
+  })
+  it('openProject / closeProject move the active pointer', () => {
+    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    s = reducer(s, closeProject())
+    expect(s.activeProjectId).toBeNull()
+    s = reducer(s, openProject('p1'))
+    expect(s.activeProjectId).toBe('p1')
+  })
+  it('renameProject updates the name + updatedAt', () => {
+    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    s = reducer(s, renameProject({ id: 'p1', name: 'Cat site', now: 5 }))
+    expect(s.index.p1.name).toBe('Cat site')
+    expect(s.index.p1.updatedAt).toBe(5)
+  })
+  it('deleteProject drops index + working and clears active if it was active', () => {
+    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    s = reducer(s, deleteProject('p1'))
+    expect(s.index.p1).toBeUndefined()
+    expect(s.working.p1).toBeUndefined()
+    expect(s.activeProjectId).toBeNull()
+  })
+  it('resetProject clears the active project working state but keeps it in the list', () => {
+    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    s = reducer(s, setDirection('hello'))
+    s = reducer(s, resetProject())
+    expect(s.working.p1.direction).toBe('')
+    expect(s.index.p1).toBeDefined()
   })
 })
