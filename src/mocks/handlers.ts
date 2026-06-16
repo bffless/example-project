@@ -309,6 +309,22 @@ const studioHandlers = [
   // voice and no $3 clone is ever spent.
   http.post('/api/voice/clone', () => HttpResponse.json({ voiceId: 'Friendly_Person' })),
 
+  // Delete project assets (story 11c): wipe objectStore keys under the project
+  // prefix and return { deleted, prefix }. A { deleted: 0 } stub is acceptable
+  // — the mock is dev-only and orphaned in-memory objects aren't fatal.
+  http.post('/api/projects/delete', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { projectId?: string }
+    const prefix = `projects/${body.projectId ?? ''}/`
+    let deleted = 0
+    for (const key of objectStore.keys()) {
+      if (key.startsWith(prefix)) {
+        objectStore.delete(key)
+        deleted++
+      }
+    }
+    return HttpResponse.json({ deleted, prefix })
+  }),
+
   // Voice say (TTS preview): a short audible tone stands in for synthesized
   // narration, with a word-count-derived duration, so the preview plays offline
   // without a paid speech call.

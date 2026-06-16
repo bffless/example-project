@@ -187,6 +187,13 @@ export const studioApi = createApi({
       keepUnusedDataFor: 45 * 60,
     }),
 
+    // Delete all bucket objects for a project (story 11c): wipes
+    // uploads/projects/<id>/ and returns { deleted, prefix }. Best-effort —
+    // the caller removes the project from local state regardless of outcome.
+    deleteProjectAssets: builder.mutation<{ deleted: number }, { projectId: string }>({
+      query: (body) => ({ url: 'api/projects/delete', method: 'POST', body }),
+    }),
+
     upload: builder.mutation<{ url: string }, { file: File; kind: UploadKind; projectId: string }>({
       async queryFn({ file, kind, projectId }) {
         try {
@@ -215,6 +222,7 @@ export const {
   useNarrateMutation,
   useSearchTranscriptMutation,
   useDescribeMutation,
+  useDeleteProjectAssetsMutation,
   useUploadMutation,
   useVoiceCloneMutation,
   useVoiceSayMutation,

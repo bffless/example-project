@@ -5,6 +5,7 @@ import { Section, Dot } from '../components/Section'
 import { ProjectList } from '../components/Studio/ProjectList'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { createProject, deleteProject, renameProject, selectProjectList } from '../store/studioSlice'
+import { useDeleteProjectAssetsMutation } from '../store/studioApi'
 
 export function StudioProjects() {
   const dispatch = useAppDispatch()
@@ -13,6 +14,7 @@ export function StudioProjects() {
   // Mount-time clock for "edited X ago" — reading Date.now() in render is impure
   // (react-hooks/purity); a state initializer runs once and keeps render pure.
   const [now] = useState(() => Date.now())
+  const [deleteAssets] = useDeleteProjectAssetsMutation()
 
   const onNew = () => {
     const id = crypto.randomUUID()
@@ -21,7 +23,14 @@ export function StudioProjects() {
   }
   const onOpen = (id: string) => navigate(`/studio/project/${id}`)
   const onRename = (id: string, name: string) => dispatch(renameProject({ id, name, now: Date.now() }))
-  const onDelete = (id: string) => dispatch(deleteProject(id))
+  const onDelete = async (id: string) => {
+    try {
+      await deleteAssets({ projectId: id }).unwrap()
+    } catch {
+      // best-effort: orphaned bucket objects aren't fatal; remove the project locally regardless
+    }
+    dispatch(deleteProject(id))
+  }
 
   return (
     <>
