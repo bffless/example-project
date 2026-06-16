@@ -72,7 +72,8 @@ import {
   addSource,
   patchSource,
   patchSourceStage,
-  resetStudio,
+  resetProject,
+  selectActive,
   setPeopleCount,
   renamePerson,
   setPersonVoice,
@@ -187,7 +188,7 @@ export function useScenePipeline() {
   // persisted, dynamic part — per-step progress. Keeping just the progress in
   // state means editing STAGE_DEFS reshapes the board on the next load, no
   // migration needed (see studioSlice `StageProgress`).
-  const stageProgress = useAppSelector((s) => s.studio.stageProgress)
+  const stageProgress = useAppSelector((s) => selectActive(s).stageProgress)
   const stages = useMemo<Stage[]>(
     () =>
       STAGE_DEFS.map((def) => ({
@@ -197,25 +198,25 @@ export function useScenePipeline() {
       })),
     [stageProgress],
   )
-  const scenes = useAppSelector((s) => s.studio.scenes)
-  const sourceUrl = useAppSelector((s) => s.studio.sourceUrl)
-  const audioUrl = useAppSelector((s) => s.studio.audioUrl)
-  const audioPeaks = useAppSelector((s) => s.studio.audioPeaks)
-  const persistedSheets = useAppSelector((s) => s.studio.contactSheets)
-  const words = useAppSelector((s) => s.studio.words)
-  const synopsis = useAppSelector((s) => s.studio.synopsis)
-  const description = useAppSelector((s) => s.studio.description)
-  const direction = useAppSelector((s) => s.studio.direction)
-  const directorPromptJobId = useAppSelector((s) => s.studio.directorPromptJobId)
-  const scenesJobId = useAppSelector((s) => s.studio.scenesJobId)
-  const voice = useAppSelector((s) => s.studio.voice)
+  const scenes = useAppSelector((s) => selectActive(s).scenes)
+  const sourceUrl = useAppSelector((s) => selectActive(s).sourceUrl)
+  const audioUrl = useAppSelector((s) => selectActive(s).audioUrl)
+  const audioPeaks = useAppSelector((s) => selectActive(s).audioPeaks)
+  const persistedSheets = useAppSelector((s) => selectActive(s).contactSheets)
+  const words = useAppSelector((s) => selectActive(s).words)
+  const synopsis = useAppSelector((s) => selectActive(s).synopsis)
+  const description = useAppSelector((s) => selectActive(s).description)
+  const direction = useAppSelector((s) => selectActive(s).direction)
+  const directorPromptJobId = useAppSelector((s) => selectActive(s).directorPromptJobId)
+  const scenesJobId = useAppSelector((s) => selectActive(s).scenesJobId)
+  const voice = useAppSelector((s) => selectActive(s).voice)
   const savedVoices = useAppSelector((s) => s.studio.savedVoices)
-  const cast = useAppSelector((s) => s.studio.cast)
-  const speakerAssignments = useAppSelector((s) => s.studio.speakerAssignments)
-  const diarize = useAppSelector((s) => s.studio.diarize)
-  const selectedId = useAppSelector((s) => s.studio.selectedId)
-  const finalCutUrl = useAppSelector((s) => s.studio.finalCutUrl)
-  const sources = useAppSelector((s) => s.studio.sources)
+  const cast = useAppSelector((s) => selectActive(s).cast)
+  const speakerAssignments = useAppSelector((s) => selectActive(s).speakerAssignments)
+  const diarize = useAppSelector((s) => selectActive(s).diarize)
+  const selectedId = useAppSelector((s) => selectActive(s).selectedId)
+  const finalCutUrl = useAppSelector((s) => selectActive(s).finalCutUrl)
+  const sources = useAppSelector((s) => selectActive(s).sources)
   // 09a bridge: until a later story makes every read per-source, the "current"
   // source is the first (single-video projects have exactly one). The prep steps
   // dual-write here so sources[0] tracks the legacy fields.
@@ -295,7 +296,7 @@ export function useScenePipeline() {
 
   const reset = useCallback(() => {
     setPendingSheets([])
-    dispatch(resetStudio())
+    dispatch(resetProject())
   }, [dispatch])
 
   // Prep is "done" when EVERY source has finished its per-video stages AND the

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, selectActive, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -51,24 +51,24 @@ export function Studio() {
   // Free-text direction the user hands the master director (e.g. "keep the demo
   // at 12:30, make the intro punchy"). Persisted in the studio slice (story 03l)
   // so Build forwards it to per-scene refines long after prep, across reloads.
-  const direction = useAppSelector((s) => s.studio.direction)
+  const direction = useAppSelector((s) => selectActive(s).direction)
   // The voice step's resource is revealed by clicking its board action (rather
   // than running a pipeline inline) — and stays open once a voice exists.
   const [showVoiceStudio, setShowVoiceStudio] = useState(false)
   const dispatch = useAppDispatch()
-  const duration = useAppSelector((s) => s.studio.duration)
-  const fileName = useAppSelector((s) => s.studio.fileName)
+  const duration = useAppSelector((s) => selectActive(s).duration)
+  const fileName = useAppSelector((s) => selectActive(s).fileName)
   // Once prep is complete the workspace shows Build. This lets the user hop back
   // to Prep (to tweak the director, re-pick a voice, etc.) without losing any
   // work — a view toggle that touches no pipeline state. Persisted in Redux (not
   // local useState) so a hard reload while revisiting Prep keeps you on Prep
   // rather than snapping forward to Build.
-  const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
-  const inExport = useAppSelector((s) => s.studio.inExport)
+  const revisitPrep = useAppSelector((s) => selectActive(s).revisitPrep)
+  const inExport = useAppSelector((s) => selectActive(s).inExport)
   // Whether the producer has clicked "Continue" to reveal the global plan
   // (thumbnails → voice → director). Until then the prep view shows only the
   // source queue — find & process your clips first; the plan comes after.
-  const planRevealed = useAppSelector((s) => s.studio.planRevealed)
+  const planRevealed = useAppSelector((s) => selectActive(s).planRevealed)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
@@ -167,7 +167,7 @@ export function Studio() {
     setFile(null)
     setFiles(new Map())
     setRestoreError(null)
-    // pipe.reset() dispatches resetStudio, which already clears revisitPrep.
+    // pipe.reset() dispatches resetProject, which already clears revisitPrep.
     pipe.reset()
   }
 
