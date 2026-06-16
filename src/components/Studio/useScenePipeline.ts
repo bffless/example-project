@@ -46,6 +46,7 @@ import {
   useLazySignDownloadQuery,
   useVoiceCloneMutation,
   useVoiceSayMutation,
+  type UploadKind,
 } from '../../store/studioApi'
 import { presetLabel } from '../../lib/voices'
 import {
@@ -74,6 +75,7 @@ import {
   patchSourceStage,
   resetProject,
   selectActive,
+  selectActiveProjectId,
   setPeopleCount,
   renamePerson,
   setPersonVoice,
@@ -222,15 +224,26 @@ export function useScenePipeline() {
   // dual-write here so sources[0] tracks the legacy fields.
   const currentSource = sources[0] ?? null
 
+  const activeProjectId = useAppSelector(selectActiveProjectId)
+
   const [transcribeStartReq] = useTranscribeStartMutation()
   const [scenesReq] = useScenesMutation()
   const [refineSceneReq] = useRefineSceneMutation()
-  const [narrateReq] = useNarrateMutation()
+  const [narrateReqRaw] = useNarrateMutation()
   const [describeReq] = useDescribeMutation()
-  const [uploadReq] = useUploadMutation()
+  const [uploadReqRaw] = useUploadMutation()
   const [voiceCloneReq] = useVoiceCloneMutation()
   const [voiceSayReq] = useVoiceSayMutation()
   const [signReq] = useLazySignDownloadQuery()
+
+  const uploadReq = useCallback(
+    (a: { file: File; kind: UploadKind }) => uploadReqRaw({ ...a, projectId: activeProjectId ?? '' }),
+    [uploadReqRaw, activeProjectId],
+  )
+  const narrateReq = useCallback(
+    (a: { text: string; voiceId: string }) => narrateReqRaw({ ...a, projectId: activeProjectId ?? '' }),
+    [narrateReqRaw, activeProjectId],
+  )
 
   // Sign any bucket serve path into a time-limited direct GCS URL (big media must
   // never stream through file_serve). Per-scene callers pass THAT scene's source URL.

@@ -114,7 +114,7 @@ export const studioApi = createApi({
     // voice and PERSIST the mp3 to the bucket → a durable serve path. Distinct
     // from voiceSay (ephemeral preview); these clips are kept for the diff-viewer
     // players and the eventual ffmpeg assemble (story 05).
-    narrate: builder.mutation<VoiceNarrateResponse, { text: string; voiceId: string }>({
+    narrate: builder.mutation<VoiceNarrateResponse, { text: string; voiceId: string; projectId: string }>({
       query: (body) => ({
         url: 'api/voice/narrate',
         method: 'POST',
@@ -187,10 +187,10 @@ export const studioApi = createApi({
       keepUnusedDataFor: 45 * 60,
     }),
 
-    upload: builder.mutation<{ url: string }, { file: File; kind: UploadKind }>({
-      async queryFn({ file, kind }) {
+    upload: builder.mutation<{ url: string }, { file: File; kind: UploadKind; projectId: string }>({
+      async queryFn({ file, kind, projectId }) {
         try {
-          const url = await presignedUpload(file, `/api/uploads/${kind}`)
+          const url = await presignedUpload(file, `/api/uploads/${kind}`, projectId)
           return { data: { url } }
         } catch (e) {
           return {
