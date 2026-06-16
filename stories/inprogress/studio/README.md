@@ -84,6 +84,13 @@ let the user add/remove cuts directly in the diff viewer** — then the wps knob
 (Per-scene scope shipped: the Build diff is now windowed to the selected scene tab
 via `windowLines`, instead of rendering the whole talk.)
 
+**The `studio/projects` initiative (stories 11a–11d) has begun.** Story 11a
+shipped projects as first-class entities (local-first, keyed Redux collection,
+list/create/open/rename/delete UI, metadata middleware, `savedVoices` hoisted to a
+shared library, clean-slate persist key bump). Story 11b (URL routing / deep-link
+by project id), 11c (GCS per-project storage layout + orphan cleanup), and 11d
+(server persistence — projects survive clearing localStorage) are queued next.
+
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
              ✅ 05 ffmpeg assemble (timeline walk → MP4 + save + loudnorm/fades)
@@ -138,6 +145,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03s | `03s-auto-build.md` | one-press unattended Build: pure step model (`autoBuild.ts`, derived from scene fields) + durable run pointer in Redux slice (persisted) + state-driven orchestrator (`useAutoBuild`) + task-tree dashboard (`AutoBuildBoard`); halt+resume-from-pointer; reload coerces running→paused; AI-TTS honoring `original` tags; pending scenes → final stitch | ✅ done |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
+| 11a | `11a-projects-entity.md` | projects as a first-class entity — keyed slice (index/working/activeProjectId) · list/create/open/rename/delete · metadata middleware · savedVoices hoisted · clean-slate persist key | ✅ done |
 | 10a | `10a-diarization.md` | `/api/transcribe` rule `972a6dc5` runs `diarization:true` + `huggingface_access_token: secrets.HF_TOKEN`; flatten step carries per-word `speaker`; `TranscriptWord`/`TWord` gain `speaker?` | ✅ done* |
 | 10b | `10b-cast-and-voice-step.md` | prep reordered thumbnails→voice→director; project **cast** (`Person[]`) + per-video `speakerAssignments`; people count control (default 1 = auto-assign, grid at N≥2); `src/lib/speakers.ts` resolution helpers; `CastStudio` UI | ✅ done |
 | 10c | `10c-speaker-aware-director.md` | `speakerTimedTranscript` groups words by speaker + labels each run with the cast name; `SpeakerNamer` threaded through `combinedTimedTranscript`; back-compat when no namer — director rule `138f27fb` prompt intentionally unchanged (self-describing `Name:` format) | ✅ done* |
