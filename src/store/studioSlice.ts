@@ -125,22 +125,6 @@ const makeSource = (p: { id: string; fileName: string; duration: number; order: 
 export type ProjectWorkingState = {
   stageProgress: StageProgressMap
   /**
-   * Whether the producer has hopped back to Prep after finishing it. Persisted
-   * (not transient React state) so a hard reload keeps you on Prep instead of
-   * snapping forward to Build: `ready` alone can't tell "prep is done, show
-   * Build" from "prep is done but I'm currently revisiting it". Cleared when the
-   * project's working state is reset.
-   */
-  revisitPrep: boolean
-  /**
-   * Whether the producer has moved on to the Export step. Like `revisitPrep`, an
-   * explicit navigation flag (persisted): Build doesn't auto-jump to Export when
-   * the last scene is built — the user clicks "Continue to export". Only takes
-   * effect once every scene is built (see `displayPhase`), so re-building a scene
-   * drops them back to Build. Cleared when the project's working state is reset.
-   */
-  inExport: boolean
-  /**
    * Whether the producer has clicked "Continue" to reveal the global plan
    * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
@@ -233,8 +217,6 @@ export type ProjectWorkingState = {
 export function freshWorkingState(): ProjectWorkingState {
   return {
     stageProgress: freshProgress(),
-    revisitPrep: false,
-    inExport: false,
     planRevealed: false,
     diarize: false,
     scenes: [],
@@ -324,16 +306,6 @@ const studioSlice = createSlice({
           break
         }
       }
-    },
-    /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
-    setRevisitPrep(state, action: PayloadAction<boolean>) {
-      const w = active(state); if (!w) return
-      w.revisitPrep = action.payload
-    },
-    /** Toggle the Build⇄Export view once all scenes are built (persisted, see above). */
-    setInExport(state, action: PayloadAction<boolean>) {
-      const w = active(state); if (!w) return
-      w.inExport = action.payload
     },
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
@@ -607,8 +579,6 @@ const studioSlice = createSlice({
 export const {
   patchStage,
   failActiveStage,
-  setRevisitPrep,
-  setInExport,
   setPlanRevealed,
   setDiarize,
   setScenes,
