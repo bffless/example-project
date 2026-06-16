@@ -443,6 +443,14 @@ const studioSlice = createSlice({
       if (!id) return
       state.working[id] = freshWorkingState()
     },
+    /** Internal: applied by the projectMetaSync middleware. Not for direct UI use. */
+    _syncMeta(state, action: PayloadAction<{ id: string; phase: ProjectMeta['phase']; thumbnailUrl: string | null; now: number }>) {
+      const meta = state.index[action.payload.id]
+      if (!meta) return
+      meta.phase = action.payload.phase
+      meta.thumbnailUrl = action.payload.thumbnailUrl
+      meta.updatedAt = action.payload.now
+    },
     setSelected(state, action: PayloadAction<string | null>) {
       const w = active(state); if (!w) return
       w.selectedId = action.payload
@@ -622,6 +630,7 @@ export const {
   renameProject,
   deleteProject,
   resetProject,
+  _syncMeta, // internal: dispatched by the projectMetaSync middleware, not for direct UI use
   setSelected,
   setDuration,
   setFileName,
