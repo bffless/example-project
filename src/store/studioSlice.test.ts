@@ -4,7 +4,7 @@ import {
   createProject, openProject, closeProject, renameProject, deleteProject, resetProject,
 } from './studioSlice'
 import { selectActive, selectProjectList, EMPTY_WORKING } from './studioSlice'
-import { hydrateProject, evictWorking, evictOthers, reconcileServerIndex } from './studioSlice'
+import { hydrateProject, evictOthers, reconcileServerIndex } from './studioSlice'
 
 const withOneProject = (): StudioState => ({
   index: { p1: { id: 'p1', name: 'A', createdAt: 1, updatedAt: 1, phase: 'import', thumbnailUrl: null } },
@@ -81,12 +81,6 @@ describe('server-sync reducers', () => {
     const w = freshWorkingState(); w.direction = 'srv'
     s = reducer(s, hydrateProject({ id: 'p1', working: w }))
     expect(s.working.p1.direction).toBe('srv')
-  })
-  it('evictWorking drops working[id] but keeps its index meta', () => {
-    let s = reducer(undefined, createProject({ id: 'p1', now: 1 }))
-    s = reducer(s, evictWorking('p1'))
-    expect(s.working.p1).toBeUndefined()
-    expect(s.index.p1).toBeDefined()
   })
   it('evictOthers keeps only the active project working state', () => {
     let s = reducer(undefined, createProject({ id: 'a', now: 1 }))

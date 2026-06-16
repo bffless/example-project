@@ -4,7 +4,10 @@ import type { StudioState } from './studioSlice'
 
 /** Project-management actions manage `index` themselves — skip them so we don't
  *  clobber createdAt/name or re-stamp on open/close. Also skip the sync action
- *  itself so it never recurses. */
+ *  itself so it never recurses. Server-driven state writes (hydrateProject,
+ *  reconcileServerIndex) must also be skipped: they carry the authoritative
+ *  server timestamp and must not be overwritten by a local Date.now() stamp,
+ *  which would make an unedited local copy wrongly "win" a later reconcile. */
 const SKIP = new Set([
   'studio/createProject',
   'studio/openProject',
@@ -12,6 +15,8 @@ const SKIP = new Set([
   'studio/renameProject',
   'studio/deleteProject',
   'studio/_syncMeta',
+  'studio/hydrateProject',
+  'studio/reconcileServerIndex',
 ])
 
 /** After a working-state mutation, refresh the active project's denormalized

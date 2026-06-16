@@ -578,10 +578,6 @@ const studioSlice = createSlice({
     hydrateProject(state, action: PayloadAction<{ id: string; working: ProjectWorkingState }>) {
       state.working[action.payload.id] = action.payload.working
     },
-    /** Server sync: drop the working state from memory (keeps the index meta). */
-    evictWorking(state, action: PayloadAction<string>) {
-      delete state.working[action.payload]
-    },
     /** Server sync: keep only the given project's working state, dropping every
      *  other project's working (index/meta untouched). Idempotent — used on
      *  ENTERING a project so eviction is StrictMode-safe (mount→unmount→mount). */
@@ -647,7 +643,6 @@ export const {
   completeAutoBuild,
   setAutoPointer,
   hydrateProject,
-  evictWorking,
   evictOthers,
   reconcileServerIndex,
 } = studioSlice.actions

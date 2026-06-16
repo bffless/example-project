@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
-import studioReducer, { createProject, setContactSheets, addSource } from './studioSlice'
+import studioReducer, {
+  createProject, setContactSheets, addSource,
+  hydrateProject, reconcileServerIndex, freshWorkingState,
+} from './studioSlice'
 import { projectMetaSync } from './projectMetaSync'
 
 function makeStore() {
@@ -35,6 +38,23 @@ describe('projectMetaSync', () => {
     store.dispatch(createProject({ id: 'p1', now: 1 }))
     const before = store.getState().studio.index.p1.updatedAt
     store.dispatch({ type: 'other/thing' })
+    expect(store.getState().studio.index.p1.updatedAt).toBe(before)
+  })
+
+  it('hydrateProject does not bump updatedAt (server-driven write must not restamp)', () => {
+    const store = makeStore()
+    store.dispatch(createProject({ id: 'p1', now: 1 }))
+    const before = store.getState().studio.index.p1.updatedAt
+    const w = freshWorkingState(); w.direction = 'from-server'
+    store.dispatch(hydrateProject({ id: 'p1', working: w }))
+    expect(store.getState().studio.index.p1.updatedAt).toBe(before)
+  })
+
+  it('reconcileServerIndex does not bump updatedAt (server-driven write must not restamp)', () => {
+    const store = makeStore()
+    store.dispatch(createProject({ id: 'p1', now: 1 }))
+    const before = store.getState().studio.index.p1.updatedAt
+    store.dispatch(reconcileServerIndex([{ id: 'p1', name: 'A', createdAt: 1, updatedAt: 1, phase: 'import', thumbnailUrl: null }]))
     expect(store.getState().studio.index.p1.updatedAt).toBe(before)
   })
 })
