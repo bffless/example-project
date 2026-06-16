@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { configureStore } from '@reduxjs/toolkit'
-import studioReducer, { createProject } from '../store/studioSlice'
+import studioReducer, { createProject, openProject } from '../store/studioSlice'
 import { StudioProjectGuard } from './StudioProjectGuard'
+
+vi.mock('./Studio', () => ({
+  Studio: ({ projectId, phase }: { projectId: string; phase: string }) => (
+    <div>WORKSPACE {projectId} {phase}</div>
+  ),
+}))
 
 function makeStore() {
   return configureStore({ reducer: { studio: studioReducer } })
@@ -38,5 +44,30 @@ describe('StudioProjectGuard redirects', () => {
   it('phase ahead of readiness clamps down to prep', () => {
     renderAt('/studio/project/p1/build', (d) => d(createProject({ id: 'p1', now: 1 })))
     expect(screen.getByText('PREP-STUB')).toBeInTheDocument()
+  })
+})
+
+describe('StudioProjectGuard active-sync gate', () => {
+  it('switching from one existing project to another syncs active then mounts the workspace', async () => {
+    const store = configureStore({ reducer: { studio: studioReducer } })
+    store.dispatch(createProject({ id: 'p1', now: 1 }))
+    store.dispatch(createProject({ id: 'p2', now: 2 }))
+    store.dispatch(openProject('p1'))
+    expect(store.getState().studio.activeProjectId).toBe('p1')
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={['/studio/project/p2/prep']}>
+          <Routes>
+            <Route path="/studio" element={<div>LIST</div>} />
+            <Route path="/studio/project/:projectId/:phase" element={<StudioProjectGuard />} />
+            <Route path="/studio/project/:projectId" element={<StudioProjectGuard />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    expect(await screen.findByText(/WORKSPACE p2 prep/)).toBeInTheDocument()
+    expect(store.getState().studio.activeProjectId).toBe('p2')
   })
 })

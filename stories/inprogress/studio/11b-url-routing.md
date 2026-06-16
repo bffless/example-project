@@ -39,7 +39,7 @@ After 11a, project selection and the active phase lived exclusively in Redux
 - *Active-sync effect* — dispatches `openProject(id)` to keep `activeProjectId` in
   sync with the URL. A one-render gate prevents the workspace from mounting before
   the slice is consistent.
-- *Phase clamp / resume* — calls `resolvePhase(id, phase)` (see below) and redirects
+- *Phase clamp / resume* — calls `resolvePhase(working, phase)` (see below) and redirects
   if the requested phase is ahead of what the project has unlocked.
 
 **`resolvePhase` / `maxPhaseFor` in `src/lib/studioRoute.ts`.** Two small pure
@@ -51,7 +51,7 @@ drives the metadata middleware):
   `requested` is undefined (bare `/studio/project/:id`), resolves to the furthest
   reached phase, falling back to `'prep'`.
 
-**Workspace keyed by `projectId`.** `Studio.tsx` now renders `<Workspace key={projectId} .../>`.
+**Workspace keyed by `projectId`.** The guard renders `<Studio key={projectId} … />`.
 React remounts the workspace whenever the active project changes, resetting all transient
 clip state (`useState`, object URLs, in-memory `File` handles) without any explicit cleanup.
 
