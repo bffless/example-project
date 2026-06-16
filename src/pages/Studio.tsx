@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, selectActive, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, selectActive, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep, createProject, openProject, closeProject, renameProject, deleteProject, selectActiveProjectId, selectProjectList } from '../store/studioSlice'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
+import { ProjectList } from '../components/Studio/ProjectList'
 import { SourceQueue } from '../components/Studio/SourceQueue'
 import { PreviewPlayer } from '../components/Studio/PreviewPlayer'
 import { PipelineBoard } from '../components/Studio/PipelineBoard'
@@ -56,6 +57,19 @@ export function Studio() {
   // than running a pipeline inline) — and stays open once a voice exists.
   const [showVoiceStudio, setShowVoiceStudio] = useState(false)
   const dispatch = useAppDispatch()
+  const activeProjectId = useAppSelector(selectActiveProjectId)
+  const projects = useAppSelector(selectProjectList)
+  // Mount-time clock for the project cards' "edited X ago" labels. Reading
+  // Date.now() inline in render is flagged impure (react-hooks/purity); a state
+  // initializer runs once and keeps render pure. Relative times are cosmetic, so
+  // a stable per-session value is fine.
+  const [now] = useState(() => Date.now())
+
+  const onNewProject = () => dispatch(createProject({ id: crypto.randomUUID(), now: Date.now() }))
+  const onOpenProject = (id: string) => dispatch(openProject(id))
+  const onCloseProject = () => dispatch(closeProject())
+  const onRenameProject = (id: string, name: string) => dispatch(renameProject({ id, name, now: Date.now() }))
+  const onDeleteProject = (id: string) => dispatch(deleteProject(id))
   const duration = useAppSelector((s) => selectActive(s).duration)
   const fileName = useAppSelector((s) => selectActive(s).fileName)
   // Once prep is complete the workspace shows Build. This lets the user hop back
@@ -528,6 +542,30 @@ export function Studio() {
     }
   }, [pipeCast, pipeSources, pipeAssignments, pipeAssignSpeaker])
 
+  // No project open → the projects landing. Placed below every hook so the rules
+  // of hooks hold regardless of whether a project is active.
+  if (!activeProjectId) {
+    return (
+      <>
+        <PageHero
+          eyebrow="EP 09 — Studio · scene producer"
+          title={<>Your projects<Dot /></>}
+          lead="Each recording you turn into a short video is its own project. Pick up where you left off, or start a new one."
+        />
+        <Section eyebrow="— Producer" title={<>Projects<Dot /></>} divider={false}>
+          <ProjectList
+            projects={projects}
+            now={now}
+            onNew={onNewProject}
+            onOpen={onOpenProject}
+            onRename={onRenameProject}
+            onDelete={onDeleteProject}
+          />
+        </Section>
+      </>
+    )
+  }
+
   return (
     <>
       <PageHero
@@ -593,7 +631,15 @@ export function Studio() {
                   type="button"
                   className="pill-ghost"
                   disabled={pipe.running || rehydrating}
-                  onClick={startOver}
+                  onClick={onCloseProject}
+                >
+                  ← Projects
+                </button>
+                <button
+                  type="button"
+                  className="pill-ghost"
+                  disabled={pipe.running || rehydrating}
+                  onClick={() => { if (confirm('Start this project over? Clears its prep and scenes.')) startOver() }}
                 >
                   Start over
                 </button>
