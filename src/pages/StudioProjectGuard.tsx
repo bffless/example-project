@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { openProject, hydrateProject, selectActiveProjectId } from '../store/studioSlice'
@@ -24,11 +24,20 @@ export function StudioProjectGuard() {
   const working = useAppSelector((s) => (projectId ? s.studio.working[projectId] : undefined))
   const knownMeta = useAppSelector((s) => (projectId ? s.studio.index[projectId] : undefined))
   const activeProjectId = useAppSelector(selectActiveProjectId)
-  const [fetchProject, { isError: fetchFailed }] = useLazyGetProjectQuery()
+  const [fetchProject, result] = useLazyGetProjectQuery()
+  // Derive the fetch outcome PURELY from the lazy query result, scoped to the
+  // CURRENT projectId. `result.originalArgs` is the arg of the last trigger, so a
+  // stale result from a previously-viewed project (this guard is mounted without a
+  // key in App.tsx, so the instance is reused across project navigations) can never
+  // drive the current project's redirect. On the first render after projectId
+  // changes, `originalArgs !== projectId` → both flags false → we show "Loading…"
+  // until the hydrate effect re-triggers and the result settles for the new id.
+  const resultForThis = result.originalArgs === projectId
+  const fetchFailed = resultForThis && result.isError
   // The GET resolves with `{ id: null, data: null }` on a server miss, which the
-  // query treats as a success — so a falsy id can't surface via `fetchFailed`.
-  // Track an explicit "resolved but empty" miss to allow the redirect.
-  const [notFound, setNotFound] = useState(false)
+  // query treats as a success — so a falsy id is a "resolved but empty" not-found.
+  const notFound =
+    resultForThis && result.isSuccess && !((result.data as { id?: unknown } | undefined)?.id)
 
   // Sync the active pointer once working is present.
   useEffect(() => {
@@ -47,9 +56,9 @@ export function StudioProjectGuard() {
           if (rec && (rec as { id?: unknown }).id) {
             const { working: w } = fromServerRecord(rec)
             dispatch(hydrateProject({ id: projectId, working: w }))
-          } else {
-            setNotFound(true)
           }
+          // A "resolved but empty" miss is derived from `result` (notFound), so
+          // there's nothing to set here — the redirect gate reads it directly.
         },
         () => {},
       )

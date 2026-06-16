@@ -44,6 +44,35 @@ describe('StudioProjectGuard redirects', () => {
     expect(screen.getByText('Loading project…')).toBeInTheDocument()
     expect(await screen.findByText('LIST')).toBeInTheDocument()
   })
+  it('switching the SAME guard instance between two unknown projects → B also lands on the list (no stale flag bleed)', async () => {
+    // Regression: the guard is mounted without a `key` in App.tsx, so navigating
+    // directly from one not-locally-present project to another reuses the React
+    // instance. The old `notFound` useState (set in the lazy-query .then) did not
+    // reset, so project B could be redirected on project A's stale flag. Now the
+    // flags are derived from `result.originalArgs === projectId`, so each project's
+    // redirect is driven only by its OWN settled result.
+    const store = makeStore()
+    const ui = (path: string) => (
+      <Provider store={store}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/studio" element={<div>LIST</div>} />
+            <Route path="/studio/project/:projectId/prep" element={<StudioProjectGuard />} />
+          </Routes>
+        </MemoryRouter>
+      </Provider>
+    )
+    const { rerender } = render(ui('/studio/project/nope-a/prep'))
+    // A is unknown → lazy query rejects on the relative URL → fetchFailed → list.
+    expect(await screen.findByText('LIST')).toBeInTheDocument()
+
+    // Now navigate the reused guard instance to a second unknown project B.
+    rerender(ui('/studio/project/nope-b/prep'))
+    // First render for B: the prior result still has originalArgs === 'nope-a', so
+    // resultForThis is false → no premature redirect on A's stale flag → Loading…,
+    // then B's own fetch settles (rejects) and B lands on the list.
+    expect(await screen.findByText('LIST')).toBeInTheDocument()
+  })
   it('bare project url → resume (prep for a fresh project)', () => {
     renderAt('/studio/project/p1', (d) => d(createProject({ id: 'p1', now: 1 })))
     expect(screen.getByText('PREP-STUB')).toBeInTheDocument()
