@@ -183,12 +183,11 @@ This de-risks the whole approach before touching 12 more rules: it proves (a) ho
 
 - [ ] **Step 1: Read the three source rules** via MCP `get_proxy_rule` (or slice `get_proxy_rule_set`): source `prepare` (`5c50f027-…`), source `register`, source serve (`GET /api/uploads/source/*`). Note the exact `pipeline_config`.
 
-- [ ] **Step 2: Determine the dynamic-`subDir` form.** The config already uses expression strings elsewhere (e.g. `filename: "request.body.filename"`, `storageKey: "request.body.storageKey"`) and triple-brace templates in `response_handler` (`"{{{steps.prepare}}}"`). Update the **source prepare** rule's `prepare` step config `subDir` to a per-project value built from `request.body.projectId`. Try the expression form first:
-  - `"subDir": "'projects/' + request.body.projectId + '/source'"`
-  If a live prepare (Step 4) shows the literal expression text in the key instead of the interpolated value, fall back to the template form `"projects/{{request.body.projectId}}/source"`. **Record which form works** — Task 3 reuses it verbatim.
-  Apply the SAME working form to the **source register** rule's `subDir`. Keep every other config key (`dateBucket`, `filename`, `storageKey`, `schemaId`, `maxFileSize`, `allowedMimeTypes`) unchanged. Use MCP `update_proxy_rule`.
+- [ ] **Step 2: Set the dynamic `subDir` (form confirmed by bffless/ce#324).** `subDir` is `{{...}}` **template-interpolated** on `presigned_upload`/`register_upload`/`file_upload_handler` (static values pass through unchanged; resolved value is guarded against blank/`..`/escape). Set the **source prepare** rule's `prepare` step `subDir`:
+  - `"subDir": "projects/{{request.body.projectId}}/source"`
+  Apply the SAME value to the **source register** rule's `subDir` (the PR notes register's subDir "should match the presigned_upload step"). Keep every other config key (`dateBucket`, `filename`, `storageKey`, `schemaId`, `maxFileSize`, `allowedMimeTypes`) unchanged. Use MCP `update_proxy_rule`.
 
-- [ ] **Step 3: Add the nested serve rule.** Create `GET /api/uploads/projects/*` in the `studio` rule set, a `file_serve_handler` step with `{ "subDir": "projects" }` (mirroring the per-type serve rules, which use `{subDir:"source"}` on `/api/uploads/source/*`). Use MCP `create_proxy_rule`. Leave the existing per-type serve rules untouched.
+- [ ] **Step 3: Add the nested serve rule.** Create `GET /api/uploads/projects/*` in the `studio` rule set, a `file_serve_handler` step with `{ "subDir": "projects" }`. (bffless/ce#324 confirms `file_serve` is unchanged and already serves multi-segment subDirs — `subDir: "projects"` serves `/api/uploads/projects/<id>/...`.) Use MCP `create_proxy_rule`. Leave the existing per-type serve rules untouched.
 
 - [ ] **Step 4: Live round-trip verification (the gating check).** From a shell, hit the real backend (unmocked `/api/*` falls through the Vite proxy to `https://j5s.dev`; auth is off):
   ```bash
@@ -197,7 +196,7 @@ This de-risks the whole approach before touching 12 more rules: it proves (a) ho
     -H 'Content-Type: application/json' \
     -d '{"filename":"spike.mov","projectId":"spike-test"}'
   ```
-  Confirm the returned `storageKey` is `projects/spike-test/source/<date>/<uuid>-spike.mov` (the projectId is interpolated, NOT literal). Then PUT a tiny file to the returned `uploadUrl`, POST `/api/uploads/source/register` with `{storageKey, originalName:"spike.mov", projectId:"spike-test"}`, and finally `GET` the returned serve `url` — it must return the bytes (proves the `/api/uploads/projects/*` serve rule resolves the nested key). If `register`'s returned `url` is NOT under `/api/uploads/projects/...`, report the actual shape — the serve rule may need to match it instead. **If the projectId does not interpolate in any supported `subDir` form, STOP and report BLOCKED** (we'd need a CE change to support a dynamic prefix, like `file_delete`).
+  Confirm the returned `storageKey` is `projects/spike-test/source/<date>/<uuid>-spike.mov` (the projectId is interpolated, NOT literal). Then PUT a tiny file to the returned `uploadUrl`, POST `/api/uploads/source/register` with `{storageKey, originalName:"spike.mov", projectId:"spike-test"}`, and finally `GET` the returned serve `url` — it must return the bytes (proves the `/api/uploads/projects/*` serve rule resolves the nested key). If `register`'s returned `url` is NOT under `/api/uploads/projects/...`, report the actual shape so the serve rule can match it. (ce#324 is deployed, so interpolation should work; if it somehow doesn't, report BLOCKED rather than editing the other 12 rules.) Best-effort: delete the `spike-test` object afterward via `POST /api/projects/delete {"projectId":"spike-test"}` once Part B's rule exists, or leave it as harmless junk.
 
 - [ ] **Step 5: Commit** (the spike is config-only; record findings in the commit body)
 ```bash
@@ -210,9 +209,9 @@ Live round-trip prepare→PUT→register→GET under projects/<id>/source confir
 
 ### Task 3: Apply the proven dynamic `subDir` to the remaining rules
 
-Using the **exact form proven in Task 2**, update via MCP `update_proxy_rule`:
-- **prepare + register** for `audio`, `thumbnails`, `voice`, `export`, `scene-clip` — set each `subDir` to `…/<that-type>` (e.g. `'projects/' + request.body.projectId + '/audio'`), keeping all other config keys.
-- **narrate** (`/api/voice/narrate`): the `file_upload_handler` step's `subDir: "narration"` → the per-project form `…/narration`.
+Using the template form, update via MCP `update_proxy_rule`:
+- **prepare + register** for `audio`, `thumbnails`, `voice`, `export`, `scene-clip` — set each `subDir` to `"projects/{{request.body.projectId}}/<that-type>"` (e.g. `"projects/{{request.body.projectId}}/audio"`), keeping all other config keys.
+- **narrate** (`/api/voice/narrate`): the `file_upload_handler` step's `subDir: "narration"` → `"projects/{{request.body.projectId}}/narration"`.
 
 - [ ] **Step 1:** Fetch each rule's current `pipeline_config` (MCP) so you preserve every other key.
 - [ ] **Step 2:** Update each `subDir` to the proven per-project form. (10 rules: 5 prepare + 5 register; plus narrate = 11 edits.)
@@ -255,9 +254,9 @@ git commit -m "docs(studio): story 11c Part A — per-project storage layout"
 
 ---
 
-## PART B — project deletion (BLOCKED until CE `file_delete` is deployed)
+## PART B — project deletion (CE `file_delete` deployed ✅ — ready)
 
-> Do NOT start these tasks until `file_delete` is live (the user will confirm). Until then, `deleteProject` stays local-only (its 11a behavior), which is correct and safe.
+> `file_delete` is live and `subDir` expressions shipped (bffless/ce#324), so Part B is unblocked. Run it after Part A.
 
 ### Task 6: `/api/projects/delete` rule
 
@@ -305,7 +304,7 @@ git commit -m "feat(studio): deleting a project wipes its bucket prefix (best-ef
 ---
 
 ## Self-review notes (for the implementer)
-- **Task 2 is a hard gate.** Everything downstream assumes a per-project `subDir` interpolates. If it can't be expressed in rule config, STOP — don't edit the other 12 rules; it becomes a CE ask.
+- **Task 2 is a live confirm, not a discovery spike.** bffless/ce#324 shipped `subDir` `{{...}}` interpolation + confirmed `file_serve` handles multi-segment subDirs, so the form (`"projects/{{request.body.projectId}}/source"`) and the serve rule are known-good. Task 2 just proves the real round-trip works before touching the other 12 rules; if it unexpectedly fails, report BLOCKED.
 - **Client change (Task 1) is backward-compatible** — the extra `projectId` field is ignored by the still-static rules until Task 2/3, so Task 1 can ship and be verified on its own.
 - **No new UUID** — `projectId` is the existing 11a id; per-object uniqueness stays in the handler (the `<uuid>-<file>` prefix is unchanged).
 - **`contact-attachments` is out of scope** — don't touch its rules.
