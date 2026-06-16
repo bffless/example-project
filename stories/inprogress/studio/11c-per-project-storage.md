@@ -10,8 +10,7 @@
 > `docs/superpowers/specs/2026-06-16-bffless-ce-file-delete-handler.md`.
 
 **Status:** Part A ✅ shipped (2026-06-16, branch `studio/projects`, live-verified);
-Part B 🔨 in progress (CE `file_delete` deployed — wiring project-delete to wipe
-the bucket prefix).
+Part B ✅ shipped (2026-06-16, live-verified).
 
 ## Why
 
@@ -69,6 +68,37 @@ thin wrapper calls — existing call sites are unchanged.
 `projects/<id>/` and serve them back from the same path, keeping mock and real
 shapes identical.
 
+## What shipped (Part B)
+
+**New `POST /api/projects/delete` rule** (id `67359cca-d1bc-48ab-9330-7ffca633069f`,
+rule set `studio`). A `function_handler` step builds
+`prefix = "projects/<projectId>/"` and throws `"projectId required"` if the id is
+empty or missing (guards against a mass-delete of the entire bucket). A
+`file_delete { prefix: {{steps.prep.prefix}} }` step then removes every object
+under that prefix atomically. A final response step returns `{ deleted, prefix }`.
+Validators are intentionally off — flagged for `auth_required` restoration in
+story 07 (same as Part A rules).
+
+**App wiring.** `deleteProjectAssets` RTK mutation in `src/store/studioApi.ts`
+posts `{ projectId }` to `api/projects/delete`. `StudioProjects.onDelete` (in
+`src/components/Studio/StudioProjects.tsx`) calls it best-effort (errors are
+swallowed), then dispatches the local `deleteProject(id)` slice action regardless
+— so the UI removes the project instantly whether or not the bucket sweep
+succeeds. The confirm() gate remains in `ProjectCard` (unchanged). MSW mock added
+to `src/mocks/handlers.ts` returning `{ deleted: 1, prefix: "projects/<id>/" }`.
+
+**Live verification.** Uploaded an object under `projects/deltest/…`, then
+`POST /api/projects/delete { "projectId": "deltest" }` returned
+`{ deleted: 1, prefix: "projects/deltest/" }` and the object was gone (GCS 403 on
+direct access). Re-deleting the same prefix returned `{ deleted: 0 }` (idempotent).
+Empty `projectId` body returned `"projectId required"` (no mass-delete possible).
+
+**Cloudflare-cache caveat.** The `GET /api/uploads/projects/*` serve rule fronts
+a Cloudflare cache. A deleted object's serve URL may briefly return a cached 200
+from the edge until that cache entry expires — authoritative state is the
+deletion in GCS. This does not affect the app: the project is removed locally
+immediately and the bucket objects will not be re-requested.
+
 ## Scope guard — NOT in 11c Part A (and some not in 11c at all)
 
 - **No per-object shape change** — the `attachment_url` / `audio_url` / etc. fields
@@ -77,14 +107,15 @@ shapes identical.
   date-bucketed objects are orphaned in the bucket and untouched. No backfill needed.
 - **`contact-attachments`** (`/api/uploads/contact-attachments`) is a non-studio
   route and is intentionally untouched.
-- **Validators still off** (story 07). The Part B project-delete route is flagged for
-  `auth_required` restoration in story 07; don't "fix" it early.
+- **Validators still off** (story 07). All Part A + B routes (including the
+  destructive project-delete) are flagged for `auth_required` restoration in story
+  07; don't "fix" it early.
 - **Server-side project record sync** is story 11d — projects still live in
   localStorage only.
 
 ## File / rule map
 
-### Client
+### Client — Part A
 
 | File | Change |
 |------|--------|
@@ -93,6 +124,14 @@ shapes identical.
 | `src/components/Studio/useScenePipeline.ts` | Wrapper helpers inject `activeProjectId`; call sites unchanged |
 | `src/mocks/handlers.ts` | Mock assets nested under `projects/<id>/`; serve path updated |
 
+### Client — Part B
+
+| File | Change |
+|------|--------|
+| `src/store/studioApi.ts` | `deleteProjectAssets` RTK mutation (`POST api/projects/delete`) |
+| `src/components/Studio/StudioProjects.tsx` | `onDelete` calls `deleteProjectAssets` best-effort, then dispatches `deleteProject(id)` unconditionally |
+| `src/mocks/handlers.ts` | Mock handler for `POST /api/projects/delete` returns `{ deleted: 1, prefix }` |
+
 ### BFFless rules
 
 | Rule id | Route | Change |
@@ -100,4 +139,5 @@ shapes identical.
 | *(6× prepare)* | `POST /api/uploads/*/prepare` | `subDir` → `"projects/{{request.body.projectId}}/<type>"` |
 | *(6× register)* | `POST /api/uploads/*/register` | `subDir` → `"projects/{{request.body.projectId}}/<type>"` |
 | narrate rule | `POST /api/voice/narrate` | `file_upload` step `subDir` interpolated |
-| `30355b6d` | `GET /api/uploads/projects/*` | **New** — `file_serve { subDir: "projects" }` |
+| `30355b6d` | `GET /api/uploads/projects/*` | **New (Part A)** — `file_serve { subDir: "projects" }` |
+| `67359cca` | `POST /api/projects/delete` | **New (Part B)** — `function_handler` builds prefix + `file_delete { prefix }` + response |
