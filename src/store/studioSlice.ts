@@ -16,6 +16,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import type { RootState } from './index'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import { nextUntitledName, type ProjectMeta } from '../lib/projects'
+import { reconcileIndex } from '../lib/projectSync'
 import type { Scene } from '../lib/scenes'
 import type { AutoBuildRun } from '../lib/autoBuild'
 import type { VideoDescription } from '../lib/describe'
@@ -573,6 +574,18 @@ const studioSlice = createSlice({
       w.autoBuild.currentSceneId = action.payload.sceneId
       w.autoBuild.currentStepId = action.payload.stepId
     },
+    /** Server sync: replace the working state for a project with the server copy. */
+    hydrateProject(state, action: PayloadAction<{ id: string; working: ProjectWorkingState }>) {
+      state.working[action.payload.id] = action.payload.working
+    },
+    /** Server sync: drop the working state from memory (keeps the index meta). */
+    evictWorking(state, action: PayloadAction<string>) {
+      delete state.working[action.payload]
+    },
+    /** Server sync: merge server project metas into the local index. */
+    reconcileServerIndex(state, action: PayloadAction<ProjectMeta[]>) {
+      state.index = reconcileIndex(state.index, action.payload)
+    },
   },
 })
 
@@ -625,6 +638,9 @@ export const {
   haltAutoBuild,
   completeAutoBuild,
   setAutoPointer,
+  hydrateProject,
+  evictWorking,
+  reconcileServerIndex,
 } = studioSlice.actions
 
 /** Frozen empty working state — a STABLE reference so useSelector reads don't
