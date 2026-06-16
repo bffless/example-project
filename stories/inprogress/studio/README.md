@@ -84,15 +84,19 @@ let the user add/remove cuts directly in the diff viewer** — then the wps knob
 (Per-scene scope shipped: the Build diff is now windowed to the selected scene tab
 via `windowLines`, instead of rendering the whole talk.)
 
-**The `studio/projects` initiative (stories 11a–11d) has begun.** Stories 11a and
-11b have shipped: 11a introduced projects as first-class entities (local-first,
-keyed Redux collection, list/create/open/rename/delete UI, metadata middleware,
-`savedVoices` hoisted to a shared library, clean-slate persist key bump); 11b
-added URL-driven routing (`/studio/project/:id/:phase`, `StudioProjectGuard`,
-phase clamp/resume via `resolvePhase`/`maxPhaseFor`, keyed workspace remount,
-`revisitPrep`/`inExport` removed). Story 11c (GCS per-project storage layout +
-orphan cleanup) and 11d (server persistence — projects survive clearing
-localStorage) are queued next.
+**The `studio/projects` initiative (stories 11a–11d) has begun.** Stories 11a,
+11b, and 11c Part A have shipped: 11a introduced projects as first-class entities
+(local-first, keyed Redux collection, list/create/open/rename/delete UI, metadata
+middleware, `savedVoices` hoisted to a shared library, clean-slate persist key
+bump); 11b added URL-driven routing (`/studio/project/:id/:phase`,
+`StudioProjectGuard`, phase clamp/resume via `resolvePhase`/`maxPhaseFor`, keyed
+workspace remount, `revisitPrep`/`inExport` removed); 11c Part A nested every
+upload under `uploads/projects/<id>/<type>/…` via dynamic `subDir` interpolation
+(enabled by `bffless/ce#324`) across all 6 prepare + 6 register rules + the
+narrate step, and added a new `GET /api/uploads/projects/*` serve rule (id
+`30355b6d`). **11c Part B** (project-delete wipes the bucket prefix via CE
+`file_delete`) is in progress. 11d (server persistence — projects survive clearing
+localStorage) is queued next.
 
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
@@ -150,6 +154,7 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
 | 11a | `11a-projects-entity.md` | projects as a first-class entity — keyed slice (index/working/activeProjectId) · list/create/open/rename/delete · metadata middleware · savedVoices hoisted · clean-slate persist key | ✅ done |
 | 11b | `11b-url-routing.md` | URL-driven routing — /studio/project/:id/:phase · guard (unknown-id redirect · active-sync · phase clamp/resume via phaseOf) · keyed remount · revisitPrep/inExport removed | ✅ done |
+| 11c | `11c-per-project-storage.md` | per-project GCS layout — uploads/projects/<id>/<type>/... via dynamic subDir (ce#324) + nested serve rule; projectId threaded client-side | ✅ Part A · 🔨 Part B (delete) |
 | 10a | `10a-diarization.md` | `/api/transcribe` rule `972a6dc5` runs `diarization:true` + `huggingface_access_token: secrets.HF_TOKEN`; flatten step carries per-word `speaker`; `TranscriptWord`/`TWord` gain `speaker?` | ✅ done* |
 | 10b | `10b-cast-and-voice-step.md` | prep reordered thumbnails→voice→director; project **cast** (`Person[]`) + per-video `speakerAssignments`; people count control (default 1 = auto-assign, grid at N≥2); `src/lib/speakers.ts` resolution helpers; `CastStudio` UI | ✅ done |
 | 10c | `10c-speaker-aware-director.md` | `speakerTimedTranscript` groups words by speaker + labels each run with the cast name; `SpeakerNamer` threaded through `combinedTimedTranscript`; back-compat when no namer — director rule `138f27fb` prompt intentionally unchanged (self-describing `Name:` format) | ✅ done* |
