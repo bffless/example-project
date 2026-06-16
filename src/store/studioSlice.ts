@@ -582,6 +582,14 @@ const studioSlice = createSlice({
     evictWorking(state, action: PayloadAction<string>) {
       delete state.working[action.payload]
     },
+    /** Server sync: keep only the given project's working state, dropping every
+     *  other project's working (index/meta untouched). Idempotent — used on
+     *  ENTERING a project so eviction is StrictMode-safe (mount→unmount→mount). */
+    evictOthers(state, action: PayloadAction<string>) {
+      for (const id of Object.keys(state.working)) {
+        if (id !== action.payload) delete state.working[id]
+      }
+    },
     /** Server sync: merge server project metas into the local index. */
     reconcileServerIndex(state, action: PayloadAction<ProjectMeta[]>) {
       state.index = reconcileIndex(state.index, action.payload)
@@ -640,6 +648,7 @@ export const {
   setAutoPointer,
   hydrateProject,
   evictWorking,
+  evictOthers,
   reconcileServerIndex,
 } = studioSlice.actions
 

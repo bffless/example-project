@@ -6,8 +6,11 @@
  * this hook's cleanup. Responsibilities:
  *  - debounce-save the working state to the server whenever it changes,
  *  - flush a final save on `beforeunload` and on unmount,
- *  - evict the heavy working state from local memory on unmount (the server is
- *    now the source of truth; re-opening hydrates from the server),
+ *  - on MOUNT, evict every OTHER project's heavy working state from local memory
+ *    (keep only the active one; the server is the source of truth and re-opening
+ *    hydrates from it). Eviction on ENTER is idempotent, so it survives React 19
+ *    StrictMode's synthetic mount→unmount→mount without ever dropping the active
+ *    project's just-hydrated working state (the old self-evict-on-unmount did).
  *  - expose a `{ status, savedAt }` for a small "Saving…/Saved" UI indicator.
  *
  * Pitfalls handled here:
@@ -25,7 +28,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { selectActive, evictWorking } from '../../store/studioSlice'
+import { selectActive, evictOthers } from '../../store/studioSlice'
 import { studioApi } from '../../store/studioApi'
 import { toServerRecord } from '../../lib/projectSync'
 import { deriveProjectMeta } from '../../lib/projects'
@@ -102,16 +105,32 @@ export function useProjectAutosave(projectId: string): { status: SaveStatus; sav
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [save])
 
-  // On unmount (left the project — 11b remounts per projectId): flush a final
-  // save, then evict the working state from local memory.
+  // On MOUNT (entered a project — 11b remounts per projectId): re-arm `mounted`
+  // and evict every OTHER project's working state so only the active one is local.
+  // Idempotent, so StrictMode's mount→unmount→mount is harmless — and it never
+  // evicts the ACTIVE project's working state. The cleanup disarms `mounted` (so
+  // post-unmount saves stay silent) and RE-ARMS `first`, so the *next* mount's
+  // debounce effect skips its hydrate render again — this is what keeps
+  // StrictMode's synthetic remount from firing a spurious save, while a genuine
+  // post-mount edit still saves (re-arming in the body would swallow that edit,
+  // since this effect commits after the debounce effect).
   useEffect(() => {
+    mounted.current = true
+    dispatch(evictOthers(projectId))
     return () => {
       mounted.current = false
+      first.current = true
+    }
+  }, [projectId, dispatch])
+
+  // On unmount (left the project): flush a final save. No eviction here — that
+  // happens on entry now (above), which is what makes it StrictMode-safe.
+  useEffect(() => {
+    return () => {
       if (timer.current) clearTimeout(timer.current)
       save(false)
-      dispatch(evictWorking(projectId))
     }
-  }, [projectId, dispatch, save])
+  }, [projectId, save])
 
   return { status, savedAt }
 }

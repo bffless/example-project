@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { Provider } from 'react-redux'
@@ -74,7 +75,7 @@ describe('useProjectAutosave', () => {
     expect(savedProject()).toBe(false)
   })
 
-  it('flushes a save and evicts the working state on unmount', () => {
+  it('flushes a save on unmount without evicting the active working state', () => {
     const { store, savedProject } = makeStore()
     const { unmount } = render(
       <Provider store={store}>
@@ -86,6 +87,49 @@ describe('useProjectAutosave', () => {
       unmount()
     })
     expect(savedProject()).toBe(true)
-    expect(store.getState().studio.working.p1).toBeUndefined()
+    // Eviction moved to ENTER (evict-others-on-mount); leaving only flushes.
+    expect(store.getState().studio.working.p1).toBeDefined()
+  })
+
+  it('evicts OTHER projects on mount, keeping only the active one', () => {
+    const { store } = makeStore() // active p1
+    // Add a second project whose working state lingered from a prior visit.
+    act(() => {
+      store.dispatch(createProject({ id: 'p2', now: 2 }))
+    })
+    // Re-open p1 so it's active again with both working states present.
+    act(() => {
+      store.dispatch({ type: 'studio/openProject', payload: 'p1' })
+    })
+    expect(store.getState().studio.working.p2).toBeDefined()
+    render(
+      <Provider store={store}>
+        <Harness id="p1" />
+      </Provider>,
+    )
+    expect(store.getState().studio.working.p1).toBeDefined()
+    expect(store.getState().studio.working.p2).toBeUndefined()
+  })
+
+  it('survives StrictMode double-invoke: still saves and keeps active working', () => {
+    const { store, savedProject } = makeStore() // active project 'p1' with working
+    render(
+      <StrictMode>
+        <Provider store={store}>
+          <Harness id="p1" />
+        </Provider>
+      </StrictMode>,
+    )
+    // The synthetic mount→unmount→mount must NOT evict the active project's working.
+    expect(store.getState().studio.working.p1).toBeDefined()
+    act(() => {
+      store.dispatch({ type: 'studio/setDirection', payload: 'x' })
+    })
+    act(() => {
+      vi.advanceTimersByTime(1600)
+    })
+    // A working-state change still debounce-saves after the double-invoke.
+    expect(savedProject()).toBe(true)
+    expect(store.getState().studio.working.p1).toBeDefined()
   })
 })
