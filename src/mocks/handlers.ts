@@ -28,6 +28,14 @@ const lastSegment = (url: string) =>
   decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() ?? '')
 
 /**
+ * Project record store (story 11d). Mirrors the server's pipeline_records table:
+ * keys are project ids; values are full records with `data` kept as a JSON string
+ * (the format the client POSTs). GET /api/projects/get returns it parsed to mirror
+ * the live server contract.
+ */
+const projectStore = new Map<string, Record<string, unknown>>()
+
+/**
  * Async fire-and-poll job store (story 03f Part 0). The director/refiner start
  * endpoints now ENQUEUE a job and return a `jobId`; the FE polls `/api/studio/job`
  * until it's `done`. We stash the deterministic result at enqueue time and spin
@@ -309,9 +317,49 @@ const studioHandlers = [
   // voice and no $3 clone is ever spent.
   http.post('/api/voice/clone', () => HttpResponse.json({ voiceId: 'Friendly_Person' })),
 
+  // Project CRUD (story 11d): in-memory projectStore mirrors the server's
+  // pipeline_records table. `data` is stored as a JSON string (client sends it
+  // that way); GET /api/projects/get returns it parsed to match the live contract.
+
+  // Create a new project record: POST /api/projects body = ProjectRecord
+  http.post('/api/projects', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (typeof body.id === 'string') projectStore.set(body.id, body)
+    return HttpResponse.json(body)
+  }),
+
+  // List all projects: GET /api/projects → array of metas (data stripped)
+  http.get('/api/projects', () => {
+    const metas = [...projectStore.values()].map((r) => {
+      const { data, ...meta } = r
+      void data // strip data, return meta only
+      return meta
+    })
+    return HttpResponse.json(metas)
+  }),
+
+  // Get one full project record: GET /api/projects/get?id=<id>
+  // Returns data parsed to an object — mirrors the live server contract.
+  http.get('/api/projects/get', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? ''
+    const rec = projectStore.get(id)
+    if (!rec) return HttpResponse.json({ id: null, data: null })
+    return HttpResponse.json({
+      ...rec,
+      data: typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data,
+    })
+  }),
+
+  // Save (upsert) a project record: POST /api/projects/save body = ProjectRecord
+  http.post('/api/projects/save', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (typeof body.id === 'string') projectStore.set(body.id, body)
+    return HttpResponse.json(body)
+  }),
+
   // Delete project assets (story 11c): wipe objectStore keys under the project
-  // prefix and return { deleted, prefix }. A { deleted: 0 } stub is acceptable
-  // — the mock is dev-only and orphaned in-memory objects aren't fatal.
+  // prefix and return { deleted, prefix }. Also removes the project record from
+  // projectStore (story 11d) so the list stays consistent.
   http.post('/api/projects/delete', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { projectId?: string }
     const prefix = `projects/${body.projectId ?? ''}/`
@@ -322,6 +370,7 @@ const studioHandlers = [
         deleted++
       }
     }
+    if (body.projectId) projectStore.delete(body.projectId)
     return HttpResponse.json({ deleted, prefix })
   }),
 

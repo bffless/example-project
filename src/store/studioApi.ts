@@ -18,6 +18,8 @@ import type { DirectorRequest, DirectorScene } from '../lib/director'
 import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
 import type { SearchRequest } from '../lib/search'
 import type { DescribeRequest } from '../lib/describe'
+import type { ProjectMeta } from '../lib/projects'
+import type { ProjectRecord, ProjectRecordIn } from '../lib/projectSync'
 
 export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export' | 'scene-clip'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
@@ -194,6 +196,35 @@ export const studioApi = createApi({
       query: (body) => ({ url: 'api/projects/delete', method: 'POST', body }),
     }),
 
+    // List all projects (story 11d): GET /api/projects → array of metas (no data).
+    // Tolerates both a bare array response and a wrapped { data: [...] } shape.
+    listProjects: builder.query<ProjectMeta[], void>({
+      query: () => ({ url: 'api/projects' }),
+      transformResponse: (raw: unknown): ProjectMeta[] => {
+        const arr = Array.isArray(raw) ? raw : Array.isArray((raw as { data?: unknown })?.data) ? (raw as { data: unknown[] }).data : []
+        return (arr as unknown[]).filter((r): r is ProjectMeta => !!r && typeof (r as { id?: unknown }).id === 'string')
+      },
+    }),
+
+    // Get one full project record (story 11d): GET /api/projects/get?id=<id> →
+    // full record with data as a parsed object (server coerces the stored JSON string).
+    getProject: builder.query<ProjectRecordIn, string>({
+      query: (id) => ({ url: `api/projects/get?id=${encodeURIComponent(id)}` }),
+      transformResponse: (raw: unknown): ProjectRecordIn => raw as ProjectRecordIn,
+    }),
+
+    // Create a new project record (story 11d): POST /api/projects body = ProjectRecord
+    // (data is a JSON string). Returns the created record.
+    createProjectRecord: builder.mutation<unknown, ProjectRecord>({
+      query: (record) => ({ url: 'api/projects', method: 'POST', body: record }),
+    }),
+
+    // Save (upsert) a project record (story 11d): POST /api/projects/save body =
+    // ProjectRecord (data JSON string) → returns the updated record.
+    saveProject: builder.mutation<unknown, ProjectRecord>({
+      query: (record) => ({ url: 'api/projects/save', method: 'POST', body: record }),
+    }),
+
     upload: builder.mutation<{ url: string }, { file: File; kind: UploadKind; projectId: string }>({
       async queryFn({ file, kind, projectId }) {
         try {
@@ -226,4 +257,9 @@ export const {
   useUploadMutation,
   useVoiceCloneMutation,
   useVoiceSayMutation,
+  useListProjectsQuery,
+  useGetProjectQuery,
+  useLazyGetProjectQuery,
+  useCreateProjectRecordMutation,
+  useSaveProjectMutation,
 } = studioApi
