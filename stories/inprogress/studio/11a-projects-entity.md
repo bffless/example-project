@@ -53,7 +53,8 @@ every action and, after dispatch, derives a lightweight `ProjectMeta`
 (`{ id, name, phase, thumbnailUrl, updatedAt }`) from the active project's slice
 and writes it to `index[id]`. The list view never has to read deep project state.
 
-**Selectors.** `selectActive` returns `working[activeProjectId]` (or `null`);
+**Selectors.** `selectActive` returns the active working state, or a stable
+`EMPTY_WORKING` (a frozen empty reference) when no project is open — never `null`;
 `selectProjectList` returns `Object.values(index)` sorted by `updatedAt` descending.
 
 **`ProjectList` / `ProjectCard` UI.** A landing page that renders when no project
@@ -86,7 +87,7 @@ discarded on first load — no migration, by design. Projects are local-only unt
 
 | File | Change |
 |------|--------|
-| `src/lib/projects.ts` | `ProjectMeta` type, `createProject()` factory (UUID + defaults) |
+| `src/lib/projects.ts` | `ProjectMeta` type, `phaseOf` / `deriveProjectMeta` / `nextUntitledName` / `DEFAULT_PROJECT_NAME` (no ID minting — `crypto.randomUUID()` happens in the page/reducer) |
 | `src/store/studioSlice.ts` | Restructured state shape; `active()` helper; all project-management + existing reducers updated; `selectActive`, `selectProjectList` |
 | `src/store/projectMetaSync.ts` | Redux middleware — derives + writes `ProjectMeta` to `index` after every action |
 | `src/store/index.ts` | Middleware wired; persist key bumped to `studio-projects` |

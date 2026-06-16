@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { configureStore } from '@reduxjs/toolkit'
-import studioReducer, { createProject, setContactSheets } from './studioSlice'
+import studioReducer, { createProject, setContactSheets, addSource } from './studioSlice'
 import { projectMetaSync } from './projectMetaSync'
 
 function makeStore() {
@@ -20,6 +20,14 @@ describe('projectMetaSync', () => {
     expect(meta.thumbnailUrl).toBe('/api/uploads/thumbnails/x.png')
     expect(meta.updatedAt).toBe(100)
     vi.restoreAllMocks()
+  })
+
+  it('updates the index phase as the project progresses', () => {
+    const store = makeStore()
+    store.dispatch(createProject({ id: 'p1', now: 1 }))
+    expect(store.getState().studio.index.p1.phase).toBe('import')
+    store.dispatch(addSource({ id: 's1', fileName: 'a.mp4', duration: 10 }))
+    expect(store.getState().studio.index.p1.phase).toBe('prep')
   })
 
   it('ignores non-studio actions and the create/open/rename/delete actions themselves', () => {

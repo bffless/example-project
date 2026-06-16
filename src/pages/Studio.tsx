@@ -65,9 +65,29 @@ export function Studio() {
   // a stable per-session value is fine.
   const [now] = useState(() => Date.now())
 
-  const onNewProject = () => dispatch(createProject({ id: crypto.randomUUID(), now: Date.now() }))
-  const onOpenProject = (id: string) => dispatch(openProject(id))
-  const onCloseProject = () => dispatch(closeProject())
+  // Drop the previous project's in-memory clip bytes whenever we switch projects.
+  // These transient buffers (`file`/`files`) aren't keyed by project, so without
+  // this a leftover clip from project A would make project B skip its import
+  // screen and preview A's video. Persisted per-project source refs live in Redux
+  // and the rehydrate effect repopulates `file` for whichever project is opened.
+  const clearTransientSource = () => {
+    setFile(null)
+    setFiles(new Map())
+    setRestoreError(null)
+  }
+
+  const onNewProject = () => {
+    clearTransientSource()
+    dispatch(createProject({ id: crypto.randomUUID(), now: Date.now() }))
+  }
+  const onOpenProject = (id: string) => {
+    clearTransientSource()
+    dispatch(openProject(id))
+  }
+  const onCloseProject = () => {
+    clearTransientSource()
+    dispatch(closeProject())
+  }
   const onRenameProject = (id: string, name: string) => dispatch(renameProject({ id, name, now: Date.now() }))
   const onDeleteProject = (id: string) => dispatch(deleteProject(id))
   const duration = useAppSelector((s) => selectActive(s).duration)
@@ -178,9 +198,7 @@ export function Studio() {
   }
 
   function startOver() {
-    setFile(null)
-    setFiles(new Map())
-    setRestoreError(null)
+    clearTransientSource()
     // pipe.reset() dispatches resetProject, which already clears revisitPrep.
     pipe.reset()
   }
