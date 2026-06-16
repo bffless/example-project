@@ -13,6 +13,7 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
+import type { RootState } from './index'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
 import { nextUntitledName, type ProjectMeta } from '../lib/projects'
 import type { Scene } from '../lib/scenes'
@@ -655,5 +656,17 @@ export const {
   completeAutoBuild,
   setAutoPointer,
 } = studioSlice.actions
+
+/** Frozen empty working state — a STABLE reference so useSelector reads don't
+ *  thrash when no project is open. */
+export const EMPTY_WORKING: ProjectWorkingState = Object.freeze(freshWorkingState()) as ProjectWorkingState
+
+export const selectActive = (s: RootState): ProjectWorkingState =>
+  s.studio.activeProjectId ? (s.studio.working[s.studio.activeProjectId] ?? EMPTY_WORKING) : EMPTY_WORKING
+
+export const selectActiveProjectId = (s: RootState): string | null => s.studio.activeProjectId
+
+export const selectProjectList = (s: RootState): ProjectMeta[] =>
+  Object.values(s.studio.index).sort((a, b) => b.updatedAt - a.updatedAt)
 
 export default studioSlice.reducer

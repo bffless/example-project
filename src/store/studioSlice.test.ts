@@ -3,6 +3,7 @@ import reducer, { setScenes, setDirection, addSavedVoice, freshWorkingState, typ
 import {
   createProject, openProject, closeProject, renameProject, deleteProject, resetProject,
 } from './studioSlice'
+import { selectActive, selectProjectList, EMPTY_WORKING } from './studioSlice'
 
 const withOneProject = (): StudioState => ({
   index: { p1: { id: 'p1', name: 'A', createdAt: 1, updatedAt: 1, phase: 'import', thumbnailUrl: null } },
@@ -70,5 +71,19 @@ describe('project management', () => {
     s = reducer(s, resetProject())
     expect(s.working.p1.direction).toBe('')
     expect(s.index.p1).toBeDefined()
+  })
+})
+
+describe('selectors', () => {
+  it('selectActive returns a stable empty working state when none is open', () => {
+    const s = { studio: { index: {}, working: {}, activeProjectId: null, savedVoices: [] } } as never
+    expect(selectActive(s)).toBe(EMPTY_WORKING)
+  })
+  it('selectProjectList sorts by updatedAt desc', () => {
+    let st = reducer(undefined, createProject({ id: 'p1', now: 1 }))
+    st = reducer(st, createProject({ id: 'p2', now: 2 }))
+    st = reducer(st, renameProject({ id: 'p1', name: 'x', now: 9 }))
+    const list = selectProjectList({ studio: st } as never)
+    expect(list.map((m) => m.id)).toEqual(['p1', 'p2'])
   })
 })
