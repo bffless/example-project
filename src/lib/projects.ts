@@ -4,9 +4,9 @@
  * thumbnail) from a project's working state and name new projects. They are pure
  * — NO id minting lives here (that's impure and belongs in the reducer).
  *
- * Type-only import from the slice avoids a runtime module cycle: `projects.ts`
- * imports the `ProjectWorkingState` TYPE (erased at runtime) while the slice
- * imports these runtime helpers + the `ProjectMeta` type back.
+ * Cycle avoidance: `studioSlice.ts` type-imports `ProjectMeta` from here; this
+ * module only type-imports `ProjectWorkingState` from the slice, so there is no
+ * runtime cycle.
  */
 
 import type { ProjectWorkingState } from '../store/studioSlice'

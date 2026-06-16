@@ -11,12 +11,11 @@ describe('phaseOf', () => {
     w.sources = [{ id: 's1', order: 0, fileName: 'a.mp4', duration: 10, sourceUrl: 'u', audioUrl: null, audioPeaks: [], words: [], transcribeJobId: null, stageProgress: {} }]
     expect(phaseOf(w)).toBe('prep')
   })
-  it('is export when every scene is built and inExport is set', () => {
+  it('is export when every scene is built', () => {
     const w = freshWorkingState()
     w.sources = [{ id: 's1', order: 0, fileName: 'a.mp4', duration: 10, sourceUrl: 'u', audioUrl: null, audioPeaks: [], words: [], transcribeJobId: null, stageProgress: { upload: { status: 'done' }, extract: { status: 'done' }, transcribe: { status: 'done' } } }]
     for (const id of ['thumbnails', 'clone', 'director'] as const) w.stageProgress[id] = { status: 'done' }
     w.scenes = [{ id: 'sc1', status: 'built' } as never]
-    w.inExport = true
     expect(phaseOf(w)).toBe('export')
   })
 })

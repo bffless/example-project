@@ -127,8 +127,8 @@ export type ProjectWorkingState = {
    * Whether the producer has hopped back to Prep after finishing it. Persisted
    * (not transient React state) so a hard reload keeps you on Prep instead of
    * snapping forward to Build: `ready` alone can't tell "prep is done, show
-   * Build" from "prep is done but I'm currently revisiting it". Reset by
-   * resetStudio (Start over / fresh import).
+   * Build" from "prep is done but I'm currently revisiting it". Cleared when the
+   * project's working state is reset.
    */
   revisitPrep: boolean
   /**
@@ -136,7 +136,7 @@ export type ProjectWorkingState = {
    * explicit navigation flag (persisted): Build doesn't auto-jump to Export when
    * the last scene is built — the user clicks "Continue to export". Only takes
    * effect once every scene is built (see `displayPhase`), so re-building a scene
-   * drops them back to Build. Reset by resetStudio.
+   * drops them back to Build. Cleared when the project's working state is reset.
    */
   inExport: boolean
   /**
@@ -144,9 +144,9 @@ export type ProjectWorkingState = {
    * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
    * stays hidden so it doesn't get ahead of the first job (find & process your
-   * clips). Persisted so the reveal survives a reload; reset by resetStudio.
-   * (A plan that's already underway shows regardless — see `planStarted` in the
-   * page — so this only gates the not-yet-started case.)
+   * clips). Persisted so the reveal survives a reload; cleared when the project's
+   * working state is reset. (A plan that's already underway shows regardless —
+   * see `planStarted` in the page — so this only gates the not-yet-started case.)
    */
   planRevealed: boolean
   /** Whether transcription should run speaker **diarization** (story 10e). Off by
@@ -205,7 +205,7 @@ export type ProjectWorkingState = {
    * The Export page's generated title + summary (from `/api/describe`), plus the
    * final script it was written from — so we can show it cached and only
    * regenerate when the script actually changes. Null until generated; the title
-   * is producer-editable. Reset by resetStudio.
+   * is producer-editable. Cleared when the project's working state is reset.
    */
   description: (VideoDescription & { script: string }) | null
   /**
