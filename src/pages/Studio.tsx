@@ -31,6 +31,7 @@ import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { ExportSummary } from '../components/Studio/ExportSummary'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
+import { useProjectAutosave } from '../components/Studio/useProjectAutosave'
 import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
 import { useAutoBuild } from '../components/Studio/useAutoBuild'
 import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMutation } from '../store/studioApi'
@@ -81,6 +82,7 @@ export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhas
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
   const auto = useAutoBuild(pipe)
+  const { status: saveStatus, savedAt } = useProjectAutosave(projectId)
   const [autoMode, setAutoMode] = useState(() => auto.run.status !== 'idle')
 
   // The Build scene tabs are sticky under the global header (`h-14` = 3.5rem).
@@ -569,6 +571,11 @@ export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhas
                       : 'Run each prep step below, in order.'}
               </p>
               <div className="flex items-center gap-2">
+                {saveStatus !== 'idle' && (
+                  <span className="text-[12px] text-ink-soft" aria-live="polite">
+                    {saveLabel(saveStatus, savedAt)}
+                  </span>
+                )}
                 {/* Once prep is done, Build can hop back to Prep (no work lost).
                     Going forward to Build is the bottom "Continue" CTA. */}
                 {pipe.ready && phase !== 'prep' && (
@@ -898,6 +905,13 @@ export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhas
       </Section>
     </>
   )
+}
+
+function saveLabel(status: 'idle' | 'saving' | 'saved' | 'error', savedAt: number | null): string {
+  if (status === 'saving') return 'Saving…'
+  if (status === 'error') return 'Save failed — will retry'
+  if (status === 'saved' || savedAt) return 'Saved'
+  return ''
 }
 
 /**
