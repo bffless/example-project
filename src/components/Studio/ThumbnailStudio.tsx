@@ -36,6 +36,7 @@ export function ThumbnailStudio({
   const [notes, setNotes] = useState(thumbnail?.notes ?? '')
   const [prompt, setPrompt] = useState(thumbnail?.prompt ?? '')
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
 
   // Re-sign the persisted thumbnail for <img>/download whenever its serve path
   // changes (new render or a restored session). Serve paths can't be shown
@@ -58,6 +59,32 @@ export function ThumbnailStudio({
   async function handleDraft() {
     const drafted = await onDraft(title, description, notes)
     if (drafted != null) setPrompt(drafted)
+  }
+
+  // Force an actual file download. The signed URL is a cross-origin GCS link, so
+  // an <a download> is ignored by the browser (it just navigates). Fetch the
+  // bytes and save them via an object URL instead; if the cross-origin fetch is
+  // blocked (CORS) or fails, fall back to opening the image in a new tab.
+  async function handleDownload() {
+    if (!signedUrl) return
+    setDownloading(true)
+    try {
+      const res = await fetch(signedUrl)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = 'thumbnail.jpg'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      window.open(signedUrl, '_blank', 'noopener,noreferrer')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   return (
@@ -118,9 +145,14 @@ export function ThumbnailStudio({
             alt="Generated YouTube thumbnail"
             className="w-full max-w-2xl rounded-md border border-paper-line"
           />
-          <a href={signedUrl} download="thumbnail.png" className="pill-ghost w-fit">
-            Download
-          </a>
+          <button
+            type="button"
+            className="pill-ghost w-fit"
+            disabled={downloading}
+            onClick={handleDownload}
+          >
+            {downloading ? 'Downloading…' : 'Download'}
+          </button>
         </div>
       )}
     </div>
