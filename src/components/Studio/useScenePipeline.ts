@@ -3,6 +3,7 @@ import { STAGE_DEFS, PER_VIDEO_STAGES, GLOBAL_STAGES, type Stage, type StageId }
 import { narrationSeconds, type Cut, type NarrationSegment, type Scene } from '../../lib/scenes'
 import { combinedTimedTranscript, toScenes, type DirectorScene } from '../../lib/director'
 import { buildDescribeRequest, toDescription } from '../../lib/describe'
+import { buildThumbnailDraftRequest, toThumbnailPrompt, toThumbnailImage } from '../../lib/thumbnail'
 import {
   toRefinement,
   refineDirections,
@@ -42,6 +43,8 @@ import {
   useRefineSceneMutation,
   useNarrateMutation,
   useDescribeMutation,
+  useThumbnailDraftMutation,
+  useThumbnailRenderMutation,
   useUploadMutation,
   useLazySignDownloadQuery,
   useVoiceCloneMutation,
@@ -68,6 +71,7 @@ import {
   setFinalCutUrl,
   setDescription,
   setDescriptionTitle,
+  setYoutubeThumbnail,
   setDuration,
   setFileName,
   addSource,
@@ -208,6 +212,7 @@ export function useScenePipeline() {
   const words = useAppSelector((s) => selectActive(s).words)
   const synopsis = useAppSelector((s) => selectActive(s).synopsis)
   const description = useAppSelector((s) => selectActive(s).description)
+  const youtubeThumbnail = useAppSelector((s) => selectActive(s).youtubeThumbnail)
   const direction = useAppSelector((s) => selectActive(s).direction)
   const directorPromptJobId = useAppSelector((s) => selectActive(s).directorPromptJobId)
   const scenesJobId = useAppSelector((s) => selectActive(s).scenesJobId)
@@ -231,6 +236,8 @@ export function useScenePipeline() {
   const [refineSceneReq] = useRefineSceneMutation()
   const [narrateReqRaw] = useNarrateMutation()
   const [describeReq] = useDescribeMutation()
+  const [thumbnailDraftReq] = useThumbnailDraftMutation()
+  const [thumbnailRenderReq] = useThumbnailRenderMutation()
   const [uploadReqRaw] = useUploadMutation()
   const [voiceCloneReq] = useVoiceCloneMutation()
   const [voiceSayReq] = useVoiceSayMutation()
@@ -262,6 +269,8 @@ export function useScenePipeline() {
   // owns the save error); only the saved serve URL (finalCutUrl) is persisted.
   const [savingFinalCut, setSavingFinalCut] = useState(false)
   const [describing, setDescribing] = useState(false)
+  const [draftingThumbnail, setDraftingThumbnail] = useState(false)
+  const [renderingThumbnail, setRenderingThumbnail] = useState(false)
   // The scene whose assembled cut is currently uploading to the bucket (story 03g
   // phase 2 — per-scene assemble & save). Transient.
   const [savingSceneCutId, setSavingSceneCutId] = useState<string | null>(null)
@@ -1571,6 +1580,58 @@ export function useScenePipeline() {
     [dispatch],
   )
 
+  // ---- Export: YouTube thumbnail (story 06) ---------------------------------
+
+  // Draft a nano-banana prompt from the finished video's title + YouTube
+  // description + final script + the creator's notes. One sync call; the handler
+  // loads the `image-prompts` skill to do the prompt-craft. Returns the drafted
+  // prompt for the editable textarea (we don't persist until it's rendered).
+  const draftThumbnailPrompt = useCallback(
+    async (title: string, description: string, notes: string): Promise<string | null> => {
+      const req = buildThumbnailDraftRequest(scenes, title, description, notes)
+      if (!req.script) {
+        setSceneError('Build at least one scene before generating a thumbnail.')
+        return null
+      }
+      setDraftingThumbnail(true)
+      setSceneError(null)
+      try {
+        const raw = await thumbnailDraftReq(req).unwrap()
+        return toThumbnailPrompt(raw).prompt
+      } catch (e) {
+        setSceneError(stageError(e))
+        return null
+      } finally {
+        setDraftingThumbnail(false)
+      }
+    },
+    [scenes, thumbnailDraftReq],
+  )
+
+  // Render the thumbnail with the (edited) prompt: nano-banana → bucket → serve
+  // path, persisted on the project (url-only) so it survives reload + rides
+  // server-sync. Stores notes + prompt alongside so the UI can repopulate.
+  const renderThumbnail = useCallback(
+    async (notes: string, prompt: string) => {
+      if (!prompt.trim()) {
+        setSceneError('Draft a prompt before generating the image.')
+        return
+      }
+      setRenderingThumbnail(true)
+      setSceneError(null)
+      try {
+        const raw = await thumbnailRenderReq({ prompt, projectId: activeProjectId ?? '' }).unwrap()
+        const { imageUrl } = toThumbnailImage(raw)
+        dispatch(setYoutubeThumbnail({ notes, prompt, url: imageUrl }))
+      } catch (e) {
+        setSceneError(stageError(e))
+      } finally {
+        setRenderingThumbnail(false)
+      }
+    },
+    [thumbnailRenderReq, activeProjectId, dispatch],
+  )
+
   // ---- Export: save the assembled cut (story 05) ----------------------------
 
   // Persist the assembled MP4 the same way every other resource is saved: upload
@@ -1662,6 +1723,12 @@ export function useScenePipeline() {
     describing,
     generateDescription,
     editDescriptionTitle,
+    signFor,
+    youtubeThumbnail,
+    draftingThumbnail,
+    renderingThumbnail,
+    draftThumbnailPrompt,
+    renderThumbnail,
     saveSceneCut,
     generateSceneSheets,
     refineScene,
