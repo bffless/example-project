@@ -28,6 +28,14 @@ const lastSegment = (url: string) =>
   decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() ?? '')
 
 /**
+ * Project record store (story 11d). Mirrors the server's pipeline_records table:
+ * keys are project ids; values are full records with `data` kept as a JSON string
+ * (the format the client POSTs). GET /api/projects/get returns it parsed to mirror
+ * the live server contract.
+ */
+const projectStore = new Map<string, Record<string, unknown>>()
+
+/**
  * Async fire-and-poll job store (story 03f Part 0). The director/refiner start
  * endpoints now ENQUEUE a job and return a `jobId`; the FE polls `/api/studio/job`
  * until it's `done`. We stash the deterministic result at enqueue time and spin
@@ -59,22 +67,33 @@ const enqueueJob = (
 const studioHandlers = [
   // Presigned prepare (source + audio): hand back a fake bucket PUT URL (which we
   // also intercept) plus the storageKey/originalName the register step echoes.
+  // The key is nested under projects/<projectId>/ to mirror the real bucket layout.
   http.post('/api/uploads/:kind/prepare', async ({ params, request }) => {
-    const { filename } = (await request.json().catch(() => ({}))) as { filename?: string }
-    const name = filename ?? 'clip'
+    const body = (await request.json().catch(() => ({}))) as {
+      filename?: string
+      projectId?: string
+    }
+    const name = body.filename ?? 'clip'
+    const kind = params.kind as string
+    const pid = body.projectId ?? 'unknown-project'
+    const storageKey = `projects/${pid}/${kind}/mock/${name}`
     return HttpResponse.json({
-      uploadUrl: `${MOCK_BUCKET}/${params.kind}/${encodeURIComponent(name)}`,
-      storageKey: `mock/${params.kind}/${name}`,
+      uploadUrl: `${MOCK_BUCKET}/${storageKey}`,
+      storageKey,
       originalName: name,
     })
   }),
 
-  // The browser PUTs the bytes straight to the "bucket". Keep small objects so the
-  // serve route below can return them; skip large ones (source video/audio).
+  // The browser PUTs the bytes straight to the "bucket". Store under the full
+  // path (everything after the mock-bucket host) so the nested key is retrievable
+  // by the serve route below; skip large objects (source video/audio).
   http.put(`${MOCK_BUCKET}/*`, async ({ request }) => {
     const body = await request.arrayBuffer()
     if (body.byteLength <= MOCK_SERVE_MAX) {
-      objectStore.set(lastSegment(request.url), {
+      // Use the full pathname (minus leading slash) as the key so
+      // `projects/<id>/<kind>/...` paths are stored and served correctly.
+      const pathname = new URL(request.url).pathname.replace(/^\//, '')
+      objectStore.set(pathname, {
         body,
         type: request.headers.get('content-type') ?? 'application/octet-stream',
       })
@@ -82,13 +101,23 @@ const studioHandlers = [
     return new HttpResponse(null, { status: 200 })
   }),
 
-  // Register (source + audio): return the flat `{ url }` the FE reads as the
-  // stored object URL. Mirrors the real serve path so it looks/behaves the same.
+  // Register (source + audio): return a serve url derived from the storageKey
+  // in the request body, nesting it under projects/<projectId>/ to match the
+  // real pipeline's serve path.
   http.post('/api/uploads/:kind/register', async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { originalName?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      originalName?: string
+      storageKey?: string
+      projectId?: string
+    }
+    // Prefer the echoed storageKey (sent by the real client flow); fall back to
+    // reconstructing from projectId + kind + originalName.
+    const kind = params.kind as string
     const name = body.originalName ?? 'clip'
+    const pid = body.projectId ?? 'unknown-project'
+    const keyPath = body.storageKey ?? `projects/${pid}/${kind}/mock/${name}`
     return HttpResponse.json({
-      url: `/api/uploads/${params.kind}/mock/${encodeURIComponent(name)}`,
+      url: `/api/uploads/${keyPath}`,
     })
   }),
 
@@ -104,8 +133,14 @@ const studioHandlers = [
 
   // Serve an uploaded object back (mirrors the real `file_serve` route). Returns
   // the stored bytes, or 404 if they weren't kept / the worker restarted.
-  http.get('/api/uploads/:kind/*', ({ request }) => {
-    const obj = objectStore.get(lastSegment(request.url))
+  // The path after /api/uploads/ is used as the lookup key so nested paths like
+  // projects/<id>/<kind>/... resolve correctly (exact key match first, then
+  // lastSegment fallback for any pre-existing shallow objects).
+  http.get('/api/uploads/*', ({ request }) => {
+    const urlPath = new URL(request.url).pathname
+    // Strip the leading /api/uploads/ prefix to get the storage key.
+    const keyPath = urlPath.replace(/^\/api\/uploads\//, '')
+    const obj = objectStore.get(keyPath) ?? objectStore.get(lastSegment(request.url))
     if (!obj) return new HttpResponse(null, { status: 404 })
     return new HttpResponse(obj.body, { status: 200, headers: { 'Content-Type': obj.type } })
   }),
@@ -247,19 +282,97 @@ const studioHandlers = [
   }),
 
   // Scene narration (story 03c): a short tone stands in for the persisted mp3 so
-  // the diff-viewer audio players work offline. Returns a data-URL "serve path"
-  // the <audio> can play directly.
+  // the diff-viewer audio players work offline. Returns a serve path nested under
+  // projects/<projectId>/narration/ — mirrors the real pipeline's storage key
+  // layout — with the WAV data stashed in objectStore so the GET route serves it.
   http.post('/api/voice/narrate', async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { text?: string }
+    const body = (await request.json().catch(() => ({}))) as {
+      text?: string
+      projectId?: string
+    }
     const words = (body.text ?? '').trim().split(/\s+/).filter(Boolean).length
     const seconds = Math.max(1, Math.round(words / 2.5))
-    return HttpResponse.json({ audioUrl: toneWavDataUrl(Math.min(seconds, 4)) })
+    const wavDataUrl = toneWavDataUrl(Math.min(seconds, 4))
+    const pid = body.projectId ?? 'unknown-project'
+    const filename = `narration-${Date.now()}.wav`
+    const keyPath = `projects/${pid}/narration/mock/${filename}`
+    // Decode the data-URL to raw bytes and stash in objectStore so the serve
+    // route hands it back if anything GETs the url.
+    try {
+      const base64 = wavDataUrl.split(',')[1]
+      if (base64) {
+        const binaryStr = atob(base64)
+        const bytes = new Uint8Array(binaryStr.length)
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+        objectStore.set(keyPath, { body: bytes.buffer as ArrayBuffer, type: 'audio/wav' })
+      }
+    } catch {
+      // Non-fatal — serve route will 404 but the audioUrl data-URL still plays.
+    }
+    return HttpResponse.json({ audioUrl: `/api/uploads/${keyPath}` })
   }),
 
   // Voice clone (story 04): return a real MiniMax preset id as the stub — matches
   // the live clone-disabled pipeline, so the TTS preview below has a usable
   // voice and no $3 clone is ever spent.
   http.post('/api/voice/clone', () => HttpResponse.json({ voiceId: 'Friendly_Person' })),
+
+  // Project CRUD (story 11d): in-memory projectStore mirrors the server's
+  // pipeline_records table. `data` is stored as a JSON string (client sends it
+  // that way); GET /api/projects/get returns it parsed to match the live contract.
+
+  // Create a new project record: POST /api/projects body = ProjectRecord
+  http.post('/api/projects', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (typeof body.id === 'string') projectStore.set(body.id, body)
+    return HttpResponse.json(body)
+  }),
+
+  // List all projects: GET /api/projects → array of metas (data stripped)
+  http.get('/api/projects', () => {
+    const metas = [...projectStore.values()].map((r) => {
+      const { data, ...meta } = r
+      void data // strip data, return meta only
+      return meta
+    })
+    return HttpResponse.json(metas)
+  }),
+
+  // Get one full project record: GET /api/projects/get?id=<id>
+  // Returns data parsed to an object — mirrors the live server contract.
+  http.get('/api/projects/get', ({ request }) => {
+    const id = new URL(request.url).searchParams.get('id') ?? ''
+    const rec = projectStore.get(id)
+    if (!rec) return HttpResponse.json({ id: null, data: null })
+    return HttpResponse.json({
+      ...rec,
+      data: typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data,
+    })
+  }),
+
+  // Save (upsert) a project record: POST /api/projects/save body = ProjectRecord
+  http.post('/api/projects/save', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    if (typeof body.id === 'string') projectStore.set(body.id, body)
+    return HttpResponse.json(body)
+  }),
+
+  // Delete project assets (story 11c): wipe objectStore keys under the project
+  // prefix and return { deleted, prefix }. Also removes the project record from
+  // projectStore (story 11d) so the list stays consistent.
+  http.post('/api/projects/delete', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { projectId?: string }
+    const prefix = `projects/${body.projectId ?? ''}/`
+    let deleted = 0
+    for (const key of objectStore.keys()) {
+      if (key.startsWith(prefix)) {
+        objectStore.delete(key)
+        deleted++
+      }
+    }
+    if (body.projectId) projectStore.delete(body.projectId)
+    return HttpResponse.json({ deleted, prefix })
+  }),
 
   // Voice say (TTS preview): a short audible tone stands in for synthesized
   // narration, with a word-count-derived duration, so the preview plays offline

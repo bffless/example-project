@@ -7,6 +7,46 @@ import {
   MAX_SOURCE_BYTES,
 } from './upload'
 
+afterEach(() => vi.restoreAllMocks())
+
+function mockFetchSequence() {
+  const calls: { url: string; body: unknown }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+    calls.push({ url, body })
+    if (url.endsWith('/prepare')) {
+      return new Response(JSON.stringify({ uploadUrl: 'https://bucket/put', storageKey: 'projects/p1/source/d/u-f.mov', originalName: 'f.mov' }), { status: 200 })
+    }
+    if (url.startsWith('https://bucket/')) return new Response(null, { status: 200 })
+    if (url.endsWith('/register')) {
+      return new Response(JSON.stringify({ url: '/api/uploads/projects/p1/source/d/u-f.mov' }), { status: 200 })
+    }
+    return new Response(null, { status: 404 })
+  }))
+  return calls
+}
+
+describe('presignedUpload threads projectId', () => {
+  it('sends projectId in BOTH the prepare and register bodies', async () => {
+    const calls = mockFetchSequence()
+    const file = new File([new Uint8Array([1, 2, 3])], 'f.mov', { type: 'video/quicktime' })
+    const url = await presignedUpload(file, '/api/uploads/source', 'p1')
+    expect(url).toBe('/api/uploads/projects/p1/source/d/u-f.mov')
+    const prep = calls.find((c) => c.url.endsWith('/prepare'))!.body as Record<string, unknown>
+    const reg = calls.find((c) => c.url.endsWith('/register'))!.body as Record<string, unknown>
+    expect(prep.projectId).toBe('p1')
+    expect(prep.filename).toBe('f.mov')
+    expect(reg.projectId).toBe('p1')
+    expect(reg.storageKey).toBe('projects/p1/source/d/u-f.mov')
+  })
+
+  it('throws when projectId is empty (defensive — uploads are always project-scoped)', async () => {
+    mockFetchSequence()
+    const file = new File([new Uint8Array([1])], 'f.mov', { type: 'video/quicktime' })
+    await expect(presignedUpload(file, '/api/uploads/source', '')).rejects.toThrow(/projectId/)
+  })
+})
+
 describe('isUploadServePath', () => {
   it('matches persisted relative /api/uploads/ serve paths', () => {
     expect(isUploadServePath('/api/uploads/voice/2026-06-12/x-original-77-79.wav')).toBe(true)
@@ -65,7 +105,7 @@ describe('presignedUpload', () => {
       .mockResolvedValueOnce(ok({ url: 'https://cdn/source/clip.mp4' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const url = await presignedUpload(file, '/api/uploads/source')
+    const url = await presignedUpload(file, '/api/uploads/source', 'proj-1')
     expect(url).toBe('https://cdn/source/clip.mp4')
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
@@ -85,19 +125,19 @@ describe('presignedUpload', () => {
       .mockResolvedValueOnce(ok({ record: { url: 'https://cdn/nested' } }))
     vi.stubGlobal('fetch', fetchMock)
 
-    expect(await presignedUpload(file, '/api/uploads/audio')).toBe('https://cdn/nested')
+    expect(await presignedUpload(file, '/api/uploads/audio', 'proj-1')).toBe('https://cdn/nested')
   })
 
   it('throws when prepare fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(fail(403)))
-    await expect(presignedUpload(file, '/api/uploads/source')).rejects.toThrow(
+    await expect(presignedUpload(file, '/api/uploads/source', 'proj-1')).rejects.toThrow(
       /prepare failed \(403\)/,
     )
   })
 
   it('throws when prepare omits uploadUrl/storageKey', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(ok({ storageKey: 'k' })))
-    await expect(presignedUpload(file, '/api/uploads/source')).rejects.toThrow(
+    await expect(presignedUpload(file, '/api/uploads/source', 'proj-1')).rejects.toThrow(
       /missing uploadUrl\/storageKey/,
     )
   })
@@ -108,7 +148,7 @@ describe('presignedUpload', () => {
       .mockResolvedValueOnce(ok({ uploadUrl: 'https://bucket/put', storageKey: 'k' }))
       .mockResolvedValueOnce(fail(413))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(presignedUpload(file, '/api/uploads/source')).rejects.toThrow(
+    await expect(presignedUpload(file, '/api/uploads/source', 'proj-1')).rejects.toThrow(
       /Bucket upload failed \(413\)/,
     )
   })
@@ -120,7 +160,7 @@ describe('presignedUpload', () => {
       .mockResolvedValueOnce(ok({}))
       .mockResolvedValueOnce(ok({}))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(presignedUpload(file, '/api/uploads/source')).rejects.toThrow(
+    await expect(presignedUpload(file, '/api/uploads/source', 'proj-1')).rejects.toThrow(
       /missing url/,
     )
   })

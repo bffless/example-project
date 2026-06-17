@@ -13,7 +13,10 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
+import type { RootState } from './index'
 import { STAGE_DEFS, PER_VIDEO_STAGES, type StageId, type StageStatus } from '../lib/pipeline'
+import { nextUntitledName, type ProjectMeta } from '../lib/projects'
+import { reconcileIndex } from '../lib/projectSync'
 import type { Scene } from '../lib/scenes'
 import type { AutoBuildRun } from '../lib/autoBuild'
 import type { VideoDescription } from '../lib/describe'
@@ -112,32 +115,24 @@ const makeSource = (p: { id: string; fileName: string; duration: number; order: 
   stageProgress: freshSourceProgress(),
 })
 
-export type StudioState = {
+/**
+ * One project's worth of durable working state — what used to be the entire
+ * top-level studio slice when there was a single implicit project. Story 11a
+ * turns the slice into a keyed collection of these (see `StudioState`), one per
+ * project, with reducers re-pointed onto the active project via `active(state)`.
+ * `savedVoices` is deliberately NOT here — it's a shared user library hoisted to
+ * the root.
+ */
+export type ProjectWorkingState = {
   stageProgress: StageProgressMap
-  /**
-   * Whether the producer has hopped back to Prep after finishing it. Persisted
-   * (not transient React state) so a hard reload keeps you on Prep instead of
-   * snapping forward to Build: `ready` alone can't tell "prep is done, show
-   * Build" from "prep is done but I'm currently revisiting it". Reset by
-   * resetStudio (Start over / fresh import).
-   */
-  revisitPrep: boolean
-  /**
-   * Whether the producer has moved on to the Export step. Like `revisitPrep`, an
-   * explicit navigation flag (persisted): Build doesn't auto-jump to Export when
-   * the last scene is built — the user clicks "Continue to export". Only takes
-   * effect once every scene is built (see `displayPhase`), so re-building a scene
-   * drops them back to Build. Reset by resetStudio.
-   */
-  inExport: boolean
   /**
    * Whether the producer has clicked "Continue" to reveal the global plan
    * (thumbnails → voice → director) after their source videos finished
    * processing. Until then the prep view shows only the source queue — the plan
    * stays hidden so it doesn't get ahead of the first job (find & process your
-   * clips). Persisted so the reveal survives a reload; reset by resetStudio.
-   * (A plan that's already underway shows regardless — see `planStarted` in the
-   * page — so this only gates the not-yet-started case.)
+   * clips). Persisted so the reveal survives a reload; cleared when the project's
+   * working state is reset. (A plan that's already underway shows regardless —
+   * see `planStarted` in the page — so this only gates the not-yet-started case.)
    */
   planRevealed: boolean
   /** Whether transcription should run speaker **diarization** (story 10e). Off by
@@ -180,8 +175,6 @@ export type StudioState = {
   directorPromptJobId: string | null
   /** The narration voice (cloned, reused, or preset), set in the clone prep step. */
   voice: VoiceChoice | null
-  /** Cloned voice ids the user has minted/saved, reusable without re-cloning. */
-  savedVoices: SavedVoice[]
   selectedId: string | null
   /** Source clip duration in seconds (from the <video> metadata). */
   duration: number
@@ -198,7 +191,7 @@ export type StudioState = {
    * The Export page's generated title + summary (from `/api/describe`), plus the
    * final script it was written from — so we can show it cached and only
    * regenerate when the script actually changes. Null until generated; the title
-   * is producer-editable. Reset by resetStudio.
+   * is producer-editable. Cleared when the project's working state is reset.
    */
   description: (VideoDescription & { script: string }) | null
   /**
@@ -221,33 +214,59 @@ export type StudioState = {
   autoBuild: AutoBuildRun
 }
 
+/** A brand-new, empty project's working state (every prep stage pending). */
+export function freshWorkingState(): ProjectWorkingState {
+  return {
+    stageProgress: freshProgress(),
+    planRevealed: false,
+    diarize: false,
+    scenes: [],
+    sourceUrl: null,
+    audioUrl: null,
+    audioPeaks: [],
+    contactSheets: [],
+    words: [],
+    synopsis: null,
+    direction: '',
+    scenesJobId: null,
+    directorPromptJobId: null,
+    voice: null,
+    selectedId: null,
+    duration: 0,
+    fileName: null,
+    finalCutUrl: null,
+    description: null,
+    sources: [],
+    cast: [],
+    speakerAssignments: {},
+    autoBuild: { status: 'idle', currentSceneId: null, currentStepId: null, error: null },
+  }
+}
+
+/**
+ * The studio slice is now a keyed collection of projects (story 11a). `index`
+ * holds the lightweight per-project metadata (name, phase, thumbnail) for the
+ * dashboard; `working` holds the heavy working state keyed by the same id;
+ * `activeProjectId` selects which one the project-scoped reducers mutate.
+ * `savedVoices` is hoisted to the root — a shared user library across projects.
+ */
+export type StudioState = {
+  index: Record<string, ProjectMeta>
+  working: Record<string, ProjectWorkingState>
+  activeProjectId: string | null
+  savedVoices: SavedVoice[]
+}
+
 const initialState: StudioState = {
-  stageProgress: freshProgress(),
-  revisitPrep: false,
-  inExport: false,
-  planRevealed: false,
-  diarize: false,
-  scenes: [],
-  sourceUrl: null,
-  audioUrl: null,
-  audioPeaks: [],
-  contactSheets: [],
-  words: [],
-  synopsis: null,
-  direction: '',
-  scenesJobId: null,
-  directorPromptJobId: null,
-  voice: null,
+  index: {},
+  working: {},
+  activeProjectId: null,
   savedVoices: [],
-  selectedId: null,
-  duration: 0,
-  fileName: null,
-  finalCutUrl: null,
-  description: null,
-  sources: [],
-  cast: [],
-  speakerAssignments: {},
-  autoBuild: { status: 'idle', currentSceneId: null, currentStepId: null, error: null },
+}
+
+/** The active project's working state, or undefined when none is selected. */
+function active(state: StudioState): ProjectWorkingState | undefined {
+  return state.activeProjectId ? state.working[state.activeProjectId] : undefined
 }
 
 const defaultPersonName = (i: number) => (i === 0 ? 'Me' : `Person ${i + 1}`)
@@ -275,73 +294,81 @@ const studioSlice = createSlice({
   initialState,
   reducers: {
     patchStage(state, action: PayloadAction<{ id: StageId; patch: Partial<StageProgress> }>) {
-      const prev = state.stageProgress[action.payload.id] ?? { status: 'pending' }
-      state.stageProgress[action.payload.id] = { ...prev, ...action.payload.patch }
+      const w = active(state); if (!w) return
+      const prev = w.stageProgress[action.payload.id] ?? { status: 'pending' }
+      w.stageProgress[action.payload.id] = { ...prev, ...action.payload.patch }
     },
     /** Mark whichever stage is currently `active` as errored (used on a thrown step). */
     failActiveStage(state, action: PayloadAction<string>) {
+      const w = active(state); if (!w) return
       for (const def of STAGE_DEFS) {
-        if (state.stageProgress[def.id]?.status === 'active') {
-          state.stageProgress[def.id] = { status: 'error', detail: action.payload }
+        if (w.stageProgress[def.id]?.status === 'active') {
+          w.stageProgress[def.id] = { status: 'error', detail: action.payload }
           break
         }
       }
     },
-    /** Toggle the Prep⇄Build view after prep is complete (persisted, see above). */
-    setRevisitPrep(state, action: PayloadAction<boolean>) {
-      state.revisitPrep = action.payload
-    },
-    /** Toggle the Build⇄Export view once all scenes are built (persisted, see above). */
-    setInExport(state, action: PayloadAction<boolean>) {
-      state.inExport = action.payload
-    },
     /** Reveal the global plan once sources are processed (see `planRevealed`). */
     setPlanRevealed(state, action: PayloadAction<boolean>) {
-      state.planRevealed = action.payload
+      const w = active(state); if (!w) return
+      w.planRevealed = action.payload
     },
     /** Toggle speaker diarization for transcription (story 10e). */
     setDiarize(state, action: PayloadAction<boolean>) {
-      state.diarize = action.payload
+      const w = active(state); if (!w) return
+      w.diarize = action.payload
     },
     setScenes(state, action: PayloadAction<Scene[]>) {
-      state.scenes = action.payload
+      const w = active(state); if (!w) return
+      w.scenes = action.payload
     },
     patchScene(state, action: PayloadAction<{ id: string; patch: Partial<Scene> }>) {
-      const scene = state.scenes.find((s) => s.id === action.payload.id)
+      const w = active(state); if (!w) return
+      const scene = w.scenes.find((s) => s.id === action.payload.id)
       if (scene) Object.assign(scene, action.payload.patch)
     },
     setSourceUrl(state, action: PayloadAction<string | null>) {
-      state.sourceUrl = action.payload
+      const w = active(state); if (!w) return
+      w.sourceUrl = action.payload
     },
     setAudioUrl(state, action: PayloadAction<string | null>) {
-      state.audioUrl = action.payload
+      const w = active(state); if (!w) return
+      w.audioUrl = action.payload
     },
     setAudioPeaks(state, action: PayloadAction<number[]>) {
-      state.audioPeaks = action.payload
+      const w = active(state); if (!w) return
+      w.audioPeaks = action.payload
     },
     setContactSheets(state, action: PayloadAction<ContactSheet[]>) {
-      state.contactSheets = action.payload
+      const w = active(state); if (!w) return
+      w.contactSheets = action.payload
     },
     setWords(state, action: PayloadAction<TranscriptWord[]>) {
-      state.words = action.payload
+      const w = active(state); if (!w) return
+      w.words = action.payload
     },
     setSynopsis(state, action: PayloadAction<string | null>) {
-      state.synopsis = action.payload
+      const w = active(state); if (!w) return
+      w.synopsis = action.payload
     },
     /** The creator's master-director prompt (story 03l) — see `direction` above. */
     setDirection(state, action: PayloadAction<string>) {
-      state.direction = action.payload
+      const w = active(state); if (!w) return
+      w.direction = action.payload
     },
     /** The in-flight director job id (story 03f). Null clears it on terminal status. */
     setScenesJobId(state, action: PayloadAction<string | null>) {
-      state.scenesJobId = action.payload
+      const w = active(state); if (!w) return
+      w.scenesJobId = action.payload
     },
     /** Pointer to the last successful director job's row (story 03m). */
     setDirectorPromptJobId(state, action: PayloadAction<string | null>) {
-      state.directorPromptJobId = action.payload
+      const w = active(state); if (!w) return
+      w.directorPromptJobId = action.payload
     },
     setVoice(state, action: PayloadAction<VoiceChoice | null>) {
-      state.voice = action.payload
+      const w = active(state); if (!w) return
+      w.voice = action.payload
     },
     /** Remember a cloned/known voice id (newest first, deduped by id). */
     addSavedVoice(state, action: PayloadAction<SavedVoice>) {
@@ -355,139 +382,213 @@ const studioSlice = createSlice({
     removeSavedVoice(state, action: PayloadAction<string>) {
       state.savedVoices = state.savedVoices.filter((v) => v.voiceId !== action.payload)
     },
+    /** Mint a new project (id + timestamp minted by the caller, kept out of the
+     *  reducer so it stays pure), name it the next free "Untitled project", seed
+     *  its working state, and make it active. */
+    createProject(state, action: PayloadAction<{ id: string; now: number }>) {
+      const { id, now } = action.payload
+      const name = nextUntitledName(Object.values(state.index).map((m) => m.name))
+      state.index[id] = { id, name, createdAt: now, updatedAt: now, phase: 'import', thumbnailUrl: null }
+      state.working[id] = freshWorkingState()
+      state.activeProjectId = id
+    },
+    /** Select an existing project (no-op if it has no working state). */
+    openProject(state, action: PayloadAction<string>) {
+      if (state.working[action.payload]) state.activeProjectId = action.payload
+    },
+    /** Return to the dashboard (no project active). */
+    closeProject(state) {
+      state.activeProjectId = null
+    },
+    renameProject(state, action: PayloadAction<{ id: string; name: string; now: number }>) {
+      const meta = state.index[action.payload.id]
+      if (!meta) return
+      meta.name = action.payload.name
+      meta.updatedAt = action.payload.now
+    },
+    deleteProject(state, action: PayloadAction<string>) {
+      delete state.index[action.payload]
+      delete state.working[action.payload]
+      if (state.activeProjectId === action.payload) state.activeProjectId = null
+    },
+    /** Reset the active project's working state back to fresh (keeps it in the list). */
+    resetProject(state) {
+      const id = state.activeProjectId
+      if (!id) return
+      state.working[id] = freshWorkingState()
+    },
+    /** Internal: applied by the projectMetaSync middleware. Not for direct UI use. */
+    _syncMeta(state, action: PayloadAction<{ id: string; phase: ProjectMeta['phase']; thumbnailUrl: string | null; now: number }>) {
+      const meta = state.index[action.payload.id]
+      if (!meta) return
+      meta.phase = action.payload.phase
+      meta.thumbnailUrl = action.payload.thumbnailUrl
+      meta.updatedAt = action.payload.now
+    },
     setSelected(state, action: PayloadAction<string | null>) {
-      state.selectedId = action.payload
+      const w = active(state); if (!w) return
+      w.selectedId = action.payload
     },
     setDuration(state, action: PayloadAction<number>) {
-      state.duration = action.payload
+      const w = active(state); if (!w) return
+      w.duration = action.payload
     },
     setFileName(state, action: PayloadAction<string | null>) {
-      state.fileName = action.payload
+      const w = active(state); if (!w) return
+      w.fileName = action.payload
     },
     /** The saved final cut's serve path (story 05). Re-saving overwrites it;
      *  clearing (null) drops the saved reference without touching anything else. */
     setFinalCutUrl(state, action: PayloadAction<string | null>) {
-      state.finalCutUrl = action.payload
+      const w = active(state); if (!w) return
+      w.finalCutUrl = action.payload
     },
     /** Store the Export page's generated title + summary and the script it came
      *  from (so we know when it's stale). */
     setDescription(state, action: PayloadAction<VideoDescription & { script: string }>) {
-      state.description = action.payload
+      const w = active(state); if (!w) return
+      w.description = action.payload
     },
     /** Producer edit of the recommended title (no-op if nothing's generated yet). */
     setDescriptionTitle(state, action: PayloadAction<string>) {
-      if (state.description) state.description.title = action.payload
+      const w = active(state); if (!w) return
+      if (w.description) w.description.title = action.payload
     },
     /** Append a new source video with fresh per-video prep progress (story 09a). */
     addSource(state, action: PayloadAction<{ id: string; fileName: string; duration: number }>) {
-      state.sources.push(makeSource({ ...action.payload, order: state.sources.length }))
+      const w = active(state); if (!w) return
+      w.sources.push(makeSource({ ...action.payload, order: w.sources.length }))
     },
     /** Shallow-merge `patch` into the source identified by `id`. */
     patchSource(state, action: PayloadAction<{ id: string; patch: Partial<VideoSource> }>) {
-      const src = state.sources.find((s) => s.id === action.payload.id)
+      const w = active(state); if (!w) return
+      const src = w.sources.find((s) => s.id === action.payload.id)
       if (src) Object.assign(src, action.payload.patch)
     },
     /** Merge `patch` into one prep stage on a specific source. */
     patchSourceStage(state, action: PayloadAction<{ id: string; stage: StageId; patch: Partial<StageProgress> }>) {
-      const src = state.sources.find((s) => s.id === action.payload.id)
+      const w = active(state); if (!w) return
+      const src = w.sources.find((s) => s.id === action.payload.id)
       if (!src) return
       const prev = src.stageProgress[action.payload.stage] ?? { status: 'pending' }
       src.stageProgress[action.payload.stage] = { ...prev, ...action.payload.patch }
     },
     /** Remove a source by id and renumber `order` on the remaining entries. */
     removeSource(state, action: PayloadAction<string>) {
-      state.sources = state.sources.filter((s) => s.id !== action.payload).map((s, i) => ({ ...s, order: i }))
-      delete state.speakerAssignments[action.payload]
+      const w = active(state); if (!w) return
+      w.sources = w.sources.filter((s) => s.id !== action.payload).map((s, i) => ({ ...s, order: i }))
+      delete w.speakerAssignments[action.payload]
     },
     /** Move a source from index `from` to index `to` and renumber `order`. */
     reorderSources(state, action: PayloadAction<{ from: number; to: number }>) {
+      const w = active(state); if (!w) return
       const { from, to } = action.payload
-      if (from < 0 || to < 0 || from >= state.sources.length || to >= state.sources.length) return
-      const [moved] = state.sources.splice(from, 1)
-      state.sources.splice(to, 0, moved)
-      state.sources = state.sources.map((s, i) => ({ ...s, order: i }))
+      if (from < 0 || to < 0 || from >= w.sources.length || to >= w.sources.length) return
+      const [moved] = w.sources.splice(from, 1)
+      w.sources.splice(to, 0, moved)
+      w.sources = w.sources.map((s, i) => ({ ...s, order: i }))
     },
     /** Grow/shrink the cast to exactly `n` people (min 1). New people get a default
      *  name + no voice; removing trims from the end and drops their assignments. */
     setPeopleCount(state, action: PayloadAction<number>) {
+      const w = active(state); if (!w) return
       const n = Math.max(1, Math.floor(action.payload))
-      while (state.cast.length < n)
-        state.cast.push({ id: nextPersonId(state.cast), name: defaultPersonName(state.cast.length), voice: null })
-      if (state.cast.length > n) {
-        const removed = state.cast.slice(n).map((p) => p.id)
-        state.cast = state.cast.slice(0, n)
-        for (const vid of Object.keys(state.speakerAssignments))
-          for (const label of Object.keys(state.speakerAssignments[vid]))
-            if (removed.includes(state.speakerAssignments[vid][label]))
-              delete state.speakerAssignments[vid][label]
+      while (w.cast.length < n)
+        w.cast.push({ id: nextPersonId(w.cast), name: defaultPersonName(w.cast.length), voice: null })
+      if (w.cast.length > n) {
+        const removed = w.cast.slice(n).map((p) => p.id)
+        w.cast = w.cast.slice(0, n)
+        for (const vid of Object.keys(w.speakerAssignments))
+          for (const label of Object.keys(w.speakerAssignments[vid]))
+            if (removed.includes(w.speakerAssignments[vid][label]))
+              delete w.speakerAssignments[vid][label]
       }
-      state.voice = state.cast[0]?.voice ?? null
+      w.voice = w.cast[0]?.voice ?? null
     },
     renamePerson(state, action: PayloadAction<{ id: string; name: string }>) {
-      const p = state.cast.find((x) => x.id === action.payload.id)
+      const w = active(state); if (!w) return
+      const p = w.cast.find((x) => x.id === action.payload.id)
       if (p) p.name = action.payload.name
     },
     setPersonVoice(state, action: PayloadAction<{ id: string; voice: VoiceChoice | null }>) {
-      const p = state.cast.find((x) => x.id === action.payload.id)
+      const w = active(state); if (!w) return
+      const p = w.cast.find((x) => x.id === action.payload.id)
       if (!p) return
       p.voice = action.payload.voice
-      if (state.cast[0]?.id === p.id) state.voice = p.voice // legacy mirror
+      if (w.cast[0]?.id === p.id) w.voice = p.voice // legacy mirror
     },
     removePerson(state, action: PayloadAction<string>) {
-      state.cast = state.cast.filter((p) => p.id !== action.payload)
-      if (state.cast.length === 0)
-        state.cast = [{ id: nextPersonId(state.cast), name: defaultPersonName(0), voice: null }]
-      for (const vid of Object.keys(state.speakerAssignments))
-        for (const label of Object.keys(state.speakerAssignments[vid]))
-          if (state.speakerAssignments[vid][label] === action.payload)
-            delete state.speakerAssignments[vid][label]
-      state.voice = state.cast[0]?.voice ?? null
+      const w = active(state); if (!w) return
+      w.cast = w.cast.filter((p) => p.id !== action.payload)
+      if (w.cast.length === 0)
+        w.cast = [{ id: nextPersonId(w.cast), name: defaultPersonName(0), voice: null }]
+      for (const vid of Object.keys(w.speakerAssignments))
+        for (const label of Object.keys(w.speakerAssignments[vid]))
+          if (w.speakerAssignments[vid][label] === action.payload)
+            delete w.speakerAssignments[vid][label]
+      w.voice = w.cast[0]?.voice ?? null
     },
     assignSpeaker(state, action: PayloadAction<{ videoId: string; label: string; personId: string }>) {
+      const w = active(state); if (!w) return
       const { videoId, label, personId } = action.payload
-      ;(state.speakerAssignments[videoId] ??= {})[label] = personId
+      ;(w.speakerAssignments[videoId] ??= {})[label] = personId
     },
     /** Begin / restart an auto-build run; clears any prior halt error. */
     startAutoBuild(state) {
-      state.autoBuild.status = 'running'
-      state.autoBuild.error = null
+      const w = active(state); if (!w) return
+      w.autoBuild.status = 'running'
+      w.autoBuild.error = null
     },
     /** Pause after the current step finishes (only meaningful while running). */
     pauseAutoBuild(state) {
-      if (state.autoBuild.status === 'running') state.autoBuild.status = 'paused'
+      const w = active(state); if (!w) return
+      if (w.autoBuild.status === 'running') w.autoBuild.status = 'paused'
     },
     /** Resume a paused or halted run; clears the error. */
     resumeAutoBuild(state) {
-      if (state.autoBuild.status === 'paused' || state.autoBuild.status === 'halted') {
-        state.autoBuild.status = 'running'
-        state.autoBuild.error = null
+      const w = active(state); if (!w) return
+      if (w.autoBuild.status === 'paused' || w.autoBuild.status === 'halted') {
+        w.autoBuild.status = 'running'
+        w.autoBuild.error = null
       }
     },
     /** End the run, leaving completed scene work intact. */
     stopAutoBuild(state) {
-      state.autoBuild = { status: 'idle', currentSceneId: null, currentStepId: null, error: null }
+      const w = active(state); if (!w) return
+      w.autoBuild = { status: 'idle', currentSceneId: null, currentStepId: null, error: null }
     },
     /** Stop on an error, recording the message and leaving the pointer in place. */
     haltAutoBuild(state, action: PayloadAction<string>) {
-      state.autoBuild.status = 'halted'
-      state.autoBuild.error = action.payload
+      const w = active(state); if (!w) return
+      w.autoBuild.status = 'halted'
+      w.autoBuild.error = action.payload
     },
     /** The run finished every scene (and the final stitch). */
     completeAutoBuild(state) {
-      state.autoBuild.status = 'done'
+      const w = active(state); if (!w) return
+      w.autoBuild.status = 'done'
     },
     /** Move the run pointer to the step currently executing. */
     setAutoPointer(state, action: PayloadAction<{ sceneId: string | null; stepId: AutoBuildRun['currentStepId'] }>) {
-      state.autoBuild.currentSceneId = action.payload.sceneId
-      state.autoBuild.currentStepId = action.payload.stepId
+      const w = active(state); if (!w) return
+      w.autoBuild.currentSceneId = action.payload.sceneId
+      w.autoBuild.currentStepId = action.payload.stepId
     },
-    /**
-     * Wipe everything back to a clean import — used by "Start over". Keeps the
-     * `savedVoices` library: those cloned ids cost real money and are reusable
-     * across clips/sessions, so starting a new project shouldn't lose them.
-     */
-    resetStudio(state) {
-      return { ...initialState, stageProgress: freshProgress(), savedVoices: state.savedVoices }
+    /** Server sync: replace the working state for a project with the server copy. */
+    hydrateProject(state, action: PayloadAction<{ id: string; working: ProjectWorkingState }>) {
+      state.working[action.payload.id] = action.payload.working
+    },
+    /** Server sync: keep only the given project's working state, dropping every
+     *  other project's working (index/meta untouched). Idempotent — used on
+     *  ENTERING a project so eviction is StrictMode-safe (mount→unmount→mount). */
+    evictOthers(state, action: PayloadAction<string>) {
+      for (const id of Object.keys(state.working)) {
+        if (id !== action.payload) delete state.working[id]
+      }
+    },
+    /** Server sync: merge server project metas into the local index. */
+    reconcileServerIndex(state, action: PayloadAction<ProjectMeta[]>) {
+      state.index = reconcileIndex(state.index, action.payload)
     },
   },
 })
@@ -495,8 +596,6 @@ const studioSlice = createSlice({
 export const {
   patchStage,
   failActiveStage,
-  setRevisitPrep,
-  setInExport,
   setPlanRevealed,
   setDiarize,
   setScenes,
@@ -513,6 +612,13 @@ export const {
   setVoice,
   addSavedVoice,
   removeSavedVoice,
+  createProject,
+  openProject,
+  closeProject,
+  renameProject,
+  deleteProject,
+  resetProject,
+  _syncMeta, // internal: dispatched by the projectMetaSync middleware, not for direct UI use
   setSelected,
   setDuration,
   setFileName,
@@ -536,7 +642,21 @@ export const {
   haltAutoBuild,
   completeAutoBuild,
   setAutoPointer,
-  resetStudio,
+  hydrateProject,
+  evictOthers,
+  reconcileServerIndex,
 } = studioSlice.actions
+
+/** Frozen empty working state — a STABLE reference so useSelector reads don't
+ *  thrash when no project is open. */
+export const EMPTY_WORKING: ProjectWorkingState = Object.freeze(freshWorkingState()) as ProjectWorkingState
+
+export const selectActive = (s: RootState): ProjectWorkingState =>
+  s.studio.activeProjectId ? (s.studio.working[s.studio.activeProjectId] ?? EMPTY_WORKING) : EMPTY_WORKING
+
+export const selectActiveProjectId = (s: RootState): string | null => s.studio.activeProjectId
+
+export const selectProjectList = (s: RootState): ProjectMeta[] =>
+  Object.values(s.studio.index).sort((a, b) => b.updatedAt - a.updatedAt)
 
 export default studioSlice.reducer

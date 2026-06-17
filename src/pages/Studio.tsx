@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { addSource, reorderSources, removeSource, setDiarize, setDirection, setDuration, setFileName, setInExport, setPlanRevealed, setRevisitPrep } from '../store/studioSlice'
+import { addSource, reorderSources, removeSource, selectActive, setDiarize, setDirection, setDuration, setFileName, setPlanRevealed } from '../store/studioSlice'
+import type { UrlPhase } from '../lib/studioRoute'
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { MediaImport } from '../components/Studio/MediaImport'
@@ -29,6 +31,7 @@ import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { ExportSummary } from '../components/Studio/ExportSummary'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
+import { useProjectAutosave } from '../components/Studio/useProjectAutosave'
 import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
 import { useAutoBuild } from '../components/Studio/useAutoBuild'
 import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMutation } from '../store/studioApi'
@@ -36,7 +39,8 @@ import { buildSearchRequest, toSearchHits } from '../lib/search'
 import { skipToken } from '@reduxjs/toolkit/query'
 import { GLOBAL_STAGES, studioPhase, type StudioPhase } from '../lib/pipeline'
 
-export function Studio() {
+export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhase }) {
+  const navigate = useNavigate()
   // The in-memory clip is transient — never persisted. After a hard reload it's
   // gone, but the persisted serve reference (`pipe.sourceUrl`) and all pipeline
   // state come back. When a remaining browser step needs the raw bytes we pull
@@ -51,28 +55,34 @@ export function Studio() {
   // Free-text direction the user hands the master director (e.g. "keep the demo
   // at 12:30, make the intro punchy"). Persisted in the studio slice (story 03l)
   // so Build forwards it to per-scene refines long after prep, across reloads.
-  const direction = useAppSelector((s) => s.studio.direction)
+  const direction = useAppSelector((s) => selectActive(s).direction)
   // The voice step's resource is revealed by clicking its board action (rather
   // than running a pipeline inline) — and stays open once a voice exists.
   const [showVoiceStudio, setShowVoiceStudio] = useState(false)
   const dispatch = useAppDispatch()
-  const duration = useAppSelector((s) => s.studio.duration)
-  const fileName = useAppSelector((s) => s.studio.fileName)
-  // Once prep is complete the workspace shows Build. This lets the user hop back
-  // to Prep (to tweak the director, re-pick a voice, etc.) without losing any
-  // work — a view toggle that touches no pipeline state. Persisted in Redux (not
-  // local useState) so a hard reload while revisiting Prep keeps you on Prep
-  // rather than snapping forward to Build.
-  const revisitPrep = useAppSelector((s) => s.studio.revisitPrep)
-  const inExport = useAppSelector((s) => s.studio.inExport)
+
+  // Drop the previous project's in-memory clip bytes whenever we switch projects.
+  // These transient buffers (`file`/`files`) aren't keyed by project, so without
+  // this a leftover clip from project A would make project B skip its import
+  // screen and preview A's video. Persisted per-project source refs live in Redux
+  // and the rehydrate effect repopulates `file` for whichever project is opened.
+  const clearTransientSource = () => {
+    setFile(null)
+    setFiles(new Map())
+    setRestoreError(null)
+  }
+
+  const duration = useAppSelector((s) => selectActive(s).duration)
+  const fileName = useAppSelector((s) => selectActive(s).fileName)
   // Whether the producer has clicked "Continue" to reveal the global plan
   // (thumbnails → voice → director). Until then the prep view shows only the
   // source queue — find & process your clips first; the plan comes after.
-  const planRevealed = useAppSelector((s) => s.studio.planRevealed)
+  const planRevealed = useAppSelector((s) => selectActive(s).planRevealed)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const pipe = useScenePipeline()
   const auto = useAutoBuild(pipe)
+  const { status: saveStatus, savedAt } = useProjectAutosave(projectId)
   const [autoMode, setAutoMode] = useState(() => auto.run.status !== 'idle')
 
   // The Build scene tabs are sticky under the global header (`h-14` = 3.5rem).
@@ -164,11 +174,9 @@ export function Studio() {
   }
 
   function startOver() {
-    setFile(null)
-    setFiles(new Map())
-    setRestoreError(null)
-    // pipe.reset() dispatches resetStudio, which already clears revisitPrep.
-    pipe.reset()
+    clearTransientSource()        // same project, no remount → clear transient bytes manually
+    pipe.reset()                  // dispatches resetProject (fresh working state)
+    navigate(`/studio/project/${projectId}/prep`)  // reset project's resume phase
   }
 
   /**
@@ -406,20 +414,16 @@ export function Studio() {
     [searchTranscript, pipe.words, pipe.scenes, duration],
   )
 
-  const phase = studioPhase({
+  const stepperPhase = studioPhase({
     hasSource,
     ready: pipe.ready,
     allBuilt: pipe.allBuilt,
   })
 
-  // Show the prep view while prep is unfinished OR when the user has chosen to
-  // revisit it after completing it. The top stepper then reflects Prep as current
-  // and lets them jump back to Build.
-  const inPrep = !pipe.ready || revisitPrep
-  // Build doesn't auto-advance to Export when the last scene is built — the user
-  // clicks "Continue to export" (`inExport`). It only takes effect once everything
-  // is built, so re-building a scene drops `allBuilt` and bounces back to Build.
-  const displayPhase: StudioPhase = inPrep ? 'prep' : pipe.allBuilt && inExport ? 'export' : 'build'
+  // Phase is now driven entirely by the URL (the route guard validated it against
+  // the project's progress). The workspace just renders what the prop says.
+  const displayPhase: StudioPhase = phase
+  const inPrep = phase === 'prep'
   const builtCount = pipe.scenes.filter((s) => s.status === 'built').length
   // The global plan (thumbnails → voice → director) is held back until the
   // producer's source clips are processed AND they click "Continue" — so the
@@ -477,29 +481,18 @@ export function Studio() {
       : ['prep', 'build']
     : []
   function navigatePhase(p: StudioPhase) {
-    if (p === 'prep') dispatch(setRevisitPrep(true))
-    else if (p === 'build') {
-      dispatch(setRevisitPrep(false))
-      dispatch(setInExport(false))
-    } else if (p === 'export') {
-      dispatch(setRevisitPrep(false))
-      dispatch(setInExport(true))
-    }
+    navigate(`/studio/project/${projectId}/${p}`)
   }
 
-  // Cast-scoped voice wrappers: keep the producer on Prep when a voice is set
-  // (same as the single-voice path above) so completing the cast step doesn't
-  // auto-jump to Build.
+  // Cast-scoped voice wrappers: just drive the pipe method. Phase is URL-driven
+  // now, so setting a voice no longer needs to pin the view to Prep.
   function castCloneForPerson(personId: string, blob: Blob) {
-    dispatch(setRevisitPrep(true))
     void pipe.cloneForPerson(personId, blob)
   }
   function castPickPresetForPerson(personId: string, voiceId: string) {
-    dispatch(setRevisitPrep(true))
     pipe.pickPresetForPerson(personId, voiceId)
   }
   function castReuseForPerson(personId: string, voiceId: string) {
-    dispatch(setRevisitPrep(true))
     pipe.reuseForPerson(personId, voiceId)
   }
 
@@ -547,7 +540,7 @@ export function Studio() {
       >
         {pipe.sources.length === 0 && !hasPersisted && !file ? (
           <div className="flex flex-col gap-8">
-            <StudioStepper phase={phase} />
+            <StudioStepper phase={stepperPhase} />
             <MediaImport onSelect={onImport} />
           </div>
         ) : (
@@ -578,13 +571,18 @@ export function Studio() {
                       : 'Run each prep step below, in order.'}
               </p>
               <div className="flex items-center gap-2">
+                {saveStatus !== 'idle' && (
+                  <span className="text-[12px] text-ink-soft" aria-live="polite">
+                    {saveLabel(saveStatus, savedAt)}
+                  </span>
+                )}
                 {/* Once prep is done, Build can hop back to Prep (no work lost).
                     Going forward to Build is the bottom "Continue" CTA. */}
-                {pipe.ready && !revisitPrep && (
+                {pipe.ready && phase !== 'prep' && (
                   <button
                     type="button"
                     className="pill-ghost"
-                    onClick={() => dispatch(setRevisitPrep(true))}
+                    onClick={() => navigatePhase('prep')}
                   >
                     ← Back to prep
                   </button>
@@ -593,7 +591,15 @@ export function Studio() {
                   type="button"
                   className="pill-ghost"
                   disabled={pipe.running || rehydrating}
-                  onClick={startOver}
+                  onClick={() => navigate('/studio')}
+                >
+                  ← Projects
+                </button>
+                <button
+                  type="button"
+                  className="pill-ghost"
+                  disabled={pipe.running || rehydrating}
+                  onClick={() => { if (confirm('Start this project over? Clears its prep and scenes.')) startOver() }}
                 >
                   Start over
                 </button>
@@ -692,10 +698,7 @@ export function Studio() {
                     <button
                       type="button"
                       className="pill-cta"
-                      onClick={() => {
-                        dispatch(setRevisitPrep(false))
-                        dispatch(setInExport(false))
-                      }}
+                      onClick={() => navigatePhase('build')}
                     >
                       Continue to build →
                     </button>
@@ -714,7 +717,7 @@ export function Studio() {
                   <button
                     type="button"
                     className="pill-ghost"
-                    onClick={() => dispatch(setInExport(false))}
+                    onClick={() => navigatePhase('build')}
                   >
                     ← Back to build
                   </button>
@@ -890,10 +893,7 @@ export function Studio() {
                     type="button"
                     className="pill-cta"
                     disabled={!pipe.allBuilt}
-                    onClick={() => {
-                      dispatch(setRevisitPrep(false))
-                      dispatch(setInExport(true))
-                    }}
+                    onClick={() => navigatePhase('export')}
                   >
                     Continue to export →
                   </button>
@@ -905,6 +905,13 @@ export function Studio() {
       </Section>
     </>
   )
+}
+
+function saveLabel(status: 'idle' | 'saving' | 'saved' | 'error', savedAt: number | null): string {
+  if (status === 'saving') return 'Saving…'
+  if (status === 'error') return 'Save failed — will retry'
+  if (status === 'saved' || savedAt) return 'Saved'
+  return ''
 }
 
 /**

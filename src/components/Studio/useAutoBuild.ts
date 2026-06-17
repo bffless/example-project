@@ -26,6 +26,7 @@ import {
   haltAutoBuild,
   completeAutoBuild,
   setAutoPointer,
+  selectActive,
 } from '../../store/studioSlice'
 import { nextAction, type AutoStepId, type AutoBuildRun } from '../../lib/autoBuild'
 import { assembleSceneBlob, assembleFinalCutBlob } from '../../lib/export/assembleScene'
@@ -57,7 +58,7 @@ export type AutoBuildControls = {
 
 export function useAutoBuild(pipe: Pipe): AutoBuildControls {
   const dispatch = useAppDispatch()
-  const run = useAppSelector((s) => s.studio.autoBuild)
+  const run = useAppSelector((s) => selectActive(s).autoBuild)
   const fetchBytes = useSignedBytes()
 
   // In-flight guard (one step at a time) and the last step we attempted (to tell a

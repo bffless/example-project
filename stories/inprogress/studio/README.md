@@ -84,6 +84,33 @@ let the user add/remove cuts directly in the diff viewer** — then the wps knob
 (Per-scene scope shipped: the Build diff is now windowed to the selected scene tab
 via `windowLines`, instead of rendering the whole talk.)
 
+**The `studio/projects` initiative (stories 11a–11d) is COMPLETE.** All four
+stories have shipped: 11a introduced projects as first-class entities
+(local-first, keyed Redux collection, list/create/open/rename/delete UI, metadata
+middleware, `savedVoices` hoisted to a shared library, clean-slate persist key
+bump); 11b added URL-driven routing (`/studio/project/:id/:phase`,
+`StudioProjectGuard`, phase clamp/resume via `resolvePhase`/`maxPhaseFor`, keyed
+workspace remount, `revisitPrep`/`inExport` removed); 11c nested every upload under
+`uploads/projects/<id>/<type>/…` via dynamic `subDir` interpolation (enabled by
+`bffless/ce#324`) across all 6 prepare + 6 register rules + the narrate step,
+added a new `GET /api/uploads/projects/*` serve rule (id `30355b6d`), and wired
+project-delete to wipe the entire bucket prefix via `POST /api/projects/delete`
+(`file_delete`, rule `67359cca`, best-effort client call + immediate local remove).
+**11d (server-side project sync) shipped the durable home:** a `studio_projects`
+data-table schema (`d183deed-…`) + CRUD rules (create `25fc934e`, list `d48bca6d`,
+get `9f8c5a94`, save `1b510d2d`, delete extended on `67359cca` to also `data_delete`
+the record), records addressed by a `projectId` field filter with timestamps stored
+as `createdMs`/`updatedMs`; a pure `projectSync.ts` (last-write-wins reconcile,
+local-only projects pushed up — no clean-slate); slice
+`hydrateProject`/`evictWorking`/`evictOthers`/`reconcileServerIndex`; RTK CRUD +
+MSW mocks; `useProjectAutosave` (debounced save · flush-on-exit · evict-others,
+StrictMode-safe); list-from-server, create-on-server, and hydrate-or-redirect on
+open. **Net: projects are now first-class, URL-addressable, per-project
+bucket-stored, AND server-synced — they survive a cleared browser and follow the
+user across devices.** Story **07** will layer auth / per-user scoping across the
+studio routes (the destructive project + upload routes are flagged for
+`auth_required` there).
+
 ```
 done/        ✅ 00-scene-producer-prototype  ✅ 01-wire-upload-bucket
              ✅ 05 ffmpeg assemble (timeline walk → MP4 + save + loudnorm/fades)
@@ -138,6 +165,10 @@ inprogress/  ✅ 01b-wire-audio-bucket (stepper + manual prep + audio→bucket)
 | 03s | `03s-auto-build.md` | one-press unattended Build: pure step model (`autoBuild.ts`, derived from scene fields) + durable run pointer in Redux slice (persisted) + state-driven orchestrator (`useAutoBuild`) + task-tree dashboard (`AutoBuildBoard`); halt+resume-from-pointer; reload coerces running→paused; AI-TTS honoring `original` tags; pending scenes → final stitch | ✅ done |
 | 06 | `06-thumbnail-nano-banana.md` | side feature | ⏳ queued |
 | 07 | `07-stripe-gating.md` | billing | ⏳ queued |
+| 11a | `11a-projects-entity.md` | projects as a first-class entity — keyed slice (index/working/activeProjectId) · list/create/open/rename/delete · metadata middleware · savedVoices hoisted · clean-slate persist key | ✅ done |
+| 11b | `11b-url-routing.md` | URL-driven routing — /studio/project/:id/:phase · guard (unknown-id redirect · active-sync · phase clamp/resume via phaseOf) · keyed remount · revisitPrep/inExport removed | ✅ done |
+| 11c | `11c-per-project-storage.md` | per-project GCS layout — uploads/projects/<id>/<type>/... via dynamic subDir (ce#324) + nested serve rule; projectId threaded client-side; project-delete wipes the bucket prefix via `file_delete` | ✅ done |
+| 11d | `11d-server-sync.md` | server-side project sync — `studio_projects` CRUD (create/list/get/save/delete rules) · pure `projectSync` reconcile (last-write-wins, push-up local-only) · `useProjectAutosave` (debounced save · flush-on-exit · evict-others) · hydrate-on-open guard · list-from-server | ✅ done |
 | 10a | `10a-diarization.md` | `/api/transcribe` rule `972a6dc5` runs `diarization:true` + `huggingface_access_token: secrets.HF_TOKEN`; flatten step carries per-word `speaker`; `TranscriptWord`/`TWord` gain `speaker?` | ✅ done* |
 | 10b | `10b-cast-and-voice-step.md` | prep reordered thumbnails→voice→director; project **cast** (`Person[]`) + per-video `speakerAssignments`; people count control (default 1 = auto-assign, grid at N≥2); `src/lib/speakers.ts` resolution helpers; `CastStudio` UI | ✅ done |
 | 10c | `10c-speaker-aware-director.md` | `speakerTimedTranscript` groups words by speaker + labels each run with the cast name; `SpeakerNamer` threaded through `combinedTimedTranscript`; back-compat when no namer — director rule `138f27fb` prompt intentionally unchanged (self-describing `Name:` format) | ✅ done* |

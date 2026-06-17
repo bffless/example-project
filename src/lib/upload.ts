@@ -94,15 +94,19 @@ type RegisterResponse = {
 
 /**
  * Upload `file` to a storage bucket via the presigned flow at `basePath`
- * (e.g. `/api/uploads/source`). Returns the stored URL later stages reference
- * server-side. Throws with a descriptive message if any step fails.
+ * (e.g. `/api/uploads/source`). `projectId` is sent to the prepare and
+ * register rules, which interpolate it into the per-project storage key
+ * (`uploads/projects/<projectId>/<type>/...`). Throws with a descriptive
+ * message if any step fails.
  */
-export async function presignedUpload(file: File, basePath: string): Promise<string> {
+export async function presignedUpload(file: File, basePath: string, projectId: string): Promise<string> {
+  if (!projectId) throw new Error('presignedUpload: projectId is required')
+
   const prepRes = await fetch(`${basePath}/prepare`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: file.name }),
+    body: JSON.stringify({ filename: file.name, projectId }),
   })
   if (!prepRes.ok) throw new Error(`Upload prepare failed (${prepRes.status})`)
   const prep = (await prepRes.json()) as PrepareResponse
@@ -125,6 +129,7 @@ export async function presignedUpload(file: File, basePath: string): Promise<str
     body: JSON.stringify({
       storageKey: prep.storageKey,
       originalName: prep.originalName ?? file.name,
+      projectId,
     }),
   })
   if (!regRes.ok) throw new Error(`Upload register failed (${regRes.status})`)
