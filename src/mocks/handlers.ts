@@ -10,6 +10,11 @@ import { TRANSCRIBE_FIXTURE } from './transcribeFixture'
  */
 const MOCK_STUDIO = false
 
+// A 1×1 PNG (mock stand-in for the rendered nano-banana thumbnail). Stored in
+// objectStore so the /api/uploads/* serve route hands real bytes back to <img>.
+const PLACEHOLDER_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
 /** A fake bucket host for the presigned PUT — intercepted below so no bytes leave. */
 const MOCK_BUCKET = 'https://mock-bucket.studio.local'
 
@@ -257,6 +262,51 @@ const studioHandlers = [
       ? `${synopsis ? synopsis + ' ' : ''}In short: ${firstSentence || 'the key points'}.`.trim()
       : 'No script to summarize yet.'
     return HttpResponse.json({ title, summary })
+  }),
+
+  // Thumbnail — step 1: draft the nano-banana prompt (Export phase). The real
+  // handler loads the `image-prompts` skill; the mock just echoes a plausible
+  // multi-section prompt derived from the title/notes so the editable textarea has
+  // realistic content. Same shape as the real pipeline: { prompt }.
+  http.post('/api/thumbnail/draft', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      title?: string
+      notes?: string
+    }
+    const title = (body.title ?? 'Your Video').trim()
+    const notes = (body.notes ?? '').trim()
+    const headline = title.split(/\s+/).slice(0, 5).join(' ').toUpperCase()
+    const prompt = [
+      'A 16:9 YouTube thumbnail, modern-dev-tool house style: dark navy #0B1226 flat',
+      'background with a faint dot grid.',
+      `Headline in heavy white sans-serif: "${headline}".`,
+      'Small "WATCH ME CODE" pill top-left; a tilted code-editor mock on the right',
+      'with a thin cyan #22D3EE outline.',
+      notes ? `Creator notes: ${notes}.` : '',
+      'Colors: navy #0B1226, off-white #F8FAFC, cyan #22D3EE. 3 colors max.',
+      'Avoid: photorealistic humans, generic cloud icons, drop shadows, gradient mesh.',
+    ].filter(Boolean).join(' ')
+    return HttpResponse.json({ prompt })
+  }),
+
+  // Thumbnail — step 2: render the image with the (edited) prompt. The real
+  // handler calls google/nano-banana and stores the result to the bucket; the
+  // mock stashes a placeholder PNG in objectStore and returns its serve path, so
+  // the same sign→<img> path works offline. Same shape as the real pipeline:
+  // { imageUrl }.
+  http.post('/api/thumbnail/render', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { projectId?: string }
+    const pid = body.projectId ?? 'unknown-project'
+    const keyPath = `projects/${pid}/youtube-thumbnail/mock-${Date.now()}.png`
+    try {
+      const binaryStr = atob(PLACEHOLDER_PNG_BASE64)
+      const bytes = new Uint8Array(binaryStr.length)
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+      objectStore.set(keyPath, { body: bytes.buffer as ArrayBuffer, type: 'image/png' })
+    } catch {
+      // Non-fatal — serve route will 404 but the flow (persist + sign) still runs.
+    }
+    return HttpResponse.json({ imageUrl: `/api/uploads/${keyPath}` })
   }),
 
   // Poll a job (story 03f Part 0). Spins `pending` → `running` over the first two
