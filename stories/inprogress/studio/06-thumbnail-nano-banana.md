@@ -2,48 +2,108 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ⏳ queued · **Backend: BFFless `replicate` (`google/nano-banana`).**
-Self-contained side feature; can ship independently of the pipeline stories.
+**Status:** ✅ shipped (FE + mock) · ⏳ live BFFless rules pending · **Backend: BFFless `ai_handler` (+ `image-prompts` skill) → `replicate` (`google/nano-banana`).**
+Self-contained side feature; ships independently of the pipeline stories.
 
 > **Not the director thumbnails.** This is the **final YouTube thumbnail image**,
 > an AI **output** we get **back** when everything's done — totally separate from
 > the interval contact sheet we **give** the master director as input (story 03 /
-> `00` "Two kinds of thumbnails"). Don't conflate the two.
+> `00` "Two kinds of thumbnails"), and separate again from the project-card image
+> (`ProjectMeta.thumbnailUrl`, derived from the first contact sheet). Three things
+> named "thumbnail"; this story is only the YouTube output.
 
 ## Goal
 
-Generate the **final YouTube thumbnail** in Studio, replacing the manual flow (a
-skill writes a prompt → paste into nano-banana by hand). Pick a reference frame
-(the current `videoRef` frame or a scene frame), optionally add topic/notes, the
-pipeline drafts the image prompt and calls **`google/nano-banana`** on Replicate,
-and renders the result inline with regenerate/variations.
+Generate the **final YouTube thumbnail** in the Export phase, replacing the manual
+flow (run the `image-prompts` skill by hand → paste into nano-banana → download).
+The creator writes free-text notes about what they want, an AI handler **drafts**
+the nano-banana prompt (it loads the `image-prompts` skill to do the prompt-craft),
+the creator **edits** it, then **`google/nano-banana`** renders the image — saved
+to the bucket + the project record and re-downloadable.
 
-## Backend (`/api/thumbnail` pipeline)
+**Text-only** (no reference frame fed to nano-banana). **No variations grid.**
 
-1. (optional) `ai_handler` — draft an image prompt from the topic/notes (+ a
-   caption of the chosen frame); return it editable.
-2. `replicate` — `google/nano-banana`; `input.prompt` = the (edited) prompt;
-   pass the chosen scene frame as a reference image where supported.
-3. `response_handler` — `{ prompt, imageUrl }` (or store + serve via
-   `file_upload`/`signed_url`).
-4. Validators: `auth_required` + `rate_limit`.
+## Backend — two endpoints
 
-## Front-end
+Two steps because the creator edits the drafted prompt between them.
 
-- Mock `/api/thumbnail` in MSW (placeholder image + drafted prompt) first.
-- `src/components/Studio/ThumbnailStudio.tsx`: pick a scene frame (reuse
-  `scene.thumb` or grab the current `videoRef` frame), editable prompt textarea,
-  Generate → result, Regenerate, a small variations grid, download. Surface it
-  as a tab/section so it doesn't clutter the scene workspace.
+### 1. `POST /api/thumbnail/draft` — draft the prompt
+
+`ai_handler`, **Response Format: JSON**, **one-time completion** (not chat),
+**Skills Mode: Select Skills → `image-prompts`** (Skills Path `.bffless/skills`).
+The handler uses the `load_skill` tool to pull in the skill's prompt anatomy,
+house styles, and routing. Request body (templated into the user message):
+`{ title, description, script, notes }`. Returns `{ prompt }`.
+
+**System prompt (paste verbatim into the rule):**
+
+> You write a single image-generation prompt for `google/nano-banana` that becomes
+> a YouTube video's final thumbnail.
+>
+> You have the **`image-prompts` skill** — **load it with `load_skill` before
+> writing.** It defines the prompt anatomy, the named house styles
+> (retro-blueprint / modern-dev-tool / editorial-print), how to route a style from
+> the video's content type, the text/color/negatives rules, and examples. Follow
+> it exactly; don't invent your own format.
+>
+> The user message gives you **TITLE**, **DESCRIPTION**, **SCRIPT** (the final
+> spoken script — your evidence for what the video is about and which house style
+> fits), and **NOTES** (the creator's optional free-text wishes). When NOTES are
+> present they **override** style routing and defaults — honor them.
+>
+> Route the house style from the content type per the skill. Write the exact
+> headline text yourself (≤5 words) — never a placeholder. Apply the skill's color
+> caps and always include the negatives list.
+>
+> Return **JSON only**: `{ "prompt": "<full multi-section prompt, ready to
+> paste>" }` — no commentary, no markdown fences.
+
+### 2. `POST /api/thumbnail/render` — render the image
+
+`replicate` `google/nano-banana` with `input.prompt = {{steps.form.prompt}}`, then
+`file_upload` stores the output under `projects/<id>/youtube-thumbnail/`, and a
+`response_handler` returns `{ imageUrl }` (a `/api/uploads/...` serve path).
+Request body: `{ prompt, projectId }`.
+
+Validators (`auth_required` + `rate_limit`) stay **off** until story 07, like the
+rest of the studio pipeline. Live AI needs the project Replicate token (Settings →
+AI) or you get `REPLICATE_NOT_CONFIGURED`.
+
+## Front-end (shipped)
+
+- **`src/lib/thumbnail.ts`** — pure shape layer: `buildThumbnailDraftRequest`,
+  `toThumbnailPrompt`, `toThumbnailImage` (mock + real coerce through these).
+- **MSW** mocks for both endpoints in `src/mocks/handlers.ts` (gated by
+  `MOCK_STUDIO`); same `{prompt}` / `{imageUrl}` shapes as the real pipeline.
+- **RTK Query** `thumbnailDraft` + `thumbnailRender` (`studioApi.ts`); new
+  `'youtube-thumbnail'` `UploadKind`.
+- **Redux** durable `youtubeThumbnail: { notes, prompt, url } | null` on the
+  project working state (url-only; rides story 11d server-sync; re-signed via
+  `/api/uploads/sign` on load — never `file_serve`).
+- **`useScenePipeline`** actions `draftThumbnailPrompt` / `renderThumbnail`
+  (+ `draftingThumbnail` / `renderingThumbnail` flags), plus exposes `signFor`.
+- **`src/components/Studio/ThumbnailStudio.tsx`** in the Export step beside
+  `ExportSummary`/`FinalCutBar`: notes → Draft prompt → editable prompt → Generate
+  / Regenerate → signed image + Download.
 
 ## Acceptance criteria
 
-- [ ] With the mock: pick a frame → editable drafted prompt → Generate → image →
-      Regenerate → download.
-- [ ] Real pipeline calls `google/nano-banana`; UI consumes the same
-      `{prompt,imageUrl}` shape as the mock.
-- [ ] `auth_required` + `rate_limit`; build/lint/tests pass.
+- [x] With the mock: notes → editable drafted prompt → Generate → image →
+      Regenerate → download; the thumbnail persists on the project + survives reload.
+- [ ] Real pipeline: `/api/thumbnail/draft` (skill-driven) + `/api/thumbnail/render`
+      (`google/nano-banana`) return the same `{prompt}` / `{imageUrl}` shapes;
+      `MOCK_STUDIO = false`.
+- [x] build / lint / test:run pass.
+
+## To go live (swap step — BFFless console/MCP)
+
+1. Create the two rules above; **select the `image-prompts` skill** on the draft
+   handler and paste the system prompt.
+2. Attach to the studio rule set / alias (see memory `project_studio_rule_set_alias`).
+3. Ensure `.bffless/skills/image-prompts/` is deployed (committed in this story).
+4. Set the Replicate token; flip `MOCK_STUDIO = false`; smoke-test.
 
 ## Out of scope
 
-Brand templates / overlay-text compositing, billing (07).
+Reference-frame / image-to-image input, variations grid, brand-template /
+overlay-text compositing, billing/gating (story 07).
