@@ -29,6 +29,12 @@ describe('deriveProjectMeta', () => {
   it('returns a null thumbnail when no sheet has a persisted url', () => {
     expect(deriveProjectMeta(freshWorkingState()).thumbnailUrl).toBeNull()
   })
+  it('prefers the generated YouTube thumbnail over the contact sheet', () => {
+    const w = freshWorkingState()
+    w.contactSheets = [{ url: '/api/uploads/thumbnails/x.png' } as never]
+    w.youtubeThumbnail = { notes: 'bold', prompt: 'a 16:9 thumbnail', url: '/api/uploads/youtube-thumbnail/y.jpg' }
+    expect(deriveProjectMeta(w).thumbnailUrl).toBe('/api/uploads/youtube-thumbnail/y.jpg')
+  })
 })
 
 describe('nextUntitledName', () => {

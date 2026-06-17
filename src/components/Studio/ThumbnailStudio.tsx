@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { thumbnailFileName } from '../../lib/thumbnail'
 
 type Props = {
   /** The recommended title (from the Export description). */
@@ -75,7 +76,7 @@ export function ThumbnailStudio({
       const objectUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = objectUrl
-      a.download = 'thumbnail.jpg'
+      a.download = thumbnailFileName(title)
       document.body.appendChild(a)
       a.click()
       a.remove()

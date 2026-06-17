@@ -35,7 +35,6 @@ export function StudioProjects() {
     if (meta) void createRecord(toServerRecord(meta, freshWorkingState())) // best-effort; autosave/reconcile catch up if it fails
     navigate(`/studio/project/${id}`)
   }
-  const onOpen = (id: string) => navigate(`/studio/project/${id}`)
   const onRename = (id: string, name: string) => dispatch(renameProject({ id, name, now: Date.now() }))
   const onDelete = async (id: string) => {
     try {
@@ -64,7 +63,6 @@ export function StudioProjects() {
           projects={projects}
           now={now}
           onNew={onNew}
-          onOpen={onOpen}
           onRename={onRename}
           onDelete={onDelete}
         />

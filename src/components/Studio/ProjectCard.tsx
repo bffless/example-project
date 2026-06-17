@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { ProjectMeta } from '../../lib/projects'
 
 const PHASE_LABEL: Record<ProjectMeta['phase'], string> = {
@@ -14,24 +15,24 @@ function editedAgo(ts: number, now: number): string {
 }
 
 export function ProjectCard({
-  meta, now, onOpen, onRename, onDelete,
+  meta, now, onRename, onDelete,
 }: {
   meta: ProjectMeta
   now: number
-  onOpen: (id: string) => void
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(meta.name)
+  const href = `/studio/project/${meta.id}`
 
   return (
     <div className="flex flex-col border rule bg-paper-deep/30 overflow-hidden">
-      <button type="button" onClick={() => onOpen(meta.id)} className="block aspect-video bg-ink/5">
+      <Link to={href} className="block aspect-video bg-ink/5">
         {meta.thumbnailUrl
           ? <img src={meta.thumbnailUrl} alt="" className="h-full w-full object-cover" />
           : <span className="meta-label flex h-full items-center justify-center text-ink-soft">No preview</span>}
-      </button>
+      </Link>
       <div className="flex flex-col gap-2 p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="meta-label">{PHASE_LABEL[meta.phase]}</span>
@@ -46,9 +47,9 @@ export function ProjectCard({
             className="w-full border rule bg-paper px-2 py-1 text-[15px]"
           />
         ) : (
-          <button type="button" onClick={() => onOpen(meta.id)} className="text-left text-[16px] font-medium">
+          <Link to={href} className="text-left text-[16px] font-medium">
             {meta.name}
-          </button>
+          </Link>
         )}
         <div className="mt-1 flex items-center gap-2">
           <button type="button" className="pill-ghost text-[12px]" onClick={() => { setDraft(meta.name); setEditing(true) }}>Rename</button>

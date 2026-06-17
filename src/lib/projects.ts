@@ -35,9 +35,14 @@ export function phaseOf(w: ProjectWorkingState): StudioPhase {
   return studioPhase({ hasSource, ready, allBuilt })
 }
 
-/** The dashboard-facing derived fields (phase + thumbnail) for one project. */
+/** The dashboard-facing derived fields (phase + thumbnail) for one project.
+ *  Prefer the generated YouTube thumbnail (the finished, on-brand image) once it
+ *  exists; fall back to the first contact sheet otherwise. Both are unsigned
+ *  `/api/uploads/...` serve paths shown directly on the card. */
 export function deriveProjectMeta(w: ProjectWorkingState): Pick<ProjectMeta, 'phase' | 'thumbnailUrl'> {
-  return { phase: phaseOf(w), thumbnailUrl: w.contactSheets.find((s) => s.url)?.url ?? null }
+  const thumbnailUrl =
+    w.youtubeThumbnail?.url || w.contactSheets.find((s) => s.url)?.url || null
+  return { phase: phaseOf(w), thumbnailUrl }
 }
 
 /** The next collision-free "Untitled project" name given the existing names. */

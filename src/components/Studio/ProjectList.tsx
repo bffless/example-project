@@ -2,12 +2,11 @@ import type { ProjectMeta } from '../../lib/projects'
 import { ProjectCard } from './ProjectCard'
 
 export function ProjectList({
-  projects, now, onNew, onOpen, onRename, onDelete,
+  projects, now, onNew, onRename, onDelete,
 }: {
   projects: ProjectMeta[]
   now: number
   onNew: () => void
-  onOpen: (id: string) => void
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
 }) {
@@ -26,7 +25,7 @@ export function ProjectList({
       ) : (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((m) => (
-            <ProjectCard key={m.id} meta={m} now={now} onOpen={onOpen} onRename={onRename} onDelete={onDelete} />
+            <ProjectCard key={m.id} meta={m} now={now} onRename={onRename} onDelete={onDelete} />
           ))}
         </div>
       )}
