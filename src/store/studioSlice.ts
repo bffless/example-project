@@ -195,6 +195,14 @@ export type ProjectWorkingState = {
    */
   description: (VideoDescription & { script: string }) | null
   /**
+   * The Export page's generated YouTube thumbnail (story 06): the creator's notes,
+   * the (edited) image prompt it was rendered from, and the persisted
+   * `/api/uploads/youtube-thumbnail/...` serve path. URL-only — the PNG bytes are
+   * never persisted; the path is re-signed on load for display/download. Null
+   * until rendered; re-rendering overwrites it. Cleared when working state resets.
+   */
+  youtubeThumbnail: { notes: string; prompt: string; url: string } | null
+  /**
    * All source videos in the project (story 09a). Each holds its own per-video
    * prep state (sourceUrl, audioUrl, words, stageProgress, etc.). The single
    * top-level fields (sourceUrl, audioUrl, etc.) remain for backward compat
@@ -236,6 +244,7 @@ export function freshWorkingState(): ProjectWorkingState {
     fileName: null,
     finalCutUrl: null,
     description: null,
+    youtubeThumbnail: null,
     sources: [],
     cast: [],
     speakerAssignments: {},
@@ -449,6 +458,14 @@ const studioSlice = createSlice({
       const w = active(state); if (!w) return
       w.description = action.payload
     },
+    /** The rendered YouTube thumbnail (story 06): notes + prompt + serve path. */
+    setYoutubeThumbnail(
+      state,
+      action: PayloadAction<{ notes: string; prompt: string; url: string } | null>,
+    ) {
+      const w = active(state); if (!w) return
+      w.youtubeThumbnail = action.payload
+    },
     /** Producer edit of the recommended title (no-op if nothing's generated yet). */
     setDescriptionTitle(state, action: PayloadAction<string>) {
       const w = active(state); if (!w) return
@@ -624,6 +641,7 @@ export const {
   setFileName,
   setFinalCutUrl,
   setDescription,
+  setYoutubeThumbnail,
   setDescriptionTitle,
   addSource,
   patchSource,

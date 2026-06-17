@@ -109,6 +109,16 @@ export function scriptWords(scenes: Scene[]): { text: string; start: number; end
   return out
 }
 
+/**
+ * The YouTube-ready description block: the AI summary, then the chapter lines
+ * ("0:00 Title") YouTube turns into chapters. Either part may be empty. Shared by
+ * the Export summary view and the thumbnail generator (which feeds it to the
+ * prompt-drafting handler as DESCRIPTION).
+ */
+export function youtubeDescription(summary: string | null | undefined, chapters: Chapter[]): string {
+  return [summary, formatChapters(chapters)].filter(Boolean).join('\n\n')
+}
+
 /** Build the `/api/describe` request — the final script + the director's take. */
 export function buildDescribeRequest(scenes: Scene[], synopsis: string | null): DescribeRequest {
   return { script: videoScript(scenes), synopsis: (synopsis ?? '').trim() }
