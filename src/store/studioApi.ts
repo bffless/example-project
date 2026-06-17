@@ -18,10 +18,11 @@ import type { DirectorRequest, DirectorScene } from '../lib/director'
 import type { RefineSceneRequest, RefineSceneRaw } from '../lib/refiner'
 import type { SearchRequest } from '../lib/search'
 import type { DescribeRequest } from '../lib/describe'
+import type { ThumbnailDraftRequest } from '../lib/thumbnail'
 import type { ProjectMeta } from '../lib/projects'
 import type { ProjectRecord, ProjectRecordIn } from '../lib/projectSync'
 
-export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export' | 'scene-clip'
+export type UploadKind = 'source' | 'audio' | 'thumbnails' | 'voice' | 'export' | 'scene-clip' | 'youtube-thumbnail'
 type TranscribeResponse = { words?: TranscriptWord[]; text?: string }
 /** The master director's result blob: a logline + the raw scene breakdown. */
 type ScenesResult = { synopsis?: string; scenes?: DirectorScene[] }
@@ -149,6 +150,28 @@ export const studioApi = createApi({
       }),
     }),
 
+    // Thumbnail draft (story 06): one sync call to the prompt-drafting handler
+    // (which loads the `image-prompts` skill) → a ready-to-paste nano-banana
+    // prompt. Raw blob goes through `toThumbnailPrompt` at the call site.
+    thumbnailDraft: builder.mutation<unknown, ThumbnailDraftRequest>({
+      query: (body) => ({
+        url: 'api/thumbnail/draft',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    // Thumbnail render (story 06): call google/nano-banana with the (edited)
+    // prompt; the pipeline stores the image to the bucket and returns a serve
+    // path. Raw blob goes through `toThumbnailImage` at the call site.
+    thumbnailRender: builder.mutation<unknown, { prompt: string; projectId: string }>({
+      query: (body) => ({
+        url: 'api/thumbnail/render',
+        method: 'POST',
+        body,
+      }),
+    }),
+
     // Voice clone (story 04): POST the uploaded recording's URL → a reusable
     // voiceId. The real $3 Replicate clone is DISABLED server-side for now — the
     // pipeline returns a real preset id as a stub, so the rest of the flow (and
@@ -262,4 +285,6 @@ export const {
   useLazyGetProjectQuery,
   useCreateProjectRecordMutation,
   useSaveProjectMutation,
+  useThumbnailDraftMutation,
+  useThumbnailRenderMutation,
 } = studioApi
