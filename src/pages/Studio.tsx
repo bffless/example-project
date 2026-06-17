@@ -30,6 +30,7 @@ import { SceneAssembleBar } from '../components/Studio/SceneAssembleBar'
 import { ScenePreviewDialog } from '../components/Studio/ScenePreviewDialog'
 import { FinalCutBar } from '../components/Studio/FinalCutBar'
 import { ExportSummary } from '../components/Studio/ExportSummary'
+import { ThumbnailStudio } from '../components/Studio/ThumbnailStudio'
 import { useScenePipeline } from '../components/Studio/useScenePipeline'
 import { useProjectAutosave } from '../components/Studio/useProjectAutosave'
 import { AutoBuildBoard } from '../components/Studio/AutoBuildBoard'
@@ -38,6 +39,7 @@ import { useSignDownloadQuery, useLazySignDownloadQuery, useSearchTranscriptMuta
 import { buildSearchRequest, toSearchHits } from '../lib/search'
 import { skipToken } from '@reduxjs/toolkit/query'
 import { GLOBAL_STAGES, studioPhase, type StudioPhase } from '../lib/pipeline'
+import { videoChapters, youtubeDescription } from '../lib/describe'
 
 export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhase }) {
   const navigate = useNavigate()
@@ -735,6 +737,16 @@ export function Studio({ projectId, phase }: { projectId: string; phase: UrlPhas
                   finalCutUrl={pipe.finalCutUrl}
                   saving={pipe.savingFinalCut}
                   onSave={pipe.saveFinalCut}
+                />
+                <ThumbnailStudio
+                  title={pipe.description?.title ?? ''}
+                  description={youtubeDescription(pipe.description?.summary, videoChapters(pipe.scenes))}
+                  thumbnail={pipe.youtubeThumbnail}
+                  drafting={pipe.draftingThumbnail}
+                  rendering={pipe.renderingThumbnail}
+                  onDraft={pipe.draftThumbnailPrompt}
+                  onRender={pipe.renderThumbnail}
+                  signFor={pipe.signFor}
                 />
               </div>
             ) : (
