@@ -2,7 +2,14 @@
 
 > Read `00-architecture-and-state.md` first.
 
-**Status:** ✅ shipped (FE + mock) · ⏳ live BFFless rules pending · **Backend: BFFless `ai_handler` (+ `image-prompts` skill) → `replicate` (`google/nano-banana`).**
+**Status:** ✅ shipped (FE + mock) · ✅ live rules created · ⏳ skill deploy + console toggles pending · **Backend: BFFless `ai_handler` (+ `image-prompts` skill) → `replicate` (`google/nano-banana`).**
+
+**Live rules (studio rule set `cf413ff6`):**
+- `POST /api/thumbnail/draft` → `9a55c17b-7c2a-4349-8938-1059ffe70f35` (ai_handler `claude-sonnet-4-6`; system prompt set; `draft` step timeout 110 s)
+- `POST /api/thumbnail/render` → `c6b3ddd5-0785-4882-a342-0dbe270d5269` (replicate `google/nano-banana` → bucket)
+- upload schema `youtube_thumbnail` `504045c5-bc4d-4d67-a095-7f3e333911ab` (+ `GET /api/uploads/youtube-thumbnail/*`)
+
+**Still needed to go fully live:** (1) deploy so `.bffless/skills/image-prompts/` ships; (2) in the console, on the draft handler: Skills → Select Skills → `image-prompts`, and Response Format → JSON. Until then the handler fabricates a fake skill (verified) and the output is unusable.
 Self-contained side feature; ships independently of the pipeline stories.
 
 > **Not the director thumbnails.** This is the **final YouTube thumbnail image**,
