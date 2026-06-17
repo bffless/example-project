@@ -8,6 +8,7 @@ import {
   scriptWords,
   buildDescribeRequest,
   toDescription,
+  youtubeDescription,
 } from './describe'
 
 function scene(over: Partial<Scene> = {}): Scene {
@@ -131,5 +132,28 @@ describe('toDescription', () => {
     expect(toDescription(null)).toEqual({ title: '', summary: '' })
     expect(toDescription({ title: 42 })).toEqual({ title: '', summary: '' })
     expect(toDescription('nope')).toEqual({ title: '', summary: '' })
+  })
+})
+
+describe('youtubeDescription', () => {
+  const chapters = [{ time: 0, title: 'Intro' }, { time: 83, title: 'Body' }]
+
+  it('joins summary and chapter lines with a blank line between them', () => {
+    expect(youtubeDescription('A great video.', chapters)).toBe(
+      'A great video.\n\n0:00 Intro\n1:23 Body',
+    )
+  })
+
+  it('drops to just chapter lines when summary is null or undefined', () => {
+    expect(youtubeDescription(null, chapters)).toBe('0:00 Intro\n1:23 Body')
+    expect(youtubeDescription(undefined, chapters)).toBe('0:00 Intro\n1:23 Body')
+  })
+
+  it('drops to just the summary when chapters array is empty', () => {
+    expect(youtubeDescription('Just a summary.', [])).toBe('Just a summary.')
+  })
+
+  it('returns empty string when both summary and chapters are empty', () => {
+    expect(youtubeDescription(null, [])).toBe('')
   })
 })
