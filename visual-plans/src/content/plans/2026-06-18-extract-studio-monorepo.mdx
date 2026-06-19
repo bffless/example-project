@@ -125,8 +125,8 @@ Build and green the monorepo **before** touching this repo, so the demo never br
 
 <ApiEndpoint method="POST" path="bffless/upload-artifact@v1" change="added"
   summary="deploy-studio.yml: push apps/studio/** + workflow_dispatch"
-  request={`path: apps/studio/dist\nalias: <studio-alias>\napi-url: $\{vars.BFFLESS_URL\}\napi-key: $\{secrets.BFFLESS_API_KEY\}`}
-  response={`Studio serves at its alias; /api/* resolves\nvia the j5s.dev Studio rule set attached to it`} />
+  request={`path: apps/studio/dist\nalias: studio\napi-url: $\{vars.BFFLESS_URL\}\napi-key: $\{secrets.BFFLESS_API_KEY\}`}
+  response={`Served at studio.j5s.dev; /api/* resolves via the\nStudio rule set attached to the studio alias`} />
 
 <Callout kind="warn" title="Risk: the @ffmpeg/core-mt patch under pnpm">
 `scripts/patch-core-mt.mjs` edits files **inside `node_modules/@ffmpeg/core-mt`** on `postinstall`
@@ -150,9 +150,11 @@ pnpm — this is the only path that could silently regress.
   { label: 'Demo: every route works; no dead /studio link, no Redux/ffmpeg console errors', done: false },
 ]} />
 
-<QuestionForm questions={[
-  { q: 'Monorepo repo name + visibility, and submodule folder name?', options: ['bffless-apps, private', 'bffless-apps, public (giveaway)'], recommend: 'bffless-apps, private' },
-  { q: 'Where does Studio serve?', options: ['Root of its own alias (drop /studio prefix)', 'Keep /studio prefix (vite base)'], recommend: 'Root of its own alias (drop /studio prefix)' },
-  { q: 'ffmpeg patch mechanism under pnpm?', options: ['pnpm patch / patchedDependencies', 'Keep postinstall script'], recommend: 'pnpm patch / patchedDependencies' },
-  { q: 'Studio BFFless deploy alias (same j5s.dev project, dedicated alias with the Studio rule set attached)?', options: ['Dedicated studio alias on j5s.dev', 'New BFFless project'], recommend: 'Dedicated studio alias on j5s.dev' },
-]} />
+## Locked decisions
+
+<Callout kind="ok" title="Resolved at execution">
+**Repo:** `bffless-apps`, **public** (giveaway) · submodule folder `bffless-apps/`. &nbsp;
+**Serve path:** Studio at the **root** of its alias — drop the `/studio` prefix, no `vite base` (audit `studioRoute.ts`). &nbsp;
+**ffmpeg patch:** migrate to **`pnpm patch` / `patchedDependencies`** (no `postinstall` script). &nbsp;
+**Deploy target:** alias **`studio`** on the `j5s.dev` project, custom domain **`studio.j5s.dev`**, Studio rule set attached to the alias.
+</Callout>
