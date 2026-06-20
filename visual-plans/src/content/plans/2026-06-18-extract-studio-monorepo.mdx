@@ -1,0 +1,160 @@
+---
+title: Extract Studio into a pnpm monorepo (submodule)
+objective: Move Studio out of the demo repo into a giveaway pnpm monorepo, linked back as a submodule.
+status: proposed
+date: 2026-06-18
+tags: [monorepo, refactor, ci, bffless]
+---
+
+import { Meta, Callout, Steps, Checklist, Columns, DataModel, ApiEndpoint, FileTree, Diff, Diagram, Wireframe, QuestionForm } from '@components';
+
+<Meta title="Extract Studio into a pnpm monorepo (submodule)" status="proposed" date="2026-06-18"
+  objective="Move Studio out of the demo repo into a giveaway pnpm monorepo, linked back as a submodule — each app independently deployable."
+  tags={['monorepo','refactor','ci','bffless']} />
+
+## Objective & done criteria
+
+`example-upload` began as a **BFFless demo site** (Home / Forms / Comments / Chat / Auth) and grew a
+full app — **Studio** — that no longer belongs in a demo. Studio should ship for free as part of
+BFFless's distribution strategy: BFFless is the platform, Studio is one app for it, more apps follow.
+
+**Done when:** Studio lives in a new pnpm monorepo (`bffless-apps`) as a self-contained app that
+builds/lints/tests green and deploys via its own GitHub Action; this repo is the demo site only,
+with the monorepo attached as a git submodule; both repos are green end-to-end.
+
+<Callout kind="decision" title="The load-bearing choices (locked with James)">
+**1.** Demo site **stays standalone** in this repo — only Studio moves. &nbsp;
+**2.** Apps are **self-contained for now** — no shared `packages/*` yet; Studio copies the few shared
+bits it uses, extract packages later. &nbsp;
+**3.** **Clean-start** git history — copy Studio in as the monorepo's first commit. &nbsp;
+**4.** **Per-app, path-filtered** deploy workflows — clone the monorepo, deploy any one app.
+</Callout>
+
+## Why this is low-risk
+
+<Columns columns={[
+  { title: 'Coupling is tiny', tone: 'after', body: 'Demo pages have ZERO imports from Studio. The Redux store is 100% Studio. Only 3 files wire them together: App.tsx (routes), main.tsx (Provider), mocks/handlers.ts (already MOCK_STUDIO-gated off).' },
+  { title: 'Studio → demo reach', tone: 'neutral', body: 'Only StudioProjects.tsx imports PageHero + Section/Dot. Everything else (useSession, auth, store/hooks, theme tokens) is generic and copies cleanly.' },
+]} />
+
+## Target shape
+
+<Diagram caption="example-upload (demo) holds bffless-apps (monorepo) as a submodule; Studio deploys on its own" nodes={[
+  { id: 'demo', label: 'example-upload', sub: 'demo site • npm' },
+  { id: 'sub', label: 'bffless-apps/', sub: 'git submodule' },
+  { id: 'mono', label: 'bffless-apps repo', sub: 'pnpm workspace' },
+  { id: 'studio', label: 'apps/studio', sub: 'self-contained' },
+  { id: 'deploy', label: 'deploy-studio.yml', sub: 'upload-artifact → alias' },
+]} />
+
+<FileTree files={[
+  { path: 'example-upload/', note: 'THIS repo — demo site only after cut-over', change: 'changed' },
+  { path: '  src/  (Home/Forms/Comments/Chat/Auth + shared)', },
+  { path: '  bffless-apps/', change: 'added', note: 'git submodule → new repo' },
+  { path: '    pnpm-workspace.yaml', change: 'added', note: "packages: ['apps/*','packages/*']" },
+  { path: '    package.json', change: 'added', note: 'root: private, dev tooling' },
+  { path: '    .npmrc', change: 'added', note: 'enable-pre-post-scripts=true' },
+  { path: '    apps/studio/', change: 'added', note: 'the moved Studio tree' },
+  { path: '    .github/workflows/deploy-studio.yml', change: 'added', note: 'push: apps/studio/** + dispatch' },
+]} />
+
+## Part A — Build the monorepo first (nothing removed yet)
+
+<Callout kind="note">
+Build and green the monorepo **before** touching this repo, so the demo never breaks mid-flight.
+</Callout>
+
+<Steps items={[
+  { title: 'Scaffold the workspace', detail: 'gh repo create bffless-apps; add pnpm-workspace.yaml, root package.json (packageManager pnpm), .npmrc (enable-pre-post-scripts=true), .gitignore, README (clone → pnpm install → pnpm --filter <app> dev → deploy via Actions).', files: ['bffless-apps/pnpm-workspace.yaml','bffless-apps/package.json','bffless-apps/.npmrc'] },
+  { title: 'Move Studio → apps/studio (clean copy)', detail: 'pages/Studio*.tsx, components/Studio/**, ALL of store/**, every Studio lib/* + lib/export/** with .test siblings, mocks (Studio + /_bffless/auth/*), test/setup.ts, index.html, public/, postcss/eslint/playwright configs, the 3 tsconfig*.json, scripts/patch-core-mt.mjs, stories/inprogress/studio/** → apps/studio/stories.', files: ['bffless-apps/apps/studio/src/**','bffless-apps/apps/studio/package.json'] },
+  { title: 'Copy the shared bits Studio uses (self-contained)', detail: 'lib/useSession.ts, lib/auth.ts, components/PageHero.tsx, components/Section.tsx, and the index.css @theme + component classes.', files: ['bffless-apps/apps/studio/src/lib/useSession.ts','bffless-apps/apps/studio/src/components/PageHero.tsx','bffless-apps/apps/studio/src/index.css'] },
+  { title: 'Reshape the App shell for standalone Studio', detail: 'New App.tsx lifts the 3 Studio routes to root (drop /studio prefix); minimal layout (auth header + StudioStepper), not the demo Layout. main.tsx copied verbatim (Provider+PersistGate+BffStateProvider+BrowserRouter+MSW). vite.config.ts copied verbatim (ffmpeg tweaks, COOP/COEP, j5s.dev proxy).', files: ['bffless-apps/apps/studio/src/App.tsx','bffless-apps/apps/studio/src/main.tsx','bffless-apps/apps/studio/vite.config.ts'] },
+  { title: 'Resolve the ffmpeg patch under pnpm', detail: 'See risk below — prefer pnpm patch / patchedDependencies; verify a real assemble runs.', files: ['bffless-apps/.npmrc','bffless-apps/package.json'] },
+  { title: 'Green + push', detail: 'pnpm install → pnpm --filter studio build / lint / test:run; fix import paths from the move; commit as initial commit; git push.' },
+  { title: 'Add per-app deploy workflow', detail: 'deploy-studio.yml: push paths apps/studio/** + workflow_dispatch; pnpm/action-setup → pnpm --filter studio build → bffless/upload-artifact path apps/studio/dist to the Studio alias. Set BFFLESS_URL var + BFFLESS_API_KEY secret on the new repo.', files: ['bffless-apps/.github/workflows/deploy-studio.yml'] },
+]} />
+
+## Part B — Slim this repo to the demo site
+
+<Steps items={[
+  { title: 'Attach the submodule', detail: 'git submodule add <new-repo-url> bffless-apps → commits .gitmodules + gitlink. This is the "context for Claude / simple to move" anchor.', files: ['.gitmodules'] },
+  { title: 'Remove Studio from src/', detail: 'Delete pages/Studio*.tsx, components/Studio/**, ALL of store/**, every Studio lib/* + lib/export/ (KEEP useSession.ts, auth.ts, episodes.ts).', files: ['src/pages/','src/components/Studio/','src/store/','src/lib/'] },
+  { title: 'Unwire the 3 coupling files', detail: 'App.tsx: drop the 2 Studio imports + the <Route path="studio"> block. main.tsx: drop Provider/PersistGate/store (demo uses no Redux); keep BffStateProvider/BrowserRouter/MSW. handlers.ts: drop Studio handlers + MOCK_STUDIO; keep /_bffless/auth/*.', files: ['src/App.tsx','src/main.tsx','src/mocks/handlers.ts'] },
+  { title: 'Slim config + deps', detail: 'package.json: drop @reduxjs/toolkit, react-redux, redux-persist, @ffmpeg/* + the postinstall entry (keep ai/@ai-sdk, use-bff-state, react-markdown). Delete scripts/patch-core-mt.mjs. vite.config.ts: drop ffmpeg optimizeDeps/assetsInlineLimit + preview COOP/COEP (keep proxy + vitest). Remove stories/inprogress/studio/**. Strip the Studio section from CLAUDE.md, add a submodule pointer.', files: ['package.json','vite.config.ts','CLAUDE.md','scripts/patch-core-mt.mjs'] },
+  { title: 'Re-green the demo', detail: 'npm install (regenerate lockfile); npm run build / lint / test:run / test:e2e.' },
+]} />
+
+## The 3 coupling files (what changes here)
+
+<Diff file="src/App.tsx" summary="remove Studio imports + route block" lines={[
+  "-import { StudioProjects } from './pages/StudioProjects'",
+  "-import { StudioProjectGuard } from './pages/StudioProjectGuard'",
+  " ",
+  "         <Route path=\"auth\" element={<Auth />} />",
+  "-        <Route path=\"studio\">",
+  "-          <Route index element={<StudioProjects />} />",
+  "-          <Route path=\"project/:projectId\" element={<StudioProjectGuard />} />",
+  "-          <Route path=\"project/:projectId/:phase\" element={<StudioProjectGuard />} />",
+  "-          <Route path=\"*\" element={<Navigate to=\"/studio\" replace />} />",
+  "-        </Route>",
+  "         <Route path=\"*\" element={<Home />} />",
+]} />
+
+<Diff file="src/main.tsx" summary="demo uses no Redux — unwrap the store" lines={[
+  "-import { Provider } from 'react-redux'",
+  "-import { PersistGate } from 'redux-persist/integration/react'",
+  "-import { store, persistor } from './store'",
+  " ",
+  "-      <Provider store={store}>",
+  "-        <PersistGate loading={null} persistor={persistor}>",
+  "           <BffStateProvider>",
+  "             <BrowserRouter><App /></BrowserRouter>",
+  "           </BffStateProvider>",
+  "-        </PersistGate>",
+  "-      </Provider>",
+]} />
+
+## What moves vs. stays
+
+<Columns columns={[
+  { title: 'Moves to apps/studio', tone: 'after', body: 'pages/Studio*.tsx · components/Studio/** · ALL store/** · Studio lib/* + lib/export/** · Studio mocks · scripts/patch-core-mt.mjs · stories/inprogress/studio/** · COPIES of useSession/auth/PageHero/Section/index.css' },
+  { title: 'Stays in this repo', tone: 'before', body: 'pages: Home/Forms/Comments/Chat/Auth · components: Layout/Header/Footer/ChatPopup/CommentsSection/ContactDialog/VideoEmbed · lib: useSession/auth/episodes · the /_bffless/auth/* mocks · deploy.yml / pr-preview.yml (unchanged)' },
+]} />
+
+## Deploy model — per app, path-filtered
+
+<ApiEndpoint method="POST" path="bffless/upload-artifact@v1" change="added"
+  summary="deploy-studio.yml: push apps/studio/** + workflow_dispatch"
+  request={`path: apps/studio/dist\nalias: studio\napi-url: $\{vars.BFFLESS_URL\}\napi-key: $\{secrets.BFFLESS_API_KEY\}`}
+  response={`Served at studio.j5s.dev; /api/* resolves via the\nStudio rule set attached to the studio alias`} />
+
+<Callout kind="warn" title="Risk: the @ffmpeg/core-mt patch under pnpm">
+`scripts/patch-core-mt.mjs` edits files **inside `node_modules/@ffmpeg/core-mt`** on `postinstall`
+(it raises the MT heap 1→3 GiB and fixes the module-worker). pnpm breaks two assumptions:
+(1) it **skips a project's pre/post scripts by default** → add `enable-pre-post-scripts=true` to
+`.npmrc`; (2) its `node_modules` is a **symlinked content-addressed store** → editing the link
+mutates the shared copy. **Prefer** converting to `pnpm patch` / `pnpm.patchedDependencies`
+(deterministic, store-safe). **Must verify** a real assemble runs (MT core loads, 3 GiB heap) under
+pnpm — this is the only path that could silently regress.
+</Callout>
+
+## Verification
+
+<Checklist items={[
+  { label: 'Monorepo: pnpm install runs the ffmpeg patch ([patch-core-mt] log lines)', done: false },
+  { label: 'Monorepo: pnpm --filter studio build / lint / test:run all green', done: false },
+  { label: 'Monorepo: preview + run an ASSEMBLE end-to-end (MT core + 3 GiB heap under pnpm)', done: false },
+  { label: 'Monorepo: deploy-studio.yml (workflow_dispatch) serves Studio; /api/* resolves', done: false },
+  { label: 'Demo: git submodule update --init resolves bffless-apps', done: false },
+  { label: 'Demo: npm build / lint / test:run / test:e2e green (home.spec auth+comments mocks intact)', done: false },
+  { label: 'Demo: every route works; no dead /studio link, no Redux/ffmpeg console errors', done: false },
+]} />
+
+## Locked decisions
+
+<Callout kind="ok" title="Resolved at execution">
+**Repo:** `bffless-apps`, **public** (giveaway) · submodule folder `bffless-apps/`. &nbsp;
+**Serve path:** Studio at the **root** of its alias — drop the `/studio` prefix, no `vite base` (audit `studioRoute.ts`). &nbsp;
+**ffmpeg patch:** migrate to **`pnpm patch` / `patchedDependencies`** (no `postinstall` script). &nbsp;
+**Deploy target:** alias **`studio`** on the `j5s.dev` project, custom domain **`studio.j5s.dev`**, Studio rule set attached to the alias.
+</Callout>
