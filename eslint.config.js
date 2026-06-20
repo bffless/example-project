@@ -6,8 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  // Build/coverage output and the MSW-generated worker are not ours to lint.
-  globalIgnores(['dist', 'coverage', 'public/mockServiceWorker.js']),
+  // Build/coverage output, the MSW-generated worker, and the visual-plans
+  // gallery (a separate Astro sub-project with its own toolchain) are not ours to lint.
+  globalIgnores(['dist', 'coverage', 'public/mockServiceWorker.js', 'visual-plans']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
