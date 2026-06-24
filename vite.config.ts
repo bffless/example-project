@@ -33,7 +33,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.d.ts', 'src/main.tsx', 'src/test/**'],
+      // main.tsx and mocks/browser.ts are browser-only entry points (the latter
+      // calls msw's setupWorker, which throws outside a browser) — not unit-testable.
+      exclude: ['src/**/*.d.ts', 'src/main.tsx', 'src/mocks/browser.ts', 'src/test/**'],
     },
   },
 })
