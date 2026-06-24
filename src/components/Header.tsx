@@ -8,8 +8,7 @@ const NAV = [
   { to: '/comments', label: 'Comments' },
   { to: '/chat', label: 'Chat' },
   { to: '/auth', label: 'Auth' },
-  // /studio is hidden from the nav while it's pre-release — the route still
-  // works by direct URL. Restore the entry when it's ready for users.
+  { to: '/studio', label: 'Studio' },
 ]
 
 export function Header() {
