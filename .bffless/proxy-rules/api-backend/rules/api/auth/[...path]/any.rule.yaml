@@ -1,0 +1,27 @@
+# /api/auth/* — SuperTokens, same-origin on the primary domain. ALL methods.
+#
+# DO NOT DELETE THIS RULE. It looks unused — nothing in src/ fetches
+# `/api/auth/...` — because the *app* doesn't call it: SuperTokens does, and the
+# cookies it sets are scoped to this origin and this path.
+#
+# Why /api/auth and not /auth: CE mounts SuperTokens with
+#   apiBasePath:     /api/auth     <- the endpoints  (this rule)
+#   websiteBasePath: /auth         <- the login page (a client route; NOT proxied)
+# and SuperTokens path-scopes the refresh-token cookie to
+# /api/auth/session/refresh. Map the endpoints anywhere else and the browser
+# simply won't send that cookie — the session can't refresh, and the app quietly
+# degrades to the /_bffless/auth/* relay. That relay is the FALLBACK path, meant
+# for localhost, custom domains, and cross-origin setups — not for the primary
+# domain, where auth should be same-origin.
+#
+# `http://localhost:3000` is not a developer's laptop: from the proxy's point of
+# view it's the CE backend itself. stripPrefix drops the matched /api/auth and
+# targetUrl supplies it again, so the path round-trips unchanged:
+#
+#   /api/auth/session/refresh      -> http://localhost:3000/api/auth/session/refresh
+#   /api/auth/signup/email/exists  -> http://localhost:3000/api/auth/signup/email/exists
+#
+# Cookies are forwarded both ways, which is the whole point.
+description: SuperTokens auth endpoints, same-origin on the primary domain
+targetUrl: http://localhost:3000/api/auth
+forwardCookies: true

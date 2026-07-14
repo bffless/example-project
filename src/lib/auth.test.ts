@@ -51,13 +51,22 @@ describe('auth', () => {
   })
 
   describe('logout', () => {
-    it('posts to the logout endpoint then bounces to the admin logout url', async () => {
+    it('revokes the SuperTokens session, clears the relay, then bounces to admin', async () => {
       const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
       vi.stubGlobal('fetch', fetchMock)
 
       await logout('/auth')
 
-      expect(fetchMock).toHaveBeenCalledWith(
+      // SuperTokens' signout is what actually revokes the session. The relay's
+      // logout only clears the relay's own cookies, which don't exist on the
+      // primary domain — calling it alone would leave the real session alive.
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        '/api/auth/signout',
+        expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      )
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
         '/_bffless/auth/logout',
         expect.objectContaining({ method: 'POST', credentials: 'include' }),
       )

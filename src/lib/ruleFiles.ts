@@ -11,6 +11,7 @@ import contactRule from '../../.bffless/proxy-rules/api-backend/rules/api/contac
 import contactsSchema from '../../.bffless/proxy-rules/api-backend/schemas/contacts.schema.yaml?raw'
 import uploadRule from '../../.bffless/proxy-rules/api-backend/rules/api/uploads/contact-attachments/post.rule.yaml?raw'
 import serveAttachmentRule from '../../.bffless/proxy-rules/api-backend/rules/api/uploads/contact-attachments/[...path]/get.rule.yaml?raw'
+import authProxyRule from '../../.bffless/proxy-rules/api-backend/rules/api/auth/[...path]/any.rule.yaml?raw'
 import commentsGetRule from '../../.bffless/proxy-rules/api-backend/rules/api/comments/get.rule.yaml?raw'
 import commentsPostRule from '../../.bffless/proxy-rules/api-backend/rules/api/comments/post.rule.yaml?raw'
 import commentsSchema from '../../.bffless/proxy-rules/api-backend/schemas/comments.schema.yaml?raw'
@@ -62,6 +63,12 @@ export const SERVE_ATTACHMENT_RULE: SourceFile = {
   lang: 'yaml',
 }
 
+export const AUTH_PROXY_RULE: SourceFile = {
+  path: `${RULES}/api-backend/rules/api/auth/[...path]/any.rule.yaml`,
+  source: authProxyRule,
+  lang: 'yaml',
+}
+
 export const COMMENTS_GET_RULE: SourceFile = {
   path: `${RULES}/api-backend/rules/api/comments/get.rule.yaml`,
   source: commentsGetRule,
@@ -106,6 +113,7 @@ export const USE_SESSION: SourceFile = {
 
 /** Every file this site renders — the drift test in `ruleFiles.test.ts` walks it. */
 export const ALL_SOURCE_FILES: SourceFile[] = [
+  AUTH_PROXY_RULE,
   CONTACT_RULE,
   CONTACTS_SCHEMA,
   UPLOAD_RULE,

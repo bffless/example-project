@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { handlers } from './handlers'
-import { STORAGE_KEY, readMockAuth, writeMockAuth } from './mockAuthStore'
+import { STORAGE_KEY, readMockAuth, writeMockAuth, type MockAuthState } from './mockAuthStore'
 
-// The handler array is [session(GET), refresh(POST), logout(POST)]. Each entry is
-// an MSW RequestHandler; we drive its resolver directly via `.run()` so we can
-// assert the response without standing up a worker.
-const [sessionHandler, refreshHandler, logoutHandler] = handlers
+// Look handlers up by method+path rather than by array position: the array holds
+// both the proxied SuperTokens endpoints and the relay fallbacks, and a lookup
+// keeps these tests honest if the order ever changes.
+function handlerFor(method: string, path: string) {
+  const found = handlers.find(
+    (h) =>
+      h.info.method === method &&
+      String((h.info as { path: unknown }).path) === path,
+  )
+  if (!found) throw new Error(`no MSW handler for ${method} ${path}`)
+  return found
+}
 
 async function runHandler(
   handler: (typeof handlers)[number],
@@ -18,73 +26,109 @@ async function runHandler(
   return result?.response as Response | undefined
 }
 
+const authed: MockAuthState = {
+  enabled: true,
+  authenticated: true,
+  user: { id: 'u-1', role: 'user' },
+}
+
 describe('MSW auth handlers', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => localStorage.clear())
 
-  it('session returns a guest body when not authenticated', async () => {
-    const res = await runHandler(sessionHandler, '/_bffless/auth/session')
-    expect(res?.status).toBe(200)
-    expect(await res?.json()).toEqual({ authenticated: false, user: null })
+  describe('proxied SuperTokens endpoints (the primary path)', () => {
+    const session = () => handlerFor('GET', '/api/auth/session')
+    const refresh = () => handlerFor('POST', '/api/auth/session/refresh')
+    const signout = () => handlerFor('POST', '/api/auth/signout')
+
+    it('session returns SuperTokens’ shape: a null user when guest', async () => {
+      writeMockAuth({ ...authed, authenticated: false })
+      const res = await runHandler(session(), '/api/auth/session')
+      expect(res?.status).toBe(200)
+      // Note: `{ user: null }`, not `{ authenticated: false }` — the real
+      // SuperTokens endpoint and the relay genuinely differ here.
+      expect(await res?.json()).toEqual({ user: null })
+    })
+
+    it('session returns the mock user when authenticated', async () => {
+      writeMockAuth({
+        enabled: true,
+        authenticated: true,
+        user: { id: 'u-1', email: 'a@b.co', role: 'admin' },
+      })
+      const body = await (await runHandler(session(), '/api/auth/session'))?.json()
+      expect(body.user.id).toBe('u-1')
+      expect(body.user.role).toBe('admin')
+    })
+
+    it('session passes through when mocking is disabled', async () => {
+      writeMockAuth({ ...authed, enabled: false })
+      const res = await runHandler(session(), '/api/auth/session')
+      expect(res?.statusText).toBe('Passthrough')
+    })
+
+    it('refresh returns 200 when authenticated, 401 otherwise', async () => {
+      writeMockAuth(authed)
+      let res = await runHandler(refresh(), '/api/auth/session/refresh', { method: 'POST' })
+      expect(res?.status).toBe(200)
+
+      writeMockAuth({ ...authed, authenticated: false })
+      res = await runHandler(refresh(), '/api/auth/session/refresh', { method: 'POST' })
+      expect(res?.status).toBe(401)
+    })
+
+    it('signout flips authenticated to false and returns 204', async () => {
+      writeMockAuth(authed)
+      const res = await runHandler(signout(), '/api/auth/signout', { method: 'POST' })
+      expect(res?.status).toBe(204)
+      expect(readMockAuth().authenticated).toBe(false)
+      expect(localStorage.getItem(STORAGE_KEY)).toBeTruthy()
+    })
   })
 
-  it('session returns the mock user when authenticated', async () => {
-    writeMockAuth({
-      enabled: true,
-      authenticated: true,
-      user: { id: 'u-1', email: 'a@b.co', role: 'admin' },
-    })
-    const res = await runHandler(sessionHandler, '/_bffless/auth/session')
-    const body = await res?.json()
-    expect(body.authenticated).toBe(true)
-    expect(body.user.id).toBe('u-1')
-  })
+  describe('relay endpoints (the custom-domain fallback)', () => {
+    const session = () => handlerFor('GET', '/_bffless/auth/session')
+    const refresh = () => handlerFor('POST', '/_bffless/auth/refresh')
+    const logout = () => handlerFor('POST', '/_bffless/auth/logout')
 
-  it('session passes through when mocking is disabled', async () => {
-    writeMockAuth({
-      enabled: false,
-      authenticated: false,
-      user: { id: 'x', role: 'user' },
+    it('session returns a guest body when not authenticated', async () => {
+      const res = await runHandler(session(), '/_bffless/auth/session')
+      expect(res?.status).toBe(200)
+      expect(await res?.json()).toEqual({ authenticated: false, user: null })
     })
-    // passthrough() resolves to a sentinel response that lets the request hit
-    // the network rather than a mocked body.
-    const res = await runHandler(sessionHandler, '/_bffless/auth/session')
-    expect(res?.statusText).toBe('Passthrough')
-  })
 
-  it('refresh returns 200 when authenticated, 401 otherwise', async () => {
-    writeMockAuth({
-      enabled: true,
-      authenticated: true,
-      user: { id: 'u-1', role: 'user' },
+    it('session returns the mock user when authenticated', async () => {
+      writeMockAuth({
+        enabled: true,
+        authenticated: true,
+        user: { id: 'u-1', email: 'a@b.co', role: 'admin' },
+      })
+      const body = await (await runHandler(session(), '/_bffless/auth/session'))?.json()
+      expect(body.authenticated).toBe(true)
+      expect(body.user.id).toBe('u-1')
     })
-    let res = await runHandler(refreshHandler, '/_bffless/auth/refresh', {
-      method: 'POST',
-    })
-    expect(res?.status).toBe(200)
 
-    writeMockAuth({
-      enabled: true,
-      authenticated: false,
-      user: { id: 'u-1', role: 'user' },
+    it('session passes through when mocking is disabled', async () => {
+      writeMockAuth({ ...authed, enabled: false })
+      const res = await runHandler(session(), '/_bffless/auth/session')
+      expect(res?.statusText).toBe('Passthrough')
     })
-    res = await runHandler(refreshHandler, '/_bffless/auth/refresh', {
-      method: 'POST',
-    })
-    expect(res?.status).toBe(401)
-  })
 
-  it('logout flips authenticated to false and returns 204', async () => {
-    writeMockAuth({
-      enabled: true,
-      authenticated: true,
-      user: { id: 'u-1', role: 'user' },
+    it('refresh returns 200 when authenticated, 401 otherwise', async () => {
+      writeMockAuth(authed)
+      let res = await runHandler(refresh(), '/_bffless/auth/refresh', { method: 'POST' })
+      expect(res?.status).toBe(200)
+
+      writeMockAuth({ ...authed, authenticated: false })
+      res = await runHandler(refresh(), '/_bffless/auth/refresh', { method: 'POST' })
+      expect(res?.status).toBe(401)
     })
-    const res = await runHandler(logoutHandler, '/_bffless/auth/logout', {
-      method: 'POST',
+
+    it('logout flips authenticated to false and returns 204', async () => {
+      writeMockAuth(authed)
+      const res = await runHandler(logout(), '/_bffless/auth/logout', { method: 'POST' })
+      expect(res?.status).toBe(204)
+      expect(readMockAuth().authenticated).toBe(false)
     })
-    expect(res?.status).toBe(204)
-    expect(readMockAuth().authenticated).toBe(false)
-    expect(localStorage.getItem(STORAGE_KEY)).toBeTruthy()
   })
 })
