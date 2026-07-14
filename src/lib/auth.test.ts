@@ -11,6 +11,8 @@ describe('auth', () => {
       writable: true,
       value: {
         origin: 'https://demo.j5s.dev',
+        hostname: 'demo.j5s.dev',
+        host: 'demo.j5s.dev',
         pathname: '/forms',
         href: 'https://demo.j5s.dev/forms',
       },
@@ -46,6 +48,29 @@ describe('auth', () => {
       vi.stubEnv('VITE_BFFLESS_ADMIN_URL', 'https://custom-admin.test/')
       expect(getLoginUrl('/x')).toBe(
         'https://custom-admin.test/login?redirect=https%3A%2F%2Fdemo.j5s.dev%2Fx',
+      )
+    })
+
+    it('relays through the admin when off the primary domain (localhost)', () => {
+      // sAccessToken is scoped to `.j5s.dev` and can't reach localhost, so the
+      // login has to relay a per-domain cookie in via the custom-domain flow.
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        writable: true,
+        value: {
+          origin: 'http://localhost:5173',
+          hostname: 'localhost',
+          host: 'localhost:5173',
+          pathname: '/auth',
+          href: 'http://localhost:5173/auth',
+        },
+      })
+
+      // targetDomain is the bare host (CE rejects a `:port`); the port rides in
+      // targetOrigin, which CE honours only for localhost/127.0.0.1. redirect is
+      // a bare path, not an absolute URL.
+      expect(getLoginUrl()).toBe(
+        'https://admin.j5s.dev/login?customDomainRelay=true&targetDomain=localhost&redirect=%2Fauth&targetOrigin=http%3A%2F%2Flocalhost%3A5173',
       )
     })
   })
