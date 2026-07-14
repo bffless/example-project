@@ -1,0 +1,9 @@
+id: 4e702a2a-c99d-4c09-b0c7-a8148b76dbda
+name: install_sh_logs
+fields:
+  - name: ip
+    type: string
+    required: false
+  - name: user_agent
+    type: text
+    required: false

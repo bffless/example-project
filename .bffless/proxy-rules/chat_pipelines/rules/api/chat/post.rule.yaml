@@ -1,0 +1,44 @@
+# POST /api/chat — the whole chat backend. One handler.
+#
+# The browser (Vercel AI SDK `useChat`) streams to this route; `ai_handler`
+# calls the model, streams tokens back as they arrive, and writes both sides of
+# the exchange to the chat tables. There is no chat server in this repo.
+description: Streaming AI chat with conversation + message persistence
+pipeline:
+  name: chat AI chat
+  description: Answer as the site assistant, streaming, and persist the thread
+  steps:
+    - id: ai
+      name: ai
+      handler: ai_handler
+      config:
+        mode: chat
+        provider: anthropic
+        model: claude-sonnet-4-6
+        maxTokens: 4096
+        temperature: 0.7
+
+        # Stream tokens to the browser instead of buffering the whole reply.
+        responseMode: stream
+
+        # Where the messages live in the request the AI SDK sends.
+        messagesField: request.body.messages
+
+        # Persistence is configuration, not code: BFFless creates the
+        # conversation on the first message and appends every turn after it.
+        persistMessages: true
+        maxHistoryMessages: 50
+        persistConversationsSchemaId: $schema:chat_conversations
+        persistMessagesSchemaId: $schema:chat_messages
+
+        # Skills are markdown files deployed *with the site* (.bffless/skills/),
+        # so the assistant's knowledge is versioned per deployment and rolls
+        # back with it. This one teaches it what this site is.
+        skills:
+          mode: selected
+          enabled:
+            - site-overview
+
+        # Kept beside this file rather than inlined — it's prose, so it belongs
+        # in a prose file. `$file:` inlines it verbatim at build time.
+        systemPrompt: { $file: ./system-prompt.md }

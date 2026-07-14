@@ -1,9 +1,34 @@
 import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { VideoEmbed } from '../components/VideoEmbed'
+import { CodeFile } from '../components/CodeFile'
+import { Endpoints, type EndpointSpec } from '../components/Endpoint'
+import { RulesAsCode } from '../components/RulesAsCode'
+import { SERVE_ATTACHMENT_RULE, UPLOAD_RULE, USE_SESSION } from '../lib/ruleFiles'
 import { useSession } from '../lib/useSession'
 import { getLoginUrl, logout } from '../lib/auth'
 import { EPISODES } from '../lib/episodes'
+
+const RELAY_ENDPOINTS: EndpointSpec[] = [
+  {
+    method: 'GET',
+    path: '/_bffless/auth/session',
+    summary: 'Who is this visitor? Returns { authenticated, user } from the session cookie.',
+    tag: 'built in',
+  },
+  {
+    method: 'POST',
+    path: '/_bffless/auth/refresh',
+    summary: 'Renews an expired session without a round-trip through the login page.',
+    tag: 'built in',
+  },
+  {
+    method: 'POST',
+    path: '/_bffless/auth/logout',
+    summary: 'Clears the session cookie, then the admin bounce completes the sign-out.',
+    tag: 'built in',
+  },
+]
 
 const PIECES = [
   {
@@ -106,6 +131,67 @@ export function Auth() {
             </div>
           ))}
         </div>
+      </Section>
+
+      <Section eyebrow="— The implementation" title={<>Where auth actually happens<Dot /></>}>
+        <p className="mb-8 max-w-3xl text-[16px] leading-relaxed text-ink-soft">
+          This page is the odd one out: it has no proxy rule of its own. The session endpoints are
+          built into BFFless — nothing to define, nothing to deploy. What you <em>do</em> write is
+          where a session is <em>required</em>, and that's a line of YAML in the rule set.
+        </p>
+
+        <Endpoints endpoints={RELAY_ENDPOINTS} />
+
+        <p className="mt-6 max-w-3xl text-[15px] leading-relaxed text-ink-mute">
+          Logging in bounces through the admin origin (
+          <code className="font-mono text-[13.5px] text-ink">admin.j5s.dev/login?redirect=…</code>)
+          and comes back with a cookie scoped to this site — the cross-domain dance, handled for
+          you. The panel above is that cookie, read through the relay.
+        </p>
+
+        <h3 className="mt-12 mb-5 font-serif text-[26px] leading-[1.1] text-ink">
+          Gating a route: one validator
+        </h3>
+        <p className="mb-6 max-w-3xl text-[15px] leading-relaxed text-ink-soft">
+          The contact form's attachments are the demo's protected resource. Both the upload and the
+          download carry an{' '}
+          <code className="font-mono text-[14px] text-ink">auth_required</code> validator, so an
+          anonymous request is refused at the edge — before the pipeline runs, and regardless of
+          what the frontend chose to render.
+        </p>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <CodeFile
+            file={SERVE_ATTACHMENT_RULE}
+            caption="Reading an attachment requires a session. Guessing the URL isn't enough — this is why uploaded files aren't quietly public."
+          />
+          <CodeFile
+            file={UPLOAD_RULE}
+            collapseAfter={14}
+            caption="Writing one requires a session too. allowApiKey lets CI and agents authenticate with a key instead of a cookie."
+          />
+        </div>
+
+        <h3 className="mt-12 mb-5 font-serif text-[26px] leading-[1.1] text-ink">
+          Reading the session from React
+        </h3>
+        <div className="grid items-start gap-6 lg:grid-cols-2">
+          <CodeFile
+            file={USE_SESSION}
+            collapseAfter={16}
+            caption="The client half: one hook over /_bffless/auth/session, with a module-level promise so a page full of auth-aware components still only asks once."
+          />
+          <div className="border border-paper-line bg-paper-deep/20 p-6 md:p-7">
+            <p className="mb-3 meta-label">— The rule of thumb</p>
+            <p className="text-[15px] leading-relaxed text-ink-soft">
+              Treat what the browser knows about a session as a <em>hint</em>, good for deciding
+              what to render. It is never what keeps a file private — the validator on the rule is.
+              A static site can't enforce anything, and with BFFless it doesn't have to.
+            </p>
+          </div>
+        </div>
+
+        <RulesAsCode setName="api-backend" />
       </Section>
 
       <Section eyebrow="— Watch" title={<>Auth, end to end<Dot /></>} divider={false}>

@@ -1,0 +1,48 @@
+# POST /api/comments — the write half. No login: a comment is attributed to the
+# per-browser guest id that `useBffState` appends as ?_bffGuestId=…
+#
+# The pipeline ends by re-listing the table and returning the same
+# { comments: [...] } shape as GET, so the hook can swap its state for the
+# response of a single round-trip instead of posting and then refetching.
+description: Create a comment, return the updated list
+pipeline:
+  name: Create Comment
+  description: Create a comment then return the updated list
+  steps:
+    - id: form
+      name: form
+      handler: form_handler
+      config:
+        fields:
+          name: { type: string, required: true }
+          comment: { type: string, required: true }
+
+    - id: create
+      name: create
+      handler: data_create
+      config:
+        schemaId: $schema:comments
+        fields:
+          name: steps.form.name
+          comment: steps.form.comment
+          # Not a body field — the guest id rides in on the query string, so a
+          # visitor can't claim someone else's identity by editing the payload.
+          guest_id: request.query._bffGuestId
+
+    - id: list_comments
+      name: list_comments
+      handler: data_query
+      config:
+        schemaId: $schema:comments
+        pageSize: 100
+
+    - id: respond
+      name: respond
+      handler: response_handler
+      config:
+        body: |-
+          {
+            "comments": {{{steps.list_comments}}}
+          }
+        status: 200
+        contentType: application/json

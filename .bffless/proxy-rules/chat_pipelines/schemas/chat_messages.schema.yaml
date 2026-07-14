@@ -1,0 +1,23 @@
+id: e0830746-2f94-4f41-a1da-78d57237ced9
+name: chat_messages
+fields:
+  - name: conversation_id
+    type: string
+    required: true
+  - name: role
+    type: string
+    required: true
+  - name: content
+    type: text
+    required: true
+  - name: tokens_used
+    type: number
+    default: 0
+    required: false
+  - name: metadata
+    type: json
+    required: false
+  - name: created_at
+    type: number
+    default: 0
+    required: false

@@ -1,0 +1,18 @@
+id: b646df85-8452-4e34-8816-76b9043a6e19
+name: contacts
+fields:
+  - name: name
+    type: string
+    required: true
+  - name: email
+    type: email
+    required: true
+  - name: comment
+    type: string
+    required: true
+  - name: phone
+    type: string
+    required: false
+  - name: attachment_url
+    type: string
+    required: false

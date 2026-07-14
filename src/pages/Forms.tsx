@@ -3,7 +3,48 @@ import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { VideoEmbed } from '../components/VideoEmbed'
 import { ContactDialog } from '../components/ContactDialog'
+import { CodeFile } from '../components/CodeFile'
+import { Endpoints, HandlerChain, type EndpointSpec, type ChainStep } from '../components/Endpoint'
+import { RulesAsCode } from '../components/RulesAsCode'
+import { CONTACT_RULE, CONTACTS_SCHEMA, UPLOAD_RULE } from '../lib/ruleFiles'
 import { EPISODES } from '../lib/episodes'
+
+const ENDPOINTS: EndpointSpec[] = [
+  {
+    method: 'POST',
+    path: '/api/contact',
+    summary: 'Validates a submission and stores it as a row in the contacts table.',
+  },
+  {
+    method: 'POST',
+    path: '/api/uploads/contact-attachments',
+    summary: 'Stores an attachment and returns its URL, which the form then submits.',
+    tag: 'auth required',
+  },
+  {
+    method: 'GET',
+    path: '/api/uploads/contact-attachments/*',
+    summary: 'Serves a stored attachment back. Private — a session is required to read one.',
+    tag: 'auth required',
+  },
+]
+
+const CHAIN: ChainStep[] = [
+  {
+    handler: 'form_handler',
+    detail:
+      'Declares the fields and which are required. A submission missing name, email, or comment is rejected before anything else runs.',
+  },
+  {
+    handler: 'data_create',
+    detail: (
+      <>
+        Writes the validated fields to the <code className="font-mono text-[13px]">contacts</code>{' '}
+        Data Table. No ORM, no migration — the table is the schema file.
+      </>
+    ),
+  },
+]
 
 const STEPS = [
   {
@@ -71,6 +112,44 @@ export function Forms() {
             Open the contact form
           </button>
         </div>
+      </Section>
+
+      <Section eyebrow="— The implementation" title={<>The rules behind this form<Dot /></>}>
+        <p className="mb-8 max-w-3xl text-[16px] leading-relaxed text-ink-soft">
+          Three routes back this page, and all three are files in this repository. Below is the
+          real YAML, imported straight from the rule set — not a snippet someone pasted in and
+          forgot to update.
+        </p>
+
+        <Endpoints endpoints={ENDPOINTS} />
+
+        <h3 className="mt-12 mb-5 font-serif text-[26px] leading-[1.1] text-ink">
+          What a submission runs through
+        </h3>
+        <HandlerChain
+          steps={CHAIN}
+          note="Two handlers, in order. Each step's output is addressable by the next one — that's how create_record reads steps.form_validation.email."
+        />
+
+        <div className="mt-12 grid gap-6 lg:grid-cols-2">
+          <CodeFile
+            file={CONTACT_RULE}
+            caption="The route's path and method come from where the file sits: rules/api/contact/post.rule.yaml is POST /api/contact."
+          />
+          <div className="flex flex-col gap-6">
+            <CodeFile
+              file={CONTACTS_SCHEMA}
+              caption="The Data Table it writes to. The rule refers to it by name — $schema:contacts — never by UUID."
+            />
+            <CodeFile
+              file={UPLOAD_RULE}
+              collapseAfter={12}
+              caption="The auth_required validator is why the attachment field only appears once you sign in: an anonymous upload is refused at the edge, so the UI never has to be the thing enforcing it."
+            />
+          </div>
+        </div>
+
+        <RulesAsCode setName="api-backend" />
       </Section>
 
       <Section eyebrow="— Watch" title={<>Build the form, then add uploads<Dot /></>} divider={false}>

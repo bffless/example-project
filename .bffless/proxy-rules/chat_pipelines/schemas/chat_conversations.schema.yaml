@@ -1,0 +1,32 @@
+id: e7deb976-44b5-49ad-bc1c-cd9d99bab28c
+name: chat_conversations
+fields:
+  - name: user_id
+    type: string
+    required: true
+  - name: chat_id
+    type: string
+    required: true
+  - name: title
+    type: string
+    required: false
+  - name: model
+    type: string
+    required: true
+  - name: system_prompt
+    type: text
+    required: false
+  - name: ip_address
+    type: string
+    required: false
+  - name: message_count
+    type: number
+    default: 0
+    required: true
+  - name: total_tokens
+    type: number
+    default: 0
+    required: true
+  - name: metadata
+    type: json
+    required: false

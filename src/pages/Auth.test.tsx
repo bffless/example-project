@@ -7,7 +7,7 @@ vi.mock('../lib/useSession', () => ({
   useSession: () => useSessionMock(),
 }))
 
-const getLoginUrlMock = vi.fn((_path?: string) => 'https://admin.test/login')
+const getLoginUrlMock = vi.fn<(path?: string) => string>(() => 'https://admin.test/login')
 const logoutMock = vi.fn()
 vi.mock('../lib/auth', () => ({
   getLoginUrl: (path?: string) => getLoginUrlMock(path),

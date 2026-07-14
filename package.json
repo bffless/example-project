@@ -12,7 +12,12 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "rules:build": "bffless rules build",
+    "rules:validate": "bffless rules validate",
+    "rules:test": "bffless rules test",
+    "rules:diff": "bffless rules diff",
+    "rules:push": "bffless rules push"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.195",
@@ -37,6 +42,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.7",
+    "bffless": "^0.2.5",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

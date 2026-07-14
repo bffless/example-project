@@ -25,6 +25,29 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Validate proxy rules
+        run: npm run rules:validate
+
+      - name: Test proxy-rule handlers
+        run: npm run rules:test
+
+      # A read-only check: report what merging this PR would change about the
+      # live rule sets, as a PR comment. Nothing is written — production's rules
+      # only ever change from `main` (see deploy.yml).
+      - name: Preview proxy-rule changes
+        uses: bffless/deploy-proxy-rules@v1
+        with:
+          path: |
+            .bffless/proxy-rules/api-backend
+            .bffless/proxy-rules/chat_pipelines
+          api-url: ${{ vars.BFFLESS_URL }}
+          api-key: ${{ secrets.BFFLESS_API_KEY }}
+          project: bffless/example-project
+          prune: true
+          dry-run: true
+          pr-comment: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Generate coverage report
         run: npm run test:coverage
 
@@ -66,7 +89,10 @@ jobs:
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: preview
           description: 'Preview from PR #${{ github.event.pull_request.number }}'
-          proxy-rule-set-name: api-backend
+          # Attachment is additive and idempotent: naming both sets keeps /api/chat
+          # working on the preview alias too. The preview runs against the rule sets
+          # currently live — this PR's rule changes only land when it merges.
+          proxy-rule-set-names: api-backend,chat_pipelines
           pr-comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -100,10 +126,11 @@ jobs:
           alias: preview
           description: 'Playwright HTML report from PR #${{ github.event.pull_request.number }}'
 
+      # Skills only — see the note in deploy.yml.
       - name: Upload chat skills to BFFless
         uses: bffless/upload-artifact@v1
         with:
-          path: .bffless
+          path: .bffless/skills
           api-url: ${{ vars.BFFLESS_URL }}
           api-key: ${{ secrets.BFFLESS_API_KEY }}
           alias: preview

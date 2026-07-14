@@ -1,0 +1,30 @@
+name: Proxy rules drift check
+
+# The dashboard can still edit a rule set that git owns. This job notices:
+# `rules diff` exits 1 when the live sets differ from what's committed, which
+# fails the run. Reconcile by pushing (git wins) or pulling (keep the edit).
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Diff live rule sets against git
+        env:
+          BFFLESS_API_URL: ${{ vars.BFFLESS_URL }}
+          BFFLESS_API_KEY: ${{ secrets.BFFLESS_API_KEY }}
+        run: |
+          set -o pipefail
+          npm run rules:diff 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

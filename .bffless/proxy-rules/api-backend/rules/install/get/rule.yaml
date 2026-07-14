@@ -1,0 +1,41 @@
+# GET /install — what `curl -fsSL https://j5s.dev/install | sh` hits.
+# Fetches the CE install script from GitHub and streams it back, then logs who
+# asked in a postStep (post-steps run *after* the response is sent, so the
+# logging never slows the download down).
+description: Reverse-proxy the CE install script, logging IP + user-agent to install_sh_logs
+pipeline:
+  name: Install Script Proxy
+  description: Fetches install.sh from GitHub raw and logs each request
+  steps:
+    - id: fetch
+      name: fetch
+      handler: http_request
+      config:
+        url: "'https://raw.githubusercontent.com/bffless/ce/refs/heads/main/install.sh'"
+        method: GET
+        timeout: 15000
+
+    - id: respond
+      name: respond
+      handler: response_handler
+      config:
+        body: "{{{steps.fetch}}}"
+        status: 200
+        contentType: text/x-shellscript
+
+  postSteps:
+    # `code:` points at a real file — lintable, and unit-tested by
+    # extract.fn.test.yaml right next to it (`bffless rules test`).
+    - id: extract
+      name: extract
+      handler: function_handler
+      code: ./extract.fn.js
+
+    - id: log
+      name: log
+      handler: data_create
+      config:
+        schemaId: $schema:install_sh_logs
+        fields:
+          ip: steps.extract.ip
+          user_agent: steps.extract.userAgent

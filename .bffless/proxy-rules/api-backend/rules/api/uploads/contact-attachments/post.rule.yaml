@@ -1,0 +1,33 @@
+# POST /api/uploads/contact-attachments — the attachment field in the contact
+# dialog. `auth_required` is what makes that field appear only for signed-in
+# visitors: an anonymous POST here is rejected before the pipeline runs.
+description: Upload a contact-form attachment (signed-in visitors only)
+pipeline:
+  name: Upload contact_attachments
+  description: Store the file, register it in `contact_attachments`, return its URL
+  validators:
+    # Enforced at the edge — the frontend never has to check.
+    - type: auth_required
+      config:
+        allowApiKey: true
+  steps:
+    - id: upload
+      name: upload
+      handler: file_upload_handler
+      config:
+        schemaId: $schema:contact_attachments
+        subDir: contact-attachments
+        dateBucket: false
+        allowedMimeTypes:
+          - image/*
+          - application/pdf
+
+    # Hand the stored file's record (including `url`) back to the browser, which
+    # posts it on to /api/contact as `attachment_url`.
+    - id: response
+      name: Return Upload Result
+      handler: response_handler
+      config:
+        body: "{{{steps.upload}}}"
+        status: 200
+        contentType: application/json
