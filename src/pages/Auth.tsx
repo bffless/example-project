@@ -4,29 +4,35 @@ import { VideoEmbed } from '../components/VideoEmbed'
 import { CodeFile } from '../components/CodeFile'
 import { Endpoints, type EndpointSpec } from '../components/Endpoint'
 import { RulesAsCode } from '../components/RulesAsCode'
-import { SERVE_ATTACHMENT_RULE, UPLOAD_RULE, USE_SESSION } from '../lib/ruleFiles'
+import { AUTH_PROXY_RULE, SERVE_ATTACHMENT_RULE, UPLOAD_RULE, USE_SESSION } from '../lib/ruleFiles'
 import { useSession } from '../lib/useSession'
 import { getLoginUrl, logout } from '../lib/auth'
 import { EPISODES } from '../lib/episodes'
 
-const RELAY_ENDPOINTS: EndpointSpec[] = [
+const AUTH_ENDPOINTS: EndpointSpec[] = [
+  {
+    method: 'GET',
+    path: '/api/auth/session',
+    summary: 'Who is this visitor? Returns the canonical BFFless user — id, email, role.',
+    tag: 'primary',
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/session/refresh',
+    summary: 'Renews an expired session. SuperTokens rotates the refresh token here.',
+    tag: 'primary',
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/signout',
+    summary: 'Actually revokes the session — the only endpoint that does.',
+    tag: 'primary',
+  },
   {
     method: 'GET',
     path: '/_bffless/auth/session',
-    summary: 'Who is this visitor? Returns { authenticated, user } from the session cookie.',
-    tag: 'built in',
-  },
-  {
-    method: 'POST',
-    path: '/_bffless/auth/refresh',
-    summary: 'Renews an expired session without a round-trip through the login page.',
-    tag: 'built in',
-  },
-  {
-    method: 'POST',
-    path: '/_bffless/auth/logout',
-    summary: 'Clears the session cookie, then the admin bounce completes the sign-out.',
-    tag: 'built in',
+    summary: 'The built-in relay. Authenticates cross-origin custom domains, where the above cannot.',
+    tag: 'fallback',
   },
 ]
 
@@ -34,7 +40,7 @@ const PIECES = [
   {
     tag: 'EP 15',
     title: 'Authentication',
-    body: 'A built-in admin login relay handles the cross-domain dance. Your static site reads /_bffless/auth/session and gets a cookie-backed session — no auth server to stand up.',
+    body: 'An admin login relay handles the cross-domain dance. A proxy rule puts SuperTokens on this origin, and your static site reads a cookie-backed session — no auth server to stand up.',
   },
   {
     tag: 'EP 14',
@@ -84,7 +90,7 @@ export function Auth() {
       <Section eyebrow="— Live session" title={<>Your session, right now<Dot /></>}>
         <div className="border border-paper-line bg-paper-deep/30 p-6 md:p-8">
           <div className="flex items-center justify-between">
-            <span className="meta-label">/_bffless/auth/session</span>
+            <span className="meta-label">/api/auth/session</span>
             <button
               type="button"
               onClick={refetch}
@@ -133,20 +139,53 @@ export function Auth() {
         </div>
       </Section>
 
-      <Section eyebrow="— The implementation" title={<>Where auth actually happens<Dot /></>}>
+      <Section eyebrow="— The implementation" title={<>One rule makes auth work<Dot /></>}>
         <p className="mb-8 max-w-3xl text-[16px] leading-relaxed text-ink-soft">
-          This page is the odd one out: it has no proxy rule of its own. The session endpoints are
-          built into BFFless — nothing to define, nothing to deploy. What you <em>do</em> write is
-          where a session is <em>required</em>, and that's a line of YAML in the rule set.
+          Auth on a static site rests on a single, unglamorous proxy rule: it reverse-proxies{' '}
+          <code className="font-mono text-[15px] text-ink">/api/auth/*</code> to the BFFless
+          backend, putting SuperTokens' own endpoints on <em>this</em> origin. Without it, nothing
+          below works — and it fails in a way that's easy to miss, which is the interesting part.
         </p>
 
-        <Endpoints endpoints={RELAY_ENDPOINTS} />
+        <Endpoints endpoints={AUTH_ENDPOINTS} />
 
-        <p className="mt-6 max-w-3xl text-[15px] leading-relaxed text-ink-mute">
-          Logging in bounces through the admin origin (
-          <code className="font-mono text-[13.5px] text-ink">admin.j5s.dev/login?redirect=…</code>)
-          and comes back with a cookie scoped to this site — the cross-domain dance, handled for
-          you. The panel above is that cookie, read through the relay.
+        <div className="mt-12 grid items-start gap-6 lg:grid-cols-2">
+          <CodeFile
+            file={AUTH_PROXY_RULE}
+            collapseAfter={13}
+            caption="The rule that makes SuperTokens same-origin. forwardCookies is what carries the session cookie through — it's off by default."
+          />
+          <div className="border border-terracotta/30 bg-terracotta/[0.06] p-6 md:p-7">
+            <p className="mb-3 meta-label text-terracotta">— Why /api/auth and not /auth</p>
+            <p className="text-[15px] leading-relaxed text-ink-soft">
+              SuperTokens path-scopes the refresh-token cookie to exactly{' '}
+              <code className="font-mono text-[13.5px] text-ink">/api/auth/session/refresh</code>.
+              Mount the proxy anywhere else and the browser simply won't send that cookie — so
+              reading a session still works (the access-token cookie is scoped to{' '}
+              <code className="font-mono text-[13.5px] text-ink">/</code>), but{' '}
+              <em className="not-italic text-ink">refreshing one silently fails</em>. The site looks
+              fine, then quietly logs people out an hour later.
+            </p>
+            <p className="mt-4 text-[15px] leading-relaxed text-ink-soft">
+              <code className="font-mono text-[13.5px] text-ink">/auth</code> is SuperTokens'{' '}
+              <em>website</em> base path — the login page, a client route. It is not where the
+              endpoints live.
+            </p>
+          </div>
+        </div>
+
+        <h3 className="mt-12 mb-5 font-serif text-[26px] leading-[1.1] text-ink">
+          The relay is a fallback, not the front door
+        </h3>
+        <p className="mb-6 max-w-3xl text-[15px] leading-relaxed text-ink-soft">
+          BFFless also ships built-in{' '}
+          <code className="font-mono text-[14px] text-ink">/_bffless/auth/*</code> endpoints, and
+          it's tempting to just use those — they need no rule at all. But they exist for the case
+          where the proxy <em>can't</em> work: a cross-origin custom domain, where SuperTokens'
+          cookies never reach the origin. On your primary domain they under-hydrate the user (no{' '}
+          <code className="font-mono text-[13.5px] text-ink">role</code>), can't refresh the real
+          session, and can't revoke it on logout. So: proxied first, relay second — which is exactly
+          what the hook below does.
         </p>
 
         <h3 className="mt-12 mb-5 font-serif text-[26px] leading-[1.1] text-ink">
@@ -179,7 +218,7 @@ export function Auth() {
           <CodeFile
             file={USE_SESSION}
             collapseAfter={16}
-            caption="The client half: one hook over /_bffless/auth/session, with a module-level promise so a page full of auth-aware components still only asks once."
+            caption="The client half. Note the single-flight refresh mutex: SuperTokens rotates the refresh token on every call, so two concurrent refreshes race on the same cookie — the loser can trip token-theft detection."
           />
           <div className="border border-paper-line bg-paper-deep/20 p-6 md:p-7">
             <p className="mb-3 meta-label">— The rule of thumb</p>

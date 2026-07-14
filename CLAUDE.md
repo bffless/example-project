@@ -30,7 +30,7 @@ Every `/api/*` route the site calls is a BFFless proxy rule authored as files, p
 
 | Set | Routes |
 | --- | --- |
-| `.bffless/proxy-rules/api-backend/` | `POST /api/contact`, `POST`/`GET /api/uploads/contact-attachments*` (both `auth_required`), `GET`/`POST /api/comments`, `GET /install` |
+| `.bffless/proxy-rules/api-backend/` | `ANY /api/auth/*` (SuperTokens reverse proxy — see below), `POST /api/contact`, `POST`/`GET /api/uploads/contact-attachments*` (both `auth_required`), `GET`/`POST /api/comments`, `GET /install` |
 | `.bffless/proxy-rules/chat_pipelines/` | `POST /api/chat` (streaming `ai_handler`), `GET /api/chat` (history) |
 
 A rule's path and method come from **where its file sits**: `rules/api/contact/post.rule.yaml` is `POST /api/contact`; a `[...path]/` directory is a trailing `*`. Steps reference Data Tables by name (`$schema:contacts` → `schemas/contacts.schema.yaml`), never by UUID. The chat system prompt is a `$file:` ref to `system-prompt.md` beside the rule, so prose lives in a prose file.
@@ -47,7 +47,18 @@ npm run rules:build      # compile to dist/ (gitignored)
 ### Runtime integrations
 
 - **`src/components/CommentsSection.tsx`** uses `useBffState` from `@bffless/use-bff-state` against `/api/comments`. The hook owns fetch/update/loading/error state; the component just renders and calls `update({...})` to append. PR-preview deployments resolve `/api/*` through the `api-backend` proxy rule set declared in `.github/workflows/pr-preview.yml`.
-- **`src/lib/useSession.ts`** talks to `/_bffless/auth/session` and `/_bffless/auth/refresh` (BFFless built-in cookie-based auth relay). It dedupes concurrent calls via a module-level `inFlight` promise — `refetch()` resets it. Tests and any new auth-aware code must be aware of this singleton: it persists across renders within a session.
+- **`src/lib/useSession.ts`** reads the session from the **reverse-proxied SuperTokens endpoint** (`GET /api/auth/session`) and falls back to the built-in relay (`/_bffless/auth/session`) — see "Auth" below for why that order matters. It dedupes concurrent calls via a module-level `inFlight` promise, and refreshes through a second singleton (`refreshInFlight`, a 1-permit mutex) — `refetch()` resets both. Tests and any new auth-aware code must be aware of these singletons: they persist across renders within a session.
+
+### Auth: `/api/auth/*` is load-bearing, and the relay is only a fallback
+
+**Never delete the `ANY /api/auth/*` rule** (`.bffless/proxy-rules/api-backend/rules/api/auth/[...path]/`). Nothing in `src/` fetches it directly, so it looks unused — but it's what puts SuperTokens' endpoints on this origin, and `http://localhost:3000` in its `targetUrl` is the CE backend itself (in-pod), not somebody's laptop. It was pruned once on exactly that misreading, and production degraded silently.
+
+Two facts drive everything here:
+
+1. **SuperTokens path-scopes the refresh-token cookie to `/api/auth/session/refresh`** (derived from CE's `apiBasePath: '/api/auth'`, `apps/backend/src/auth/supertokens.config.ts`). The access-token cookie is `Path=/`. So a proxy rule mounted anywhere else (e.g. `/auth/*`) can still *read* sessions but can never *refresh* one — the browser won't send the cookie. The failure is invisible until an access token expires. `/auth` is SuperTokens' `websiteBasePath` (the login page), not an API path.
+2. **The `/_bffless/auth/*` relay is for cross-origin custom domains**, where SuperTokens' cookies can't reach the origin at all. On the primary domain it under-hydrates the user (no `role`), can't refresh the real session, and its `logout` can't revoke it. Hence the client order: proxied first, relay second.
+
+Logout therefore POSTs `/api/auth/signout` (the only thing that actually revokes) *before* the relay logout and the admin bounce.
 - **`src/components/ContactDialog.tsx`** uses the native `<dialog>` element with `showModal()`. Authenticated users get a file-attachment field that uploads to `/api/uploads/contact-attachments` first, then POSTs the resulting `attachment_url` alongside the form payload to `/api/contact`. Unauthenticated users submit without the upload step.
 
 ### The demo pages document their own backend

@@ -28,7 +28,7 @@ describe('Auth page', () => {
     render(<Auth />)
     // "Authentication"/"Authorization" also appear as VideoEmbed episode titles,
     // so match on the unique per-piece descriptions instead.
-    expect(screen.getByText(/A built-in admin login relay handles/)).toBeInTheDocument()
+    expect(screen.getByText(/An admin login relay handles/)).toBeInTheDocument()
     expect(screen.getByText(/Two levels of roles/)).toBeInTheDocument()
     expect(screen.getByText(/A Pipeline can run on signup/)).toBeInTheDocument()
   })

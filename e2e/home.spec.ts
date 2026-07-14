@@ -29,6 +29,13 @@ test.describe('demo site', () => {
       })
     })
 
+    // Both auth paths must be stubbed: the app reads the reverse-proxied
+    // SuperTokens endpoints first (`/api/auth/*`) and only falls back to the
+    // relay (`/_bffless/auth/*`). 401 on both = a guest visitor.
+    await page.route('**/api/auth/**', async (route) => {
+      await route.fulfill({ status: 401, body: '' })
+    })
+
     await page.route('**/_bffless/auth/**', async (route) => {
       await route.fulfill({ status: 401, body: '' })
     })
