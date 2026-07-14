@@ -1,0 +1,23 @@
+handler: ./extract.fn.js
+cases:
+  - name: takes the client IP from the first x-forwarded-for hop
+    data:
+      request:
+        headers:
+          x-forwarded-for: '203.0.113.7, 70.41.3.18'
+          user-agent: 'curl/8.5.0'
+    expect:
+      result: { ip: '203.0.113.7', userAgent: 'curl/8.5.0' }
+
+  - name: falls back to request.ip when there is no proxy header
+    data:
+      request:
+        headers: { user-agent: 'curl/8.5.0' }
+        ip: '198.51.100.4'
+    expect:
+      result: { ip: '198.51.100.4', userAgent: 'curl/8.5.0' }
+
+  - name: reports unknown rather than throwing on an empty request
+    data: {}
+    expect:
+      result: { ip: 'unknown', userAgent: 'unknown' }

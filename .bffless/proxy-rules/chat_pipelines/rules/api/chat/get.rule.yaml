@@ -1,0 +1,17 @@
+# GET /api/chat?conversationId=… — replays a thread after a reload.
+# The browser keeps the conversation id in localStorage; this hands back every
+# message it has, oldest first.
+description: Load the message history for one conversation
+pipeline:
+  name: chat get messages
+  description: Retrieve chat messages by conversation ID
+  steps:
+    - id: query_messages
+      name: query_messages
+      handler: data_query
+      config:
+        schemaId: $schema:chat_messages
+        limit: 100
+        filters:
+          conversation_id: { op: eq, value: request.query.conversationId }
+        orderBy: { field: created_at, direction: asc }

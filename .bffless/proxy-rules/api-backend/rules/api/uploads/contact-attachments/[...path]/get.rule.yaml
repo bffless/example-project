@@ -1,0 +1,16 @@
+# GET /api/uploads/contact-attachments/* — the `[...path]` directory is how a
+# trailing wildcard is spelled in the filesystem layout.
+# Attachments are private: serving them requires a session, same as uploading.
+description: Serve a contact-form attachment (signed-in visitors only)
+pipeline:
+  name: Serve contact_attachments
+  description: Stream a stored attachment back to an authenticated visitor
+  validators:
+    - type: auth_required
+      config: {}
+  steps:
+    - id: serve
+      name: serve
+      handler: file_serve_handler
+      config:
+        subDir: contact-attachments

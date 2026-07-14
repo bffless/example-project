@@ -1,0 +1,12 @@
+id: c116f599-99a4-4639-9c41-088e3c86b0e1
+name: comments
+fields:
+  - name: name
+    type: string
+    required: true
+  - name: comment
+    type: string
+    required: true
+  - name: guest_id
+    type: string
+    required: true

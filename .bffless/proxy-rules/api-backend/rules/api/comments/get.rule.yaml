@@ -1,0 +1,25 @@
+# GET /api/comments — the read half of the comment wall. `useBffState` calls
+# this on mount and expects the shape { comments: [...] }.
+description: List every comment
+pipeline:
+  name: List Comments
+  description: "Return all comments as { comments: [...] }"
+  steps:
+    - id: list_comments
+      name: list_comments
+      handler: data_query
+      config:
+        schemaId: $schema:comments
+        pageSize: 100
+
+    # data_query returns a bare array; the hook wants it under a `comments` key.
+    - id: respond
+      name: respond
+      handler: response_handler
+      config:
+        body: |-
+          {
+            "comments": {{{steps.list_comments}}}
+          }
+        status: 200
+        contentType: application/json

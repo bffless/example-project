@@ -3,9 +3,27 @@ import { PageHero } from '../components/PageHero'
 import { Section, Dot } from '../components/Section'
 import { VideoEmbed } from '../components/VideoEmbed'
 import { ChatPanel } from '../components/ChatPopup/ChatPanel'
+import { CodeFile } from '../components/CodeFile'
+import { Endpoints, type EndpointSpec } from '../components/Endpoint'
+import { RulesAsCode } from '../components/RulesAsCode'
+import { CHAT_GET_RULE, CHAT_POST_RULE, CHAT_SKILL } from '../lib/ruleFiles'
 import { EPISODES } from '../lib/episodes'
 
 const STORAGE_KEY = 'chat_conversation_id'
+
+const ENDPOINTS: EndpointSpec[] = [
+  {
+    method: 'POST',
+    path: '/api/chat',
+    summary: 'Calls the model, streams tokens back, and persists both sides of the exchange.',
+    tag: 'streaming',
+  },
+  {
+    method: 'GET',
+    path: '/api/chat?conversationId=…',
+    summary: 'Replays a thread after a reload, oldest message first.',
+  },
+]
 
 const FEATURES = [
   {
@@ -78,6 +96,36 @@ export function Chat() {
             />
           )}
         </div>
+      </Section>
+
+      <Section eyebrow="— The implementation" title={<>One handler, one file<Dot /></>}>
+        <p className="mb-8 max-w-3xl text-[16px] leading-relaxed text-ink-soft">
+          Everything the assistant does — calling the model, streaming the reply, remembering the
+          thread — is one <code className="font-mono text-[15px] text-ink">ai_handler</code> step.
+          Streaming and persistence are settings on it, not code you write.
+        </p>
+
+        <Endpoints endpoints={ENDPOINTS} />
+
+        <div className="mt-12 grid gap-6 lg:grid-cols-2">
+          <CodeFile
+            file={CHAT_POST_RULE}
+            caption="persistMessages turns a stateless model call into a durable conversation: BFFless opens the thread on the first message and appends every turn to the chat_messages table after it."
+          />
+          <div className="flex flex-col gap-6">
+            <CodeFile
+              file={CHAT_GET_RULE}
+              caption="History replay. The browser keeps the conversation id in localStorage and asks for its messages on load."
+            />
+            <CodeFile
+              file={CHAT_SKILL}
+              collapseAfter={10}
+              caption="A Skill: plain markdown, deployed with the site. It's what the assistant knows about this page — versioned per deployment, so a rollback takes its knowledge back with it."
+            />
+          </div>
+        </div>
+
+        <RulesAsCode setName="chat_pipelines" />
       </Section>
 
       <Section eyebrow="— Watch" title={<>Chat AI SDK and BFFless<Dot /></>} divider={false}>
