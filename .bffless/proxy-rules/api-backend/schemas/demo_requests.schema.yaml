@@ -1,0 +1,20 @@
+name: demo_requests
+fields:
+  - name: name
+    type: string
+    required: true
+  - name: email
+    type: email
+    required: true
+  - name: company
+    type: string
+    required: false
+  - name: preferred_date
+    type: string
+    required: false
+  - name: preferred_time
+    type: string
+    required: false
+  - name: notes
+    type: string
+    required: false

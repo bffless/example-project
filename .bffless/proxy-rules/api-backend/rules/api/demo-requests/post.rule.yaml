@@ -1,0 +1,36 @@
+# POST /api/demo-requests — the header's "Schedule a demo" dialog submits here.
+# Public: anyone can request a demo. Preferred date/time are free-form strings
+# (the dialog sends ISO `YYYY-MM-DD` and `HH:MM`); scheduling is confirmed by a
+# human follow-up, so the pipeline only validates and stores the request.
+description: Validate a demo request and store it
+pipeline:
+  name: Demo Request Handler
+  description: Validate the payload, then write one row to the `demo_requests` table
+  steps:
+    # Reject the request unless the required fields are present and well-typed.
+    - id: form_validation
+      name: form_validation
+      handler: form_handler
+      config:
+        fields:
+          name: { type: string, required: true }
+          email: { type: string, required: true }
+          company: { type: string, required: false }
+          preferred_date: { type: string, required: false }
+          preferred_time: { type: string, required: false }
+          notes: { type: string, required: false }
+
+    # Persist the validated fields. `$schema:demo_requests` resolves to
+    # schemas/demo_requests.schema.yaml — a name, never a UUID.
+    - id: create_record
+      name: create_record
+      handler: data_create
+      config:
+        schemaId: $schema:demo_requests
+        fields:
+          name: steps.form_validation.name
+          email: steps.form_validation.email
+          company: steps.form_validation.company
+          preferred_date: steps.form_validation.preferred_date
+          preferred_time: steps.form_validation.preferred_time
+          notes: steps.form_validation.notes

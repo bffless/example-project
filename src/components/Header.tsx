@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { NavLink, Link } from 'react-router-dom'
 import { useSession } from '../lib/useSession'
 import { getLoginUrl, logout } from '../lib/auth'
+import { ScheduleDemoDialog } from './ScheduleDemoDialog'
 
 const NAV = [
   { to: '/', label: 'Home', end: true },
@@ -13,6 +15,7 @@ const NAV = [
 
 export function Header() {
   const { session, loading } = useSession()
+  const [demoOpen, setDemoOpen] = useState(false)
   const isAuthed = session?.authenticated === true
   const userLabel = isAuthed ? (session.user.email ?? session.user.id) : null
 
@@ -44,6 +47,14 @@ export function Header() {
               {item.label}
             </NavLink>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setDemoOpen(true)}
+            className="cursor-pointer rounded-full border border-terracotta px-3.5 py-1.5 font-mono text-[13px] text-terracotta transition-colors hover:bg-terracotta hover:text-paper"
+          >
+            Schedule a demo
+          </button>
 
           <span className="mx-1 hidden h-5 w-px bg-paper-line sm:inline-block" aria-hidden="true" />
 
@@ -81,6 +92,8 @@ export function Header() {
           )}
         </nav>
       </div>
+
+      <ScheduleDemoDialog open={demoOpen} onClose={() => setDemoOpen(false)} />
     </header>
   )
 }
