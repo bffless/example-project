@@ -26,6 +26,16 @@ function renderHeader() {
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    if (!HTMLDialogElement.prototype.showModal) {
+      HTMLDialogElement.prototype.showModal = function () {
+        this.setAttribute('open', '')
+      }
+    }
+    if (!HTMLDialogElement.prototype.close) {
+      HTMLDialogElement.prototype.close = function () {
+        this.removeAttribute('open')
+      }
+    }
   })
 
   afterEach(() => {
@@ -72,6 +82,14 @@ describe('Header', () => {
     const out = screen.getByRole('button', { name: 'Log out' })
     fireEvent.click(out)
     expect(logoutMock).toHaveBeenCalled()
+  })
+
+  it('opens the schedule-demo dialog from the header button', () => {
+    useSessionMock.mockReturnValue({ session: null, loading: false, refetch: vi.fn() })
+    renderHeader()
+    expect(screen.queryByRole('heading', { name: 'Schedule a demo' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule a demo' }))
+    expect(screen.getByRole('heading', { name: 'Schedule a demo' })).toBeInTheDocument()
   })
 
   it('falls back to the user id when no email is present', () => {
